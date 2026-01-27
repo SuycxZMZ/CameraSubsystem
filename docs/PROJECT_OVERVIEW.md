@@ -207,7 +207,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 - GCC 7.0+ (支持 C++17)
 - CMake 3.10+
 - spdlog（推荐以 third_party 方式集成）
-- Google Test（可选；未安装时会自动跳过测试）
+- Google Test（推荐以 third_party/googletest 方式集成）
 
 ### spdlog 安装与集成（推荐）
 
@@ -238,6 +238,37 @@ rm -rf build
 ./scripts/build.sh
 ```
 
+### Google Test 安装与配置（推荐）
+
+本项目的 CMake 已支持以下优先级：
+1. `find_package(GTest CONFIG)`（系统已安装时）
+2. `third_party/googletest`（推荐）
+3. 未找到时跳过测试目标（不影响库构建）
+
+推荐将 googletest 作为子模块放入 `third_party/googletest`：
+
+```bash
+# 在仓库根目录执行
+git submodule add https://github.com/google/googletest.git third_party/googletest
+git submodule update --init --recursive
+```
+
+可选方案（系统安装，适合 CI / 统一环境）：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libgtest-dev
+```
+
+完成配置后，建议全量重新构建并执行测试：
+
+```bash
+rm -rf build
+./scripts/build.sh
+cd build
+ctest --output-on-failure
+```
+
 ### 编译步骤
 
 ```bash
@@ -248,7 +279,7 @@ cd CameraSubsystem
 # 编译项目
 ./scripts/build.sh
 
-# 运行测试
+# 运行测试（需已配置 Google Test）
 cd build
 ctest --output-on-failure
 ```

@@ -162,8 +162,29 @@ target_link_libraries(camera_subsystem_platform
 # 安装规则
 install(DIRECTORY include/camera_subsystem DESTINATION include)
 
-# 启用测试 (在未安装 GTest 时自动降级为仅构建库)
+# 启用测试 (优先系统安装,其次 third_party/googletest,否则跳过)
 include(CTest)
 if (CAMERA_SUBSYSTEM_BUILD_TESTS AND BUILD_TESTING)
-    add_subdirectory(tests)
+    set(CAMERA_SUBSYSTEM_GTEST_DIR "${CAMERA_SUBSYSTEM_THIRD_PARTY_DIR}/googletest")
+
+    # 先尝试系统安装（Config 模式）
+    find_package(GTest CONFIG QUIET)
+
+    # 系统未安装时，回退到 third_party/googletest
+    if (NOT GTest_FOUND AND EXISTS "${CAMERA_SUBSYSTEM_GTEST_DIR}/CMakeLists.txt")
+        message(STATUS "GTest not found via find_package; using third_party/googletest")
+
+        # 控制 googletest 自身的选项，避免污染全局安装逻辑
+        set(BUILD_GMOCK OFF CACHE BOOL "Disable gmock" FORCE)
+        set(INSTALL_GTEST OFF CACHE BOOL "Disable gtest install" FORCE)
+
+        add_subdirectory("${CAMERA_SUBSYSTEM_GTEST_DIR}" EXCLUDE_FROM_ALL)
+        set(GTest_FOUND TRUE)
+    endif ()
+
+    if (GTest_FOUND)
+        add_subdirectory(tests)
+    else ()
+        message(WARNING "GTest not found; skipping unit tests")
+    endif ()
 endif ()
