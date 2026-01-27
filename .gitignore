@@ -1,0 +1,34 @@
+# Build directories
+build/
+build-*/
+cmake-build-*/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+compile_commands.json
+Testing/
+
+# Third-party build outputs
+third_party/**/build/
+third_party/**/CMakeFiles/
+third_party/**/CMakeCache.txt
+
+# Logs and coverage
+*.log
+*.gcda
+*.gcno
+*.gcov
+coverage/
+
+# Editor / OS junk
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
