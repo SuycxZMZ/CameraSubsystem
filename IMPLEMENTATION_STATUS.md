@@ -98,15 +98,17 @@ CameraSubsystem/
 - ✅ `frame_subscriber.h` - 订阅者接口定义
 - ✅ `frame_broker.h/cpp` - 分发中心实现
 
-### 4. Camera层 (Camera) ⏳
+### 4. Camera层 (Camera) ✅
 
-**状态:** 未开始
+**状态:** 已完成基础实现
+
+**已实现:**
+- ✅ `camera_source.h/cpp` - Camera数据源实现（V4L2 + MMAP）
+- ✅ 设备打开/格式配置/帧采集/回调分发
 
 **待实现:**
-- ⏳ `camera_source.h` - Camera数据源类
-- ⏳ `camera_source.cpp` - Camera数据源实现
-- ⏳ V4L2 设备操作封装
-- ⏳ Buffer 管理机制
+- ⏳ V4L2 多平面与 DMA-BUF 支持
+- ⏳ 高级 Buffer 管理机制
 
 ### 5. 工具类 (Utils) 🚧
 
@@ -146,6 +148,7 @@ CameraSubsystem/
 - ✅ CameraConfig 单元测试（11个测试用例，全部通过）
 - ✅ PlatformLayer 压测程序（platform_stress_test）
 - ✅ FrameBroker 压测程序（frame_broker_stress_test）
+- ✅ CameraSource 压测程序（camera_source_stress_test）
 
 **待添加测试:**
 - ⏳ PlatformLayer 单元测试

@@ -34,6 +34,25 @@ target_link_libraries(frame_broker_stress_test
 
 add_test(NAME frame_broker_stress_test COMMAND frame_broker_stress_test 5)
 
+# CameraSource 压测程序：不依赖 GTest，始终构建
+add_executable(camera_source_stress_test
+    stress/camera_source_stress_test.cpp
+)
+
+set_target_properties(camera_source_stress_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin"
+)
+
+target_link_libraries(camera_source_stress_test
+    PRIVATE
+        camera_subsystem_camera
+        camera_subsystem_broker
+        camera_subsystem_platform
+        camera_subsystem_core
+)
+
+add_test(NAME camera_source_stress_test COMMAND camera_source_stress_test 5)
+
 # 根 CMakeLists.txt 负责查找/引入 GTest，这里做目标名自适配
 set(GTEST_TARGET "")
 set(GTEST_MAIN_TARGET "")

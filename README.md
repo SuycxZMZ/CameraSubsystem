@@ -6,7 +6,7 @@
 **核心方向:** Camera / V4L2 -> Zero-Copy Pub/Sub -> NPU / AI  
 **文档作者:** 架构设计团队  
 **创建日期:** 2026-01-27  
-**最后更新:** 2026-01-27
+**最后更新:** 2026-01-31
 
 ---
 
@@ -214,6 +214,63 @@ struct FrameHandle
     uint8_t     reserved_[56];   // 预留扩展空间 (总计 64 字节)
 };
 ```
+
+---
+
+## 4. 开发与调试指南（Ubuntu + V4L2）
+
+本项目当前可在 Ubuntu 上直接使用 V4L2 采集进行调试（RK3576 交叉编译暂未启用）。
+
+### 4.1 构建
+
+```bash
+./scripts/build.sh
+```
+
+### 4.2 摄像头权限
+
+```bash
+sudo usermod -aG video $USER
+# 重新登录后生效
+```
+
+或临时使用 sudo 运行压测程序。
+
+### 4.3 压测程序（非 GTest）
+
+所有压测可执行文件输出到项目根目录 `bin/` 下：
+
+```bash
+# PlatformLayer 压测
+./bin/platform_stress_test 5
+
+# FrameBroker 压测
+./bin/frame_broker_stress_test 5
+
+# CameraSource 压测（默认 20 秒）
+sudo ./bin/camera_source_stress_test 20 /dev/video0
+```
+
+### 4.4 CameraSource 压测说明
+
+- 每秒输出一行表格日志（sec / frames / fps / dispatched / dropped / queue / image）
+- 每秒保存一张图片到 `stress_frames/`
+- 最多保留 10 张，编号 `frame_0` ~ `frame_9`，循环覆盖
+- 保存格式：
+  - MJPEG → `.jpg`
+  - RGB/RGBA → `.ppm`
+  - NV12/YUYV/H264/H265 → `.pgm`（灰度或原始 Y 平面）
+
+### 4.5 代码格式化
+
+```bash
+# 全量格式化（排除 third_party）
+./scripts/format.sh
+
+# 仅格式化 Git 变更文件
+./scripts/format.sh changed
+```
+
 
 **设计要点:**
 - POD 结构,可在 C/C++ 边界安全传递
