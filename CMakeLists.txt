@@ -31,6 +31,10 @@ set(PLATFORM_SOURCES
     src/platform/platform_epoll.cpp
 )
 
+set(UTILS_SOURCES
+    src/utils/signal_handler.cpp
+)
+
 set(BROKER_SOURCES
     src/broker/frame_broker.cpp
 )
@@ -92,6 +96,20 @@ target_include_directories(camera_subsystem_camera
 )
 
 target_compile_options(camera_subsystem_camera
+    PRIVATE
+        ${CAMERA_SUBSYSTEM_WARNING_FLAGS}
+)
+
+add_library(camera_subsystem_utils STATIC
+    ${UTILS_SOURCES}
+)
+
+target_include_directories(camera_subsystem_utils
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+target_compile_options(camera_subsystem_utils
     PRIVATE
         ${CAMERA_SUBSYSTEM_WARNING_FLAGS}
 )

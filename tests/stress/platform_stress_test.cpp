@@ -25,8 +25,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
 #include <memory>
+#include <string>
 #include <sys/eventfd.h>
 #include <unistd.h>
 #include <vector>
@@ -42,7 +42,7 @@ std::atomic<uint64_t> g_epoll_event_count_(0);
 // 信号处理函数
 void SignalHandler(int signal)
 {
-    std::cout << "\nReceived signal " << signal << ", stopping..." << std::endl;
+    (void)signal;
     g_running_.store(false);
 }
 
@@ -56,11 +56,11 @@ void LogStressThread(int thread_id)
     while (g_running_.load())
     {
         // 高频率输出日志
-        PlatformLogger::Log(LogLevel::kInfo, "stress_test", "Thread %d log message %lu", thread_id,
-                            local_count);
+        PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                            "Thread %d log message %lu", thread_id, local_count);
 
-        PlatformLogger::Log(LogLevel::kDebug, "stress_test", "Thread %d debug message %lu",
-                            thread_id, local_count);
+        PlatformLogger::Log(LogLevel::kDebug, "stress_test",
+                            "Thread %d debug message %lu", thread_id, local_count);
 
         local_count++;
         g_log_count_.fetch_add(2);
@@ -69,20 +69,21 @@ void LogStressThread(int thread_id)
         std::this_thread::sleep_for(std::chrono::microseconds(10));
     }
 
-    std::cout << "Thread " << thread_name << " exited, logged " << local_count << " messages"
-              << std::endl;
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                        "Thread %s exited, logged %lu messages",
+                        thread_name, local_count);
 }
 
 // 线程生命周期测试
 void ThreadLifecycleTest()
 {
-    std::cout << "\n=== Thread Lifecycle Test ===" << std::endl;
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test", "=== Thread Lifecycle Test ===");
 
     const int kThreadCount = 100;
     std::vector<std::unique_ptr<PlatformThread>> threads;
 
     // 创建多个线程
-    for (int i = 0; i < kThreadCount; ++i)
+    for (int i = 0; i < kThreadCount && g_running_.load(); ++i)
     {
         char name[32];
         snprintf(name, sizeof(name), "lifecycle_%d", i);
@@ -93,7 +94,8 @@ void ThreadLifecycleTest()
             {
                 g_thread_count_.fetch_add(1);
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                std::cout << "Thread " << i << " executed" << std::endl;
+                PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                                    "Thread %d executed", i);
             });
 
         if (thread->Start())
@@ -108,19 +110,21 @@ void ThreadLifecycleTest()
         thread->Join();
     }
 
-    std::cout << "Thread lifecycle test completed. Total threads executed: "
-              << g_thread_count_.load() << std::endl;
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                        "Thread lifecycle test completed. Total threads executed: %lu",
+                        g_thread_count_.load());
 }
 
 // Epoll压力测试
 void EpollStressTest(int duration_seconds)
 {
-    std::cout << "\n=== Epoll Stress Test (" << duration_seconds << "s) ===" << std::endl;
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                        "=== Epoll Stress Test (%ds) ===", duration_seconds);
 
     PlatformEpoll epoll;
     if (!epoll.Create())
     {
-        std::cerr << "Failed to create epoll" << std::endl;
+        PlatformLogger::Log(LogLevel::kError, "stress_test", "Failed to create epoll");
         return;
     }
 
@@ -133,20 +137,23 @@ void EpollStressTest(int duration_seconds)
         int fd = eventfd(0, EFD_NONBLOCK);
         if (fd < 0)
         {
-            std::cerr << "Failed to create eventfd " << i << std::endl;
+            PlatformLogger::Log(LogLevel::kError, "stress_test",
+                                "Failed to create eventfd %d", i);
             continue;
         }
 
         event_fds.push_back(fd);
 
-        // 添加到epoll
-        if (!epoll.Add(fd, EPOLLIN, static_cast<uint64_t>(i)))
+        // 添加到epoll（保存实际fd作为data）
+        if (!epoll.Add(fd, EPOLLIN, static_cast<uint64_t>(fd)))
         {
-            std::cerr << "Failed to add fd " << fd << " to epoll" << std::endl;
+            PlatformLogger::Log(LogLevel::kError, "stress_test",
+                                "Failed to add fd %d to epoll", fd);
         }
     }
 
     // 启动事件触发线程
+    std::atomic<bool> trigger_running(true);
     std::thread trigger_thread(
         [&]()
         {
@@ -154,7 +161,8 @@ void EpollStressTest(int duration_seconds)
             const auto end_time =
                 std::chrono::steady_clock::now() + std::chrono::seconds(duration_seconds);
 
-            while (g_running_.load() && std::chrono::steady_clock::now() < end_time)
+            while (trigger_running.load() && g_running_.load() &&
+                   std::chrono::steady_clock::now() < end_time)
             {
                 for (int fd : event_fds)
                 {
@@ -166,10 +174,11 @@ void EpollStressTest(int duration_seconds)
 
     // 等待事件
     struct epoll_event events[32];
-    const int kTimeoutMs = 5000;
+    const int kTimeoutMs = 1000;
     uint64_t event_count = 0;
 
     auto start_time = std::chrono::steady_clock::now();
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test", "Starting epoll wait loop...");
 
     while (g_running_.load())
     {
@@ -178,15 +187,19 @@ void EpollStressTest(int duration_seconds)
         {
             for (int i = 0; i < ret; ++i)
             {
-                uint64_t data = events[i].data.u64;
+                const int event_fd = static_cast<int>(events[i].data.u64);
                 uint64_t value = 0;
-                read(static_cast<int>(data), &value, sizeof(value));
-                event_count++;
-                g_epoll_event_count_.fetch_add(1);
+                const ssize_t read_bytes = read(event_fd, &value, sizeof(value));
+                if (read_bytes > 0)
+                {
+                    event_count++;
+                    g_epoll_event_count_.fetch_add(1);
+                }
             }
         }
         else if (ret < 0)
         {
+            PlatformLogger::Log(LogLevel::kError, "stress_test", "Epoll wait error");
             break;
         }
 
@@ -194,11 +207,18 @@ void EpollStressTest(int duration_seconds)
         auto elapsed = std::chrono::steady_clock::now() - start_time;
         if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= duration_seconds)
         {
+            PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                                "Epoll test duration reached");
             break;
         }
     }
 
-    trigger_thread.join();
+    // 停止触发线程
+    trigger_running.store(false);
+    if (trigger_thread.joinable())
+    {
+        trigger_thread.join();
+    }
     epoll.Close();
 
     // 关闭所有eventfd
@@ -207,22 +227,26 @@ void EpollStressTest(int duration_seconds)
         close(fd);
     }
 
-    std::cout << "Epoll stress test completed. Total events: " << event_count << std::endl;
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                        "Epoll stress test completed. Total events: %lu",
+                        event_count);
 }
 
 // 线程亲和性和优先级测试
 void ThreadAffinityPriorityTest()
 {
-    std::cout << "\n=== Thread Affinity & Priority Test ===" << std::endl;
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                        "=== Thread Affinity & Priority Test ===");
 
     const int kThreadCount = 4;
     std::vector<std::unique_ptr<PlatformThread>> threads;
 
     // 获取CPU核心数
     int cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
-    std::cout << "System CPU cores: " << cpu_count << std::endl;
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                        "System CPU cores: %d", cpu_count);
 
-    for (int i = 0; i < kThreadCount; ++i)
+    for (int i = 0; i < kThreadCount && g_running_.load(); ++i)
     {
         char name[32];
         snprintf(name, sizeof(name), "affinity_%d", i);
@@ -237,7 +261,8 @@ void ThreadAffinityPriorityTest()
                 // 获取当前线程的PlatformThread对象（这里简化处理）
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-                std::cout << "Thread " << i << " running on CPU " << (i % cpu_count) << std::endl;
+                PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                                    "Thread %d running on CPU %d", i, (i % cpu_count));
             });
 
         if (thread->Start())
@@ -259,13 +284,15 @@ void ThreadAffinityPriorityTest()
         thread->Join();
     }
 
-    std::cout << "Thread affinity & priority test completed" << std::endl;
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                        "Thread affinity & priority test completed");
 }
 
 // 长时间运行测试
 void LongRunningStressTest(int duration_seconds)
 {
-    std::cout << "\n=== Long Running Stress Test (" << duration_seconds << "s) ===" << std::endl;
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                        "=== Long Running Stress Test (%ds) ===", duration_seconds);
 
     const int kLogThreadCount = 4;
     std::vector<std::unique_ptr<PlatformThread>> log_threads;
@@ -274,7 +301,7 @@ void LongRunningStressTest(int duration_seconds)
     uint64_t last_log_count = 0;
 
     // 启动日志压力测试线程
-    for (int i = 0; i < kLogThreadCount; ++i)
+    for (int i = 0; i < kLogThreadCount && g_running_.load(); ++i)
     {
         char name[32];
         snprintf(name, sizeof(name), "long_run_%d", i);
@@ -302,9 +329,11 @@ void LongRunningStressTest(int duration_seconds)
         uint64_t logs_per_second = current_log_count - last_log_count;
         last_log_count = current_log_count;
 
-        std::cout << "Running time: " << elapsed_seconds << "s, "
-                  << "Total logs: " << current_log_count << ", " << "Logs/s: " << logs_per_second
-                  << std::endl;
+        PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                            "Running time: %lds, Total logs: %lu, Logs/s: %lu",
+                            static_cast<long>(elapsed_seconds),
+                            current_log_count,
+                            logs_per_second);
 
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
@@ -318,27 +347,33 @@ void LongRunningStressTest(int duration_seconds)
         thread->Join();
     }
 
-    std::cout << "Long running stress test completed" << std::endl;
-    std::cout << "Total logs: " << g_log_count_.load() << std::endl;
-    std::cout << "Total epoll events: " << g_epoll_event_count_.load() << std::endl;
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                        "Long running stress test completed");
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                        "Total logs: %lu", g_log_count_.load());
+    PlatformLogger::Log(LogLevel::kInfo, "stress_test",
+                        "Total epoll events: %lu", g_epoll_event_count_.load());
 }
 
 int main(int argc, char* argv[])
 {
-    std::cout << "========================================" << std::endl;
-    std::cout << "  PlatformLayer Stress Test Program   " << std::endl;
-    std::cout << "========================================" << std::endl;
-
     // 设置信号处理
     signal(SIGINT, SignalHandler);
     signal(SIGTERM, SignalHandler);
 
-    // 初始化日志系统
-    if (!PlatformLogger::Initialize("platform_stress_test.log", LogLevel::kInfo))
+    // 初始化日志系统（仅控制台输出）
+    if (!PlatformLogger::Initialize(std::string(), LogLevel::kInfo))
     {
-        std::cerr << "Failed to initialize logger" << std::endl;
+        fprintf(stderr, "Failed to initialize logger\n");
         return 1;
     }
+
+    PlatformLogger::Log(LogLevel::kInfo, "main",
+                        "========================================");
+    PlatformLogger::Log(LogLevel::kInfo, "main",
+                        "  PlatformLayer Stress Test Program   ");
+    PlatformLogger::Log(LogLevel::kInfo, "main",
+                        "========================================");
 
     PlatformLogger::Log(LogLevel::kInfo, "main", "PlatformLayer stress test started");
 
@@ -354,36 +389,59 @@ int main(int argc, char* argv[])
         }
     }
 
-    std::cout << "Test duration: " << test_duration << " seconds" << std::endl;
+    PlatformLogger::Log(LogLevel::kInfo, "main",
+                        "Test duration: %d seconds", test_duration);
 
     try
     {
         // 执行线程生命周期测试
         ThreadLifecycleTest();
+        if (!g_running_.load())
+        {
+            PlatformLogger::Log(LogLevel::kWarning, "main", "Interrupted by signal");
+            PlatformLogger::Shutdown();
+            return 1;
+        }
 
         // 短时运行时，将时长平均分配给主要耗时测试
         const int segment_seconds = std::max(kMinimumDuration, test_duration / 2);
 
         // 执行Epoll压力测试
         EpollStressTest(segment_seconds);
+        if (!g_running_.load())
+        {
+            PlatformLogger::Log(LogLevel::kWarning, "main", "Interrupted by signal");
+            PlatformLogger::Shutdown();
+            return 1;
+        }
 
         // 执行线程亲和性和优先级测试
         ThreadAffinityPriorityTest();
+        if (!g_running_.load())
+        {
+            PlatformLogger::Log(LogLevel::kWarning, "main", "Interrupted by signal");
+            PlatformLogger::Shutdown();
+            return 1;
+        }
 
         // 执行长时间运行测试
         LongRunningStressTest(segment_seconds);
 
         PlatformLogger::Log(LogLevel::kInfo, "main", "All stress tests completed successfully");
-        std::cout << "\n=== Stress Test Summary ===" << std::endl;
-        std::cout << "Total logs: " << g_log_count_.load() << std::endl;
-        std::cout << "Total thread executions: " << g_thread_count_.load() << std::endl;
-        std::cout << "Total epoll events: " << g_epoll_event_count_.load() << std::endl;
-        std::cout << "All tests passed!" << std::endl;
+        PlatformLogger::Log(LogLevel::kInfo, "main", "=== Stress Test Summary ===");
+        PlatformLogger::Log(LogLevel::kInfo, "main",
+                            "Total logs: %lu", g_log_count_.load());
+        PlatformLogger::Log(LogLevel::kInfo, "main",
+                            "Total thread executions: %lu", g_thread_count_.load());
+        PlatformLogger::Log(LogLevel::kInfo, "main",
+                            "Total epoll events: %lu", g_epoll_event_count_.load());
+        PlatformLogger::Log(LogLevel::kInfo, "main", "All tests passed!");
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Exception during stress test: " << e.what() << std::endl;
-        PlatformLogger::Log(LogLevel::kError, "main", "Exception: %s", e.what());
+        PlatformLogger::Log(LogLevel::kError, "main",
+                            "Exception during stress test: %s", e.what());
+        PlatformLogger::Shutdown();
         return 1;
     }
 
