@@ -11,8 +11,10 @@
 #include <cstdint>
 #include <sys/epoll.h>
 
-namespace camera_subsystem {
-namespace platform {
+namespace camera_subsystem
+{
+namespace platform
+{
 
 /**
  * @brief 平台 Epoll 类
@@ -22,7 +24,7 @@ namespace platform {
  */
 class PlatformEpoll
 {
-public:
+  public:
     /**
      * @brief 最大事件数量
      */
@@ -114,7 +116,7 @@ public:
      */
     int GetFd() const;
 
-private:
+  private:
     int epoll_fd_;
 };
 

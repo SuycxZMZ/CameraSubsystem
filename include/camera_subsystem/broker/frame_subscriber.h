@@ -10,8 +10,10 @@
 
 #include "../core/frame_handle.h"
 
-namespace camera_subsystem {
-namespace broker {
+namespace camera_subsystem
+{
+namespace broker
+{
 
 /**
  * @brief 帧订阅者接口
@@ -20,7 +22,7 @@ namespace broker {
  */
 class IFrameSubscriber
 {
-public:
+  public:
     /**
      * @brief 虚析构函数
      */

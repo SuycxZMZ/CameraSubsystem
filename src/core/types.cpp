@@ -7,8 +7,10 @@
 
 #include "camera_subsystem/core/types.h"
 
-namespace camera_subsystem {
-namespace core {
+namespace camera_subsystem
+{
+namespace core
+{
 
 const char* GetErrorString(ErrorCode code)
 {

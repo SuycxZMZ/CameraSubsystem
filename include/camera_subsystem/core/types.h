@@ -10,8 +10,10 @@
 
 #include <cstdint>
 
-namespace camera_subsystem {
-namespace core {
+namespace camera_subsystem
+{
+namespace core
+{
 
 /**
  * @brief 像素格式枚举
@@ -19,13 +21,13 @@ namespace core {
 enum class PixelFormat : uint32_t
 {
     kUnknown = 0,
-    kNV12,       // Y/CbCr 4:2:0, semi-planar
-    kYUYV,       // YUYV 4:2:2 interleaved
-    kRGB888,     // 24-bit RGB
-    kRGBA8888,   // 32-bit RGBA
-    kMJPEG,      // Motion JPEG
-    kH264,       // H.264 encoded
-    kH265,       // H.265 encoded
+    kNV12,     // Y/CbCr 4:2:0, semi-planar
+    kYUYV,     // YUYV 4:2:2 interleaved
+    kRGB888,   // 24-bit RGB
+    kRGBA8888, // 32-bit RGBA
+    kMJPEG,    // Motion JPEG
+    kH264,     // H.264 encoded
+    kH265,     // H.265 encoded
     kFormatCount
 };
 
@@ -34,10 +36,10 @@ enum class PixelFormat : uint32_t
  */
 enum class MemoryType : uint32_t
 {
-    kMmap = 0,   // V4L2 MMAP buffer
-    kDmaBuf,     // DMA-BUF file descriptor
-    kShm,        // Shared memory
-    kHeap        // User space heap memory
+    kMmap = 0, // V4L2 MMAP buffer
+    kDmaBuf,   // DMA-BUF file descriptor
+    kShm,      // Shared memory
+    kHeap      // User space heap memory
 };
 
 /**

@@ -12,8 +12,10 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace camera_subsystem {
-namespace core {
+namespace camera_subsystem
+{
+namespace core
+{
 
 /**
  * @brief 帧句柄结构 (C-Style POD)
@@ -30,31 +32,31 @@ namespace core {
 struct FrameHandle
 {
     // --- 基础标识 ---
-    uint32_t    frame_id_;       // 全局递增帧序号
-    uint32_t    camera_id_;      // 相机设备 ID
-    uint64_t    timestamp_ns_;   // 纳秒级时间戳 (CLOCK_MONOTONIC)
+    uint32_t frame_id_;     // 全局递增帧序号
+    uint32_t camera_id_;    // 相机设备 ID
+    uint64_t timestamp_ns_; // 纳秒级时间戳 (CLOCK_MONOTONIC)
 
     // --- 图像属性 ---
-    uint32_t    width_;          // 图像宽度 (像素)
-    uint32_t    height_;         // 图像高度 (像素)
-    PixelFormat format_;         // 像素格式
+    uint32_t width_;     // 图像宽度 (像素)
+    uint32_t height_;    // 图像高度 (像素)
+    PixelFormat format_; // 像素格式
 
     // --- 内存布局 (关键: 支持对齐与多平面) ---
-    uint32_t    plane_count_;    // 平面数量 (1, 2 or 3)
-    uint32_t    line_stride_[3]; // 每个平面的行跨度 (字节)
-    uint32_t    plane_offset_[3];// 每个平面相对于 buffer 起始的偏移
-    uint32_t    plane_size_[3];  // 每个平面的大小
+    uint32_t plane_count_;     // 平面数量 (1, 2 or 3)
+    uint32_t line_stride_[3];  // 每个平面的行跨度 (字节)
+    uint32_t plane_offset_[3]; // 每个平面相对于 buffer 起始的偏移
+    uint32_t plane_size_[3];   // 每个平面的大小
 
     // --- 内存句柄 ---
-    MemoryType  memory_type_;    // 内存类型
-    int         buffer_fd_;      // DMA-BUF 或 Shared Memory FD
-    void*       virtual_address_; // 映射后的虚拟地址 (仅 CPU 访问有效)
-    size_t      buffer_size_;    // Buffer 总大小
+    MemoryType memory_type_; // 内存类型
+    int buffer_fd_;          // DMA-BUF 或 Shared Memory FD
+    void* virtual_address_;  // 映射后的虚拟地址 (仅 CPU 访问有效)
+    size_t buffer_size_;     // Buffer 总大小
 
     // --- 扩展字段 ---
-    uint32_t    sequence_;       // 帧序列号 (V4L2)
-    uint32_t    flags_;          // 标志位 (保留)
-    uint8_t     reserved_[56];   // 预留扩展空间 (总计 64 字节)
+    uint32_t sequence_;    // 帧序列号 (V4L2)
+    uint32_t flags_;       // 标志位 (保留)
+    uint8_t reserved_[56]; // 预留扩展空间 (总计 64 字节)
 
     /**
      * @brief 默认构造函数

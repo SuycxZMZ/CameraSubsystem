@@ -11,21 +11,23 @@
 #include "types.h"
 #include <cstdint>
 
-namespace camera_subsystem {
-namespace core {
+namespace camera_subsystem
+{
+namespace core
+{
 
 /**
  * @brief Camera 配置结构
  */
 struct CameraConfig
 {
-    uint32_t    width_;          // 图像宽度 (像素)
-    uint32_t    height_;         // 图像高度 (像素)
-    PixelFormat format_;         // 像素格式
-    uint32_t    fps_;            // 帧率
-    uint32_t    buffer_count_;   // Buffer 数量
-    uint32_t    io_method_;      // IO 方法 (IoMethod)
-    uint8_t     reserved_[64];   // 预留扩展空间
+    uint32_t width_;        // 图像宽度 (像素)
+    uint32_t height_;       // 图像高度 (像素)
+    PixelFormat format_;    // 像素格式
+    uint32_t fps_;          // 帧率
+    uint32_t buffer_count_; // Buffer 数量
+    uint32_t io_method_;    // IO 方法 (IoMethod)
+    uint8_t reserved_[64];  // 预留扩展空间
 
     /**
      * @brief 默认构造函数
@@ -41,14 +43,9 @@ struct CameraConfig
      * @param buffer_count Buffer 数量
      * @param io_method IO 方法
      */
-    CameraConfig(
-        uint32_t width,
-        uint32_t height,
-        PixelFormat format,
-        uint32_t fps,
-        uint32_t buffer_count,
-        uint32_t io_method = static_cast<uint32_t>(IoMethod::kDmaBuf)
-    );
+    CameraConfig(uint32_t width, uint32_t height, PixelFormat format, uint32_t fps,
+                 uint32_t buffer_count,
+                 uint32_t io_method = static_cast<uint32_t>(IoMethod::kDmaBuf));
 
     /**
      * @brief 检查配置是否有效

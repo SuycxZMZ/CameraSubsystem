@@ -2,6 +2,7 @@
 build/
 build-*/
 cmake-build-*/
+bin/
 
 # CMake generated files
 CMakeFiles/
@@ -31,4 +32,4 @@ coverage/
 *.swo
 *~
 .DS_Store
-
+.cache

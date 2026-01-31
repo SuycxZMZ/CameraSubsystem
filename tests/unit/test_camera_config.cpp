@@ -5,9 +5,9 @@
  * @date 2026-01-28
  */
 
-#include <gtest/gtest.h>
 #include "camera_subsystem/core/camera_config.h"
 #include "camera_subsystem/core/types.h"
+#include <gtest/gtest.h>
 
 using namespace camera_subsystem::core;
 
@@ -31,13 +31,12 @@ TEST(CameraConfigTest, DefaultConstructor)
  */
 TEST(CameraConfigTest, ParameterizedConstructor)
 {
-    CameraConfig config(
-        1920,                              // width
-        1080,                              // height
-        PixelFormat::kNV12,                // format
-        30,                                // fps
-        4,                                 // buffer_count
-        static_cast<uint32_t>(IoMethod::kMmap)  // io_method
+    CameraConfig config(1920,                                  // width
+                        1080,                                  // height
+                        PixelFormat::kNV12,                    // format
+                        30,                                    // fps
+                        4,                                     // buffer_count
+                        static_cast<uint32_t>(IoMethod::kMmap) // io_method
     );
 
     EXPECT_EQ(config.width_, 1920);
@@ -71,16 +70,16 @@ TEST(CameraConfigTest, IsValid)
 
     // 测试边界情况
     config.buffer_count_ = 1;
-    EXPECT_FALSE(config.IsValid());  // buffer_count 太小
+    EXPECT_FALSE(config.IsValid()); // buffer_count 太小
 
     config.buffer_count_ = 9;
-    EXPECT_FALSE(config.IsValid());  // buffer_count 太大
+    EXPECT_FALSE(config.IsValid()); // buffer_count 太大
 
     config.buffer_count_ = 2;
-    EXPECT_TRUE(config.IsValid());   // 最小值
+    EXPECT_TRUE(config.IsValid()); // 最小值
 
     config.buffer_count_ = 8;
-    EXPECT_TRUE(config.IsValid());   // 最大值
+    EXPECT_TRUE(config.IsValid()); // 最大值
 }
 
 /**
@@ -88,14 +87,8 @@ TEST(CameraConfigTest, IsValid)
  */
 TEST(CameraConfigTest, Reset)
 {
-    CameraConfig config(
-        1920,
-        1080,
-        PixelFormat::kNV12,
-        30,
-        4,
-        static_cast<uint32_t>(IoMethod::kMmap)
-    );
+    CameraConfig config(1920, 1080, PixelFormat::kNV12, 30, 4,
+                        static_cast<uint32_t>(IoMethod::kMmap));
 
     EXPECT_EQ(config.width_, 1920);
     EXPECT_EQ(config.height_, 1080);
@@ -183,15 +176,15 @@ TEST(CameraConfigTest, DifferentFormats)
 TEST(CameraConfigTest, DifferentIoMethods)
 {
     CameraConfig config_mmap(1920, 1080, PixelFormat::kNV12, 30, 4,
-                            static_cast<uint32_t>(IoMethod::kMmap));
+                             static_cast<uint32_t>(IoMethod::kMmap));
     EXPECT_TRUE(config_mmap.IsValid());
 
     CameraConfig config_dmabuf(1920, 1080, PixelFormat::kNV12, 30, 4,
-                              static_cast<uint32_t>(IoMethod::kDmaBuf));
+                               static_cast<uint32_t>(IoMethod::kDmaBuf));
     EXPECT_TRUE(config_dmabuf.IsValid());
 
     CameraConfig config_userptr(1920, 1080, PixelFormat::kNV12, 30, 4,
-                               static_cast<uint32_t>(IoMethod::kUserPtr));
+                                static_cast<uint32_t>(IoMethod::kUserPtr));
     EXPECT_TRUE(config_userptr.IsValid());
 }
 

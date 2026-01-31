@@ -10,10 +10,13 @@
 
 #include "../core/types.h"
 #include <cstdarg>
+#include <mutex>
 #include <string>
 
-namespace camera_subsystem {
-namespace platform {
+namespace camera_subsystem
+{
+namespace platform
+{
 
 using core::LogLevel;
 
@@ -25,7 +28,7 @@ using core::LogLevel;
  */
 class PlatformLogger
 {
-public:
+  public:
     /**
      * @brief 初始化日志系统
      * @param log_file 日志文件路径,空字符串表示仅输出到控制台
@@ -35,10 +38,7 @@ public:
      * @note 该函数是线程安全的
      * @note 必须在任何日志操作之前调用
      */
-    static bool Initialize(
-        const std::string& log_file,
-        LogLevel level = LogLevel::kInfo
-    );
+    static bool Initialize(const std::string& log_file, LogLevel level = LogLevel::kInfo);
 
     /**
      * @brief 记录日志
@@ -50,12 +50,7 @@ public:
      * @note 该函数是线程安全的
      * @note 热路径 (OnFrame 回调内) 建议仅打印 ERROR 日志
      */
-    static void Log(
-        LogLevel level,
-        const char* module,
-        const char* format,
-        ...
-    );
+    static void Log(LogLevel level, const char* module, const char* format, ...);
 
     /**
      * @brief 设置日志级别
@@ -89,28 +84,35 @@ public:
      */
     static bool IsInitialized();
 
-private:
+  private:
     static bool s_initialized_;
     static LogLevel s_level_;
+    static std::mutex s_mutex_;
+
+    /**
+     * @brief 将LogLevel转换为字符串
+     * @param level 日志级别
+     * @return 日志级别字符串
+     */
+    static const char* LevelToString(LogLevel level);
 };
 
 // 日志宏定义
-#define LOG_TRACE(module, fmt, ...) \
+#define LOG_TRACE(module, fmt, ...)                                                                \
     PlatformLogger::Log(LogLevel::kTrace, module, fmt, ##__VA_ARGS__)
 
-#define LOG_DEBUG(module, fmt, ...) \
+#define LOG_DEBUG(module, fmt, ...)                                                                \
     PlatformLogger::Log(LogLevel::kDebug, module, fmt, ##__VA_ARGS__)
 
-#define LOG_INFO(module, fmt, ...) \
-    PlatformLogger::Log(LogLevel::kInfo, module, fmt, ##__VA_ARGS__)
+#define LOG_INFO(module, fmt, ...) PlatformLogger::Log(LogLevel::kInfo, module, fmt, ##__VA_ARGS__)
 
-#define LOG_WARN(module, fmt, ...) \
+#define LOG_WARN(module, fmt, ...)                                                                 \
     PlatformLogger::Log(LogLevel::kWarning, module, fmt, ##__VA_ARGS__)
 
-#define LOG_ERROR(module, fmt, ...) \
+#define LOG_ERROR(module, fmt, ...)                                                                \
     PlatformLogger::Log(LogLevel::kError, module, fmt, ##__VA_ARGS__)
 
-#define LOG_CRITICAL(module, fmt, ...) \
+#define LOG_CRITICAL(module, fmt, ...)                                                             \
     PlatformLogger::Log(LogLevel::kCritical, module, fmt, ##__VA_ARGS__)
 
 } // namespace platform

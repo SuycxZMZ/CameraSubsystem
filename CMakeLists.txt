@@ -4,6 +4,9 @@ project(CameraSubsystem VERSION 0.1.0 LANGUAGES CXX)
 # 构建选项
 option(CAMERA_SUBSYSTEM_BUILD_TESTS "Build unit tests" ON)
 
+# 为 clangd 生成 compile_commands.json
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # 设置 C++ 标准
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

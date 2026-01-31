@@ -15,8 +15,10 @@
 #include <thread>
 #include <vector>
 
-namespace camera_subsystem {
-namespace platform {
+namespace camera_subsystem
+{
+namespace platform
+{
 
 /**
  * @brief 平台线程类
@@ -26,7 +28,7 @@ namespace platform {
  */
 class PlatformThread
 {
-public:
+  public:
     /**
      * @brief 线程执行函数类型
      */
@@ -129,18 +131,18 @@ public:
      */
     bool IsStopRequested() const;
 
-private:
+  private:
     /**
      * @brief 线程入口函数
      */
     void ThreadEntry();
 
-    std::string             thread_name_;
-    ThreadFunc              thread_func_;
+    std::string thread_name_;
+    ThreadFunc thread_func_;
     std::unique_ptr<std::thread> native_thread_;
-    std::atomic<bool>       is_running_;
-    std::atomic<bool>       should_stop_;
-    std::atomic<bool>       is_detached_;
+    std::atomic<bool> is_running_;
+    std::atomic<bool> should_stop_;
+    std::atomic<bool> is_detached_;
 };
 
 } // namespace platform

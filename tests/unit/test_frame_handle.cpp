@@ -5,9 +5,9 @@
  * @date 2026-01-28
  */
 
-#include <gtest/gtest.h>
 #include "camera_subsystem/core/frame_handle.h"
 #include "camera_subsystem/core/types.h"
+#include <gtest/gtest.h>
 
 using namespace camera_subsystem::core;
 
@@ -87,13 +87,13 @@ TEST(FrameHandleTest, GetPlaneSize)
 {
     FrameHandle frame;
     frame.plane_count_ = 2;
-    frame.plane_size_[0] = 2073600;  // Y plane
-    frame.plane_size_[1] = 1036800;  // UV plane
+    frame.plane_size_[0] = 2073600; // Y plane
+    frame.plane_size_[1] = 1036800; // UV plane
 
     EXPECT_EQ(frame.GetPlaneSize(0), 2073600);
     EXPECT_EQ(frame.GetPlaneSize(1), 1036800);
-    EXPECT_EQ(frame.GetPlaneSize(2), 0);   // 超出范围
-    EXPECT_EQ(frame.GetPlaneSize(3), 0);   // 超出范围
+    EXPECT_EQ(frame.GetPlaneSize(2), 0); // 超出范围
+    EXPECT_EQ(frame.GetPlaneSize(3), 0); // 超出范围
 }
 
 /**
@@ -113,7 +113,7 @@ TEST(FrameHandleTest, GetPlaneData)
 
     EXPECT_EQ(plane0, reinterpret_cast<void*>(0x10000000));
     EXPECT_EQ(plane1, reinterpret_cast<void*>(0x10000000 + 2073600));
-    EXPECT_EQ(plane2, nullptr);  // 超出范围
+    EXPECT_EQ(plane2, nullptr); // 超出范围
 }
 
 /**

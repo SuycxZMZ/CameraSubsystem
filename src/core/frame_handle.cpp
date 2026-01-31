@@ -8,23 +8,15 @@
 #include "camera_subsystem/core/frame_handle.h"
 #include <cstring>
 
-namespace camera_subsystem {
-namespace core {
+namespace camera_subsystem
+{
+namespace core
+{
 
 FrameHandle::FrameHandle()
-    : frame_id_(0)
-    , camera_id_(0)
-    , timestamp_ns_(0)
-    , width_(0)
-    , height_(0)
-    , format_(PixelFormat::kUnknown)
-    , plane_count_(0)
-    , memory_type_(MemoryType::kMmap)
-    , buffer_fd_(-1)
-    , virtual_address_(nullptr)
-    , buffer_size_(0)
-    , sequence_(0)
-    , flags_(0)
+    : frame_id_(0), camera_id_(0), timestamp_ns_(0), width_(0), height_(0),
+      format_(PixelFormat::kUnknown), plane_count_(0), memory_type_(MemoryType::kMmap),
+      buffer_fd_(-1), virtual_address_(nullptr), buffer_size_(0), sequence_(0), flags_(0)
 {
     memset(line_stride_, 0, sizeof(line_stride_));
     memset(plane_offset_, 0, sizeof(plane_offset_));
@@ -54,10 +46,8 @@ size_t FrameHandle::GetPlaneSize(uint32_t plane_index) const
 
 bool FrameHandle::IsValid() const
 {
-    return (width_ > 0 && height_ > 0 &&
-            format_ != PixelFormat::kUnknown &&
-            plane_count_ > 0 && plane_count_ <= 3 &&
-            buffer_size_ > 0 &&
+    return (width_ > 0 && height_ > 0 && format_ != PixelFormat::kUnknown && plane_count_ > 0 &&
+            plane_count_ <= 3 && buffer_size_ > 0 &&
             (virtual_address_ != nullptr || buffer_fd_ >= 0));
 }
 
