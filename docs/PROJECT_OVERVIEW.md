@@ -180,18 +180,18 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ### 当前版本
 - **版本号**: v0.1
 - **状态**: 开发中
-- **完成度**: 约 20%
+- **完成度**: 约 35%
 
 ### 已完成模块
 - ✅ 核心数据结构设计
-- ✅ 平台抽象层接口定义
-- ✅ 分发层接口定义
+- ✅ 平台抽象层实现
+- ✅ 分发层实现（FrameBroker）
+- ✅ 信号处理工具（utils/signal_handler）
 - ✅ 构建系统配置
 - ✅ 单元测试框架
+- ✅ 压测程序（PlatformLayer / FrameBroker）
 
 ### 进行中模块
-- 🚧 PlatformLayer 实现
-- 🚧 FrameBroker 实现
 - 🚧 CameraSource 实现
 
 ### 计划中模块

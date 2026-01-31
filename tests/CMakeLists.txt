@@ -16,6 +16,24 @@ target_link_libraries(platform_stress_test
 # 将压测程序加入 CTest，构建后可自动执行
 add_test(NAME platform_stress_test COMMAND platform_stress_test 5)
 
+# FrameBroker 压测程序：不依赖 GTest，始终构建
+add_executable(frame_broker_stress_test
+    stress/frame_broker_stress_test.cpp
+)
+
+set_target_properties(frame_broker_stress_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin"
+)
+
+target_link_libraries(frame_broker_stress_test
+    PRIVATE
+        camera_subsystem_broker
+        camera_subsystem_platform
+        camera_subsystem_core
+)
+
+add_test(NAME frame_broker_stress_test COMMAND frame_broker_stress_test 5)
+
 # 根 CMakeLists.txt 负责查找/引入 GTest，这里做目标名自适配
 set(GTEST_TARGET "")
 set(GTEST_MAIN_TARGET "")
