@@ -9,6 +9,7 @@
 #define CAMERA_SUBSYSTEM_BROKER_FRAME_BROKER_H
 
 #include "camera_subsystem/broker/frame_subscriber.h"
+#include "camera_subsystem/core/buffer_pool.h"
 #include "camera_subsystem/core/frame_handle.h"
 #include "camera_subsystem/core/types.h"
 
@@ -89,6 +90,8 @@ public:
      * @brief 发布帧数据
      */
     void PublishFrame(const core::FrameHandle& frame);
+    void PublishFrame(const core::FrameHandle& frame,
+                      const std::shared_ptr<core::BufferBlock>& buffer_ref);
 
     /**
      * @brief 设置最大队列长度
@@ -110,6 +113,7 @@ private:
     {
         core::FrameHandle frame;
         std::shared_ptr<IFrameSubscriber> subscriber;
+        std::shared_ptr<core::BufferBlock> buffer_ref;
         uint8_t priority = 0;
         uint64_t sequence = 0;
     };

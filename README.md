@@ -6,7 +6,7 @@
 **核心方向:** Camera / V4L2 -> Zero-Copy Pub/Sub -> NPU / AI  
 **文档作者:** 架构设计团队  
 **创建日期:** 2026-01-27  
-**最后更新:** 2026-01-31
+**最后更新:** 2026-02-02
 
 ---
 
@@ -152,11 +152,75 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 
 ---
 
-## 3. 核心数据结构设计
+## 3. 架构设计深化（Buffer 生命周期与背压策略）
+
+本节针对“统一 Buffer 生命周期与复用池”和“背压与丢帧策略”给出明确架构设计，确保在边缘设备上稳定、低延迟运行。
+
+### 3.1 Buffer 生命周期与复用池
+
+**目标**
+1. 全链路零拷贝，避免在热路径中分配与复制。
+2. 明确 Buffer 所有权，避免悬空指针与资源泄漏。
+3. 支持多平面格式与 DMA-BUF 的可扩展设计。
+
+**核心设计**
+1. `BufferPool` 统一管理 Buffer，使用预分配与复用策略。
+2. `FrameHandle` 仅持有 Buffer 的引用（或句柄），不拥有内存。
+3. Buffer 状态机：`Free -> InUse -> InFlight -> Free`。
+
+**生命周期流程**
+1. CameraSource 从 `BufferPool` 申请可用 Buffer。
+2. V4L2 `DQBUF` 后将 Buffer 封装为 `FrameHandle` 并分发。
+3. FrameBroker 仅复制 `FrameHandle` 的元数据与引用，不复制数据。
+4. 当最后一个订阅者释放 Buffer 引用时，自动归还 `BufferPool`。
+5. CameraSource 将归还的 Buffer `QBUF` 回驱动，进入下一轮采集。
+
+**线程安全与性能**
+1. `BufferPool` 内部使用 MPMC 队列或互斥锁保护。
+2. Buffer 归还采用 RAII（智能指针 + 自定义 deleter）。
+3. 统计指标：池深度、可用数量、复用次数、丢帧数。
+
+**扩展规划**
+1. 多平面 Buffer：记录 plane offsets/stride/size。
+2. DMA-BUF：记录 fd 与 plane fd，支持零拷贝传给 NPU/编码器。
+
+### 3.2 背压与丢帧策略
+
+**目标**
+1. 在高负载下保证关键路径稳定（实时性优先）。
+2. 避免队列无限增长导致内存抖动与延迟失控。
+3. 为不同订阅者提供差异化 QoS。
+
+**策略分层**
+1. **采集层（CameraSource）**
+   - 当 `BufferPool` 耗尽时优先丢弃最新帧，避免阻塞采集线程。
+2. **分发层（FrameBroker）**
+   - 基于优先级的队列上限。
+   - 超过阈值时执行丢帧策略。
+3. **订阅者层（Subscriber）**
+   - 对低优先级订阅者可以“只保留最新帧”。
+
+**丢帧策略（可配置）**
+1. `DropNewest`：实时性优先，保持较低延迟。
+2. `DropOldest`：吞吐优先，尽量保留最新帧。
+3. `DropByPriority`：低优先级先丢，高优先级保留。
+
+**背压触发条件**
+1. 队列长度超过 `max_queue_size`。
+2. 端到端延迟超过 `max_latency_ms`。
+3. 连续处理耗时超出目标帧间隔。
+
+**可观测性**
+1. 丢帧数、队列深度、FPS、平均/95P 延迟。
+2. 按订阅者统计（便于定位慢消费者）。
+
+---
+
+## 4. 核心数据结构设计
 
 数据结构设计遵循 POD (Plain Old Data) 原则,确保在 C/C++ 边界及共享内存中安全传递。
 
-### 3.1 帧句柄 (FrameHandle)
+### 4.1 帧句柄 (FrameHandle)
 
 FrameHandle 是帧数据的唯一凭证,包含所有渲染和处理所需的描述信息。
 
@@ -271,6 +335,22 @@ sudo ./bin/camera_source_stress_test 20 /dev/video0
 ./scripts/format.sh changed
 ```
 
+### 4.6 边缘设备与交叉编译（RK3576 / Debian）
+
+当前阶段优先在 Ubuntu 上使用 V4L2 调试。面向 RK3576 的交叉编译计划如下：
+
+- 规划 CMake Toolchain 文件（例如 `cmake/toolchains/rk3576.cmake`）
+- 使用 aarch64 交叉编译器与 sysroot（由 SDK 提供）
+- 设备侧依赖：V4L2、pthread、libdrm（后续补充）
+- CI 增加交叉编译与最小运行时包产物
+
+### 4.7 架构完善与待优化项
+
+- 零拷贝主链路完善（DMABUF / 多平面）
+- 订阅者背压与丢帧策略（按优先级/延迟阈值）
+- 统一 Buffer 生命周期与复用池
+- 采集/分发线程亲和性与调度策略
+- 指标与观测性（FPS、延迟、队列深度）
 
 **设计要点:**
 - POD 结构,可在 C/C++ 边界安全传递

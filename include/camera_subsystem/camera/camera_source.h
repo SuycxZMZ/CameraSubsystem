@@ -8,6 +8,7 @@
 #ifndef CAMERA_SUBSYSTEM_CAMERA_CAMERA_SOURCE_H
 #define CAMERA_SUBSYSTEM_CAMERA_CAMERA_SOURCE_H
 
+#include "camera_subsystem/core/buffer_pool.h"
 #include "camera_subsystem/core/camera_config.h"
 #include "camera_subsystem/core/frame_handle.h"
 
@@ -32,6 +33,9 @@ class CameraSource
 {
 public:
     using FrameCallback = std::function<void(const core::FrameHandle&)>;
+    using FrameCallbackWithBuffer =
+        std::function<void(const core::FrameHandle&,
+                           const std::shared_ptr<core::BufferBlock>&)>;
 
     CameraSource();
     ~CameraSource();
@@ -45,8 +49,10 @@ public:
     std::string GetDevicePath() const;
 
     void SetFrameCallback(FrameCallback callback);
+    void SetFrameCallbackWithBuffer(FrameCallbackWithBuffer callback);
     core::CameraConfig GetConfig() const;
     uint64_t GetFrameCount() const;
+    uint64_t GetDroppedFrameCount() const;
 
 private:
     void CaptureLoop();
@@ -77,10 +83,15 @@ private:
 
     std::atomic<bool> is_running_;
     std::atomic<uint64_t> frame_count_;
+    std::atomic<uint64_t> dropped_frames_;
     std::thread capture_thread_;
 
     mutable std::mutex callback_mutex_;
     FrameCallback callback_;
+    FrameCallbackWithBuffer callback_with_buffer_;
+
+    core::BufferPool buffer_pool_;
+    size_t pool_buffer_size_ = 0;
 };
 
 } // namespace camera

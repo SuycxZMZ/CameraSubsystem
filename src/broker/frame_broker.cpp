@@ -134,6 +134,12 @@ size_t FrameBroker::GetSubscriberCount() const
 
 void FrameBroker::PublishFrame(const core::FrameHandle& frame)
 {
+    PublishFrame(frame, nullptr);
+}
+
+void FrameBroker::PublishFrame(const core::FrameHandle& frame,
+                               const std::shared_ptr<core::BufferBlock>& buffer_ref)
+{
     if (!is_running_)
     {
         return;
@@ -179,6 +185,7 @@ void FrameBroker::PublishFrame(const core::FrameHandle& frame)
             DispatchTask task;
             task.frame = frame;
             task.subscriber = sub;
+            task.buffer_ref = buffer_ref;
             task.priority = sub->GetPriority();
             task.sequence = sequence_.fetch_add(1);
 

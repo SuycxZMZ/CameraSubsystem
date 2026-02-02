@@ -1,5 +1,7 @@
 # CameraSubsystem 项目概览
 
+**最后更新:** 2026-02-02
+
 ## 项目简介
 
 CameraSubsystem 是一个高性能、低延迟、可扩展的 Camera 数据流基座，专为 RK3576 平台设计（预留 Android 迁移）。它作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源，提供零拷贝的数据传输能力。
@@ -201,6 +203,28 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 - ⏳ 性能测试
 - ⏳ 示例代码
 
+### 架构完善与待优化项
+- 零拷贝主链路完善（DMABUF / 多平面）
+- 订阅者背压与丢帧策略（按优先级/延迟阈值）
+- Buffer 生命周期与复用池
+- 采集/分发线程亲和性与调度策略
+- 指标与观测性（FPS、延迟、队列深度）
+
+### 详细设计摘要（Buffer 生命周期与背压）
+
+**Buffer 生命周期与复用池**
+1. `BufferPool` 统一管理预分配 Buffer，避免热路径分配与拷贝。
+2. `FrameHandle` 持有 Buffer 引用而非所有权，依靠 RAII 归还。
+3. 生命周期状态：`Free -> InUse -> InFlight -> Free`。
+4. 归还后由 CameraSource 重新 `QBUF`，保持采集连续性。
+
+**背压与丢帧策略**
+1. 采集层：池耗尽时优先丢弃最新帧，避免阻塞采集线程。
+2. 分发层：队列超阈值或延迟过大触发丢帧策略。
+3. 订阅者层：低优先级订阅者可“仅保留最新帧”。
+4. 支持策略：`DropNewest`、`DropOldest`、`DropByPriority`。
+5. 观测指标：丢帧数、队列深度、FPS、延迟分布。
+
 ## 快速开始
 
 ### 环境要求
@@ -260,6 +284,15 @@ git submodule update --init --recursive
 sudo apt-get update
 sudo apt-get install -y libgtest-dev
 ```
+
+### 边缘设备与交叉编译（RK3576 / Debian）
+
+当前阶段优先在 Ubuntu 上使用 V4L2 调试。面向 RK3576 的交叉编译规划：
+
+- 规划 CMake Toolchain 文件（例如 `cmake/toolchains/rk3576.cmake`）
+- 使用 aarch64 交叉编译器与 sysroot（由 SDK 提供）
+- 设备侧依赖：V4L2、pthread、libdrm（后续补充）
+- CI 增加交叉编译与最小运行时包产物
 
 完成配置后，建议全量重新构建并执行测试：
 

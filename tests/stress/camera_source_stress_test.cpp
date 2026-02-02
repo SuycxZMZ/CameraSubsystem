@@ -138,20 +138,24 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    camera_source.SetFrameCallback([&broker](const core::FrameHandle& frame)
-    {
-        broker.PublishFrame(frame);
-
-        std::lock_guard<std::mutex> lock(g_frame_mutex_);
-        g_latest_frame_.width = frame.width_;
-        g_latest_frame_.height = frame.height_;
-        g_latest_frame_.format = frame.format_;
-        g_latest_frame_.data.resize(frame.buffer_size_);
-        if (frame.virtual_address_ != nullptr && frame.buffer_size_ > 0)
+    camera_source.SetFrameCallbackWithBuffer(
+        [&broker](const core::FrameHandle& frame,
+                  const std::shared_ptr<core::BufferBlock>& buffer_ref)
         {
-            std::memcpy(g_latest_frame_.data.data(), frame.virtual_address_, frame.buffer_size_);
-        }
-    });
+            broker.PublishFrame(frame, buffer_ref);
+
+            std::lock_guard<std::mutex> lock(g_frame_mutex_);
+            g_latest_frame_.width = frame.width_;
+            g_latest_frame_.height = frame.height_;
+            g_latest_frame_.format = frame.format_;
+            g_latest_frame_.data.resize(frame.buffer_size_);
+            if (frame.virtual_address_ != nullptr && frame.buffer_size_ > 0)
+            {
+                std::memcpy(g_latest_frame_.data.data(),
+                            frame.virtual_address_,
+                            frame.buffer_size_);
+            }
+        });
 
     if (!camera_source.Start())
     {

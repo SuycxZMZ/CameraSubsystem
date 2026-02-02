@@ -36,8 +36,13 @@ int Xioctl(int fd, int request, void* arg)
 } // namespace
 
 CameraSource::CameraSource()
-    : config_(), device_path_("/dev/video0"), device_fd_(-1), streaming_(false), is_running_(false),
-      frame_count_(0)
+    : config_()
+    , device_path_("/dev/video0")
+    , device_fd_(-1)
+    , streaming_(false)
+    , is_running_(false)
+    , frame_count_(0)
+    , dropped_frames_(0)
 {
 }
 
@@ -79,6 +84,23 @@ bool CameraSource::Initialize(const core::CameraConfig& config)
         return false;
     }
 
+    pool_buffer_size_ = 0;
+    if (!buffers_.empty())
+    {
+        pool_buffer_size_ = buffers_[0].length;
+    }
+    if (pool_buffer_size_ == 0)
+    {
+        pool_buffer_size_ = CalculateBufferSize(config_);
+    }
+
+    if (!buffer_pool_.Initialize(config_.buffer_count_, pool_buffer_size_))
+    {
+        CleanupBuffers();
+        CloseDevice();
+        return false;
+    }
+
     return true;
 }
 
@@ -103,6 +125,7 @@ bool CameraSource::Start()
 
     is_running_ = true;
     frame_count_ = 0;
+    dropped_frames_ = 0;
     capture_thread_ = std::thread(&CameraSource::CaptureLoop, this);
     return true;
 }
@@ -134,6 +157,12 @@ void CameraSource::SetFrameCallback(FrameCallback callback)
     callback_ = std::move(callback);
 }
 
+void CameraSource::SetFrameCallbackWithBuffer(FrameCallbackWithBuffer callback)
+{
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    callback_with_buffer_ = std::move(callback);
+}
+
 void CameraSource::SetDevicePath(const std::string& device_path)
 {
     if (is_running_)
@@ -156,6 +185,11 @@ core::CameraConfig CameraSource::GetConfig() const
 uint64_t CameraSource::GetFrameCount() const
 {
     return frame_count_.load();
+}
+
+uint64_t CameraSource::GetDroppedFrameCount() const
+{
+    return dropped_frames_.load();
 }
 
 void CameraSource::CaptureLoop()
@@ -202,6 +236,18 @@ void CameraSource::CaptureLoop()
             break;
         }
 
+        auto buffer_ref = buffer_pool_.Acquire();
+        if (!buffer_ref)
+        {
+            dropped_frames_.fetch_add(1);
+            if (Xioctl(device_fd_, VIDIOC_QBUF, &buf) < 0)
+            {
+                platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                              "VIDIOC_QBUF failed: %s", strerror(errno));
+            }
+            continue;
+        }
+
         core::FrameHandle frame;
         frame.Reset();
 
@@ -213,7 +259,7 @@ void CameraSource::CaptureLoop()
         frame.height_ = config_.height_;
         frame.format_ = config_.format_;
         frame.sequence_ = static_cast<uint32_t>(buf.sequence);
-        frame.memory_type_ = core::MemoryType::kMmap;
+        frame.memory_type_ = core::MemoryType::kHeap;
 
         size_t used_size = static_cast<size_t>(buf.bytesused);
         if (used_size == 0)
@@ -221,18 +267,27 @@ void CameraSource::CaptureLoop()
             used_size = buffers_[buf.index].length;
         }
 
-        frame.virtual_address_ = buffers_[buf.index].start;
-        frame.buffer_size_ = used_size;
+        const size_t copy_size = std::min(used_size, buffer_ref->size);
+        std::memcpy(buffer_ref->data, buffers_[buf.index].start, copy_size);
 
-        FillFrameLayout(frame, used_size);
+        frame.virtual_address_ = buffer_ref->data;
+        frame.buffer_size_ = copy_size;
+
+        FillFrameLayout(frame, copy_size);
 
         FrameCallback callback;
+        FrameCallbackWithBuffer callback_with_buffer;
         {
             std::lock_guard<std::mutex> lock(callback_mutex_);
             callback = callback_;
+            callback_with_buffer = callback_with_buffer_;
         }
 
-        if (callback)
+        if (callback_with_buffer)
+        {
+            callback_with_buffer(frame, buffer_ref);
+        }
+        else if (callback)
         {
             callback(frame);
         }

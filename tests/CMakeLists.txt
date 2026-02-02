@@ -100,3 +100,16 @@ target_link_libraries(test_camera_config
 )
 
 add_test(NAME test_camera_config COMMAND test_camera_config)
+
+add_executable(test_buffer_pool
+    unit/test_buffer_pool.cpp
+)
+
+target_link_libraries(test_buffer_pool
+    PRIVATE
+        camera_subsystem_core
+        ${GTEST_TARGET}
+        ${GTEST_MAIN_TARGET}
+)
+
+add_test(NAME test_buffer_pool COMMAND test_buffer_pool)
