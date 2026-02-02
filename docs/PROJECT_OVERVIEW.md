@@ -182,7 +182,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ### 当前版本
 - **版本号**: v0.1
 - **状态**: 开发中
-- **完成度**: 约 55%
+- **完成度**: 约 60%
 
 ### 已完成模块
 - ✅ 核心数据结构设计
@@ -190,12 +190,14 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 - ✅ 分发层实现（FrameBroker）
 - ✅ 信号处理工具（utils/signal_handler）
 - ✅ CameraSource（V4L2 + MMAP 采集）
+- ✅ BufferPool（统一生命周期与复用池，拷贝模式）
 - ✅ 构建系统配置
 - ✅ 单元测试框架
 - ✅ 压测程序（PlatformLayer / FrameBroker / CameraSource）
 
 ### 进行中模块
 - 🚧 CameraSource 高级能力（多平面 / DMA-BUF）
+- 🚧 背压策略完善（延迟阈值 / DropPolicy 参数化）
 
 ### 计划中模块
 - ⏳ 工具类实现
@@ -206,7 +208,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ### 架构完善与待优化项
 - 零拷贝主链路完善（DMABUF / 多平面）
 - 订阅者背压与丢帧策略（按优先级/延迟阈值）
-- Buffer 生命周期与复用池
+- Buffer 生命周期与复用池（已实现基础版，待零拷贝）
 - 采集/分发线程亲和性与调度策略
 - 指标与观测性（FPS、延迟、队列深度）
 
@@ -217,6 +219,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 2. `FrameHandle` 持有 Buffer 引用而非所有权，依靠 RAII 归还。
 3. 生命周期状态：`Free -> InUse -> InFlight -> Free`。
 4. 归还后由 CameraSource 重新 `QBUF`，保持采集连续性。
+5. 当前实现为 **拷贝模式**，后续升级为 **DMA-BUF 零拷贝**。
 
 **背压与丢帧策略**
 1. 采集层：池耗尽时优先丢弃最新帧，避免阻塞采集线程。

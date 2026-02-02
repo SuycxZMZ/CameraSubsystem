@@ -96,6 +96,10 @@ CameraSubsystem/
 - ✅ FrameHandle 单元测试（12个测试用例）
 - ✅ CameraConfig 单元测试（11个测试用例）
 - ✅ 类型转换测试
+- ✅ BufferPool 单元测试
+
+**新增组件:**
+- ✅ `buffer_pool.h/cpp` - BufferPool 统一生命周期与复用池
 
 ### 2. 平台抽象层 (Platform) ✅
 
@@ -241,8 +245,8 @@ CameraSubsystem/
 ## 架构完善项（面向边缘设备）
 
 - 完成零拷贝主链路（V4L2 DMABUF -> FrameHandle -> Broker -> Consumer）
-- 引入背压与丢帧策略（按订阅者优先级/延迟阈值）
-- 统一 Buffer 生命周期与复用池（减少 malloc/free 抖动）
+- 引入背压与丢帧策略（按订阅者优先级/延迟阈值）✅ 基础版本已实现
+- 统一 Buffer 生命周期与复用池（减少 malloc/free 抖动）✅ 基础版本已实现
 - 增加可观测性指标（FPS、队列深度、丢帧率、延迟分布）
 - 采集线程与分发线程亲和性配置（绑定大核/小核）
 - 降低日志对热路径的影响（采样或分级降噪）
@@ -254,6 +258,7 @@ CameraSubsystem/
 2. `FrameHandle` 仅持有引用，使用 RAII 归还 Buffer。
 3. 生命周期状态：`Free -> InUse -> InFlight -> Free`。
 4. 归还后由 CameraSource 重新 `QBUF`，保证采集连续性。
+5. 当前实现为 **拷贝模式**（V4L2 MMAP -> BufferPool），后续升级为 **DMA-BUF 零拷贝**。
 
 **背压与丢帧策略**
 1. 采集层：池耗尽时优先丢弃最新帧，避免阻塞采集线程。
@@ -278,6 +283,7 @@ CameraSubsystem/
 - [ ] 添加代码覆盖率检查
 - [ ] 增加跨架构编译与运行时自检
 - [ ] 完善多平面与 DMA-BUF 实现细节
+- [ ] 将 BufferPool 与 DMA-BUF 零拷贝打通
 
 ## 贡献指南
 

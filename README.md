@@ -167,13 +167,14 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 1. `BufferPool` 统一管理 Buffer，使用预分配与复用策略。
 2. `FrameHandle` 仅持有 Buffer 的引用（或句柄），不拥有内存。
 3. Buffer 状态机：`Free -> InUse -> InFlight -> Free`。
+4. 当前实现为 **拷贝模式**（V4L2 MMAP -> BufferPool），后续升级为 **DMA-BUF 零拷贝**。
 
 **生命周期流程**
 1. CameraSource 从 `BufferPool` 申请可用 Buffer。
-2. V4L2 `DQBUF` 后将 Buffer 封装为 `FrameHandle` 并分发。
+2. V4L2 `DQBUF` 后拷贝到池中，并封装为 `FrameHandle` 分发。
 3. FrameBroker 仅复制 `FrameHandle` 的元数据与引用，不复制数据。
 4. 当最后一个订阅者释放 Buffer 引用时，自动归还 `BufferPool`。
-5. CameraSource 将归还的 Buffer `QBUF` 回驱动，进入下一轮采集。
+5. CameraSource 将驱动 Buffer `QBUF` 回驱动，进入下一轮采集。
 
 **线程安全与性能**
 1. `BufferPool` 内部使用 MPMC 队列或互斥锁保护。
