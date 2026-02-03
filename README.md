@@ -6,7 +6,7 @@
 **核心方向:** Camera / V4L2 -> Zero-Copy Pub/Sub -> NPU / AI  
 **文档作者:** 架构设计团队  
 **创建日期:** 2026-01-27  
-**最后更新:** 2026-02-02
+**最后更新:** 2026-02-03
 
 ---
 
@@ -154,7 +154,129 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 
 ## 3. 架构设计深化（Buffer 生命周期与背压策略）
 
-本节针对“统一 Buffer 生命周期与复用池”和“背压与丢帧策略”给出明确架构设计，确保在边缘设备上稳定、低延迟运行。
+### 3.0 架构评审意见
+
+**评审日期:** 2026-02-02  
+**评审人:** 高级架构师团队
+
+#### 3.0.1 评审总述
+
+经过深入的架构评审，系统整体设计合理，但在以下方面存在改进空间：
+
+| 评审项 | 评审意见 | 优先级 | 状态 |
+|--------|---------|--------|------|
+| Buffer生命周期管理 | BufferPool与FrameHandle绑定关系不清晰，缺乏状态机管理和泄漏检测 | 高 | 待处理 |
+| 背压策略配置性 | 丢帧策略硬编码，缺乏动态调整和阈值配置 | 高 | 待处理 |
+| 错误恢复机制 | 设备断开后缺乏自动重连和降级策略 | 中 | 待处理 |
+| 线程亲和性配置 | 无法配置线程CPU亲和性和大小核分离 | 中 | 待处理 |
+| 可观测性 | 缺乏统一的Metrics收集和实时监控接口 | 中 | 待处理 |
+| 内存管理策略 | 缺乏内存预算控制和压力检测 | 中 | 待处理 |
+| 跨平台抽象 | Android HAL层未实现，平台能力探测不完整 | 低 | 待处理 |
+
+#### 3.0.2 详细评审意见
+
+##### A. Buffer生命周期管理
+
+**[ARCH-001] Buffer所有权不明确**
+- **问题**: FrameHandle与Buffer的引用关系模糊，容易导致悬空指针
+- **影响**: 可能导致内存泄漏或崩溃
+- **建议**: 引入BufferGuard类，使用RAII明确所有权
+- **代码位置**: `include/camera_subsystem/core/buffer_guard.h` (待创建)
+- **见代码**: `src/camera/camera_source.cpp` - 需要添加BufferGuard集成
+
+**[ARCH-002] 缺少Buffer状态机**
+- **问题**: Buffer状态流转不清晰，难以追踪生命周期
+- **建议**: 实现Buffer状态枚举：Free → InUse → InFlight → Free
+- **代码位置**: `include/camera_subsystem/core/buffer_state.h` (待创建)
+
+**[ARCH-003] Buffer泄漏检测**
+- **问题**: 长时间运行可能存在Buffer泄漏
+- **建议**: 添加Buffer泄漏检测和告警机制
+- **代码位置**: `include/camera_subsystem/core/buffer_pool.h` - 需要添加泄漏检测
+
+##### B. 背压策略配置性
+
+**[ARCH-004] 丢帧策略硬编码**
+- **问题**: DropNewest/DropOldest等策略固定，无法动态调整
+- **建议**: 引入BackpressurePolicy配置类，支持运行时策略切换
+- **代码位置**: `include/camera_subsystem/broker/backpressure_policy.h` (待创建)
+- **见代码**: `src/broker/frame_broker.cpp` - 需要集成策略配置
+
+**[ARCH-005] 缺少背压阈值配置**
+- **问题**: 队列大小和延迟阈值固定
+- **建议**: 添加动态阈值调整算法
+- **代码位置**: `include/camera_subsystem/broker/broker_config.h` (待创建)
+
+**[ARCH-006] 订阅者优先级静态**
+- **问题**: 优先级在注册时固定，无法动态调整
+- **建议**: 实现自适应优先级调整机制
+- **代码位置**: `src/broker/frame_broker.cpp` - 需要添加动态优先级调整
+
+##### C. 错误恢复机制
+
+**[ARCH-007] 缺少设备监控和自动重连**
+- **问题**: 设备断开后需要手动重启
+- **建议**: 引入DeviceMonitor类，实现自动重连和降级策略
+- **代码位置**: `include/camera_subsystem/camera/device_monitor.h` (待创建)
+
+**[ARCH-008] 缺少降级策略**
+- **问题**: 高负载时无法自动降级
+- **建议**: 实现自动降级（降低帧率/分辨率）
+- **代码位置**: `include/camera_subsystem/camera/degradation_policy.h` (待创建)
+
+##### D. 线程亲和性配置
+
+**[ARCH-009] 缺少CPU亲和性配置**
+- **问题**: 无法配置线程CPU亲和性
+- **建议**: 引入ThreadAffinity配置类
+- **代码位置**: `include/camera_subsystem/platform/thread_affinity.h` (待创建)
+
+**[ARCH-010] 缺少大小核分离调度**
+- **问题**: Worker线程无法区分大小核
+- **建议**: 实现CPU拓扑探测和大小核分离调度
+- **代码位置**: `include/camera_subsystem/platform/cpu_topology.h` (待创建)
+
+##### E. 可观测性
+
+**[ARCH-011] 缺少Metrics收集接口**
+- **问题**: 无法统一收集性能指标
+- **建议**: 引入MetricsCollector类，支持Prometheus/Grafana
+- **代码位置**: `include/camera_subsystem/metrics/metrics_collector.h` (待创建)
+
+**[ARCH-012] 缺少实时监控接口**
+- **问题**: 无法实时监控系统状态
+- **建议**: 实现SystemMonitor类，提供REST/gRPC接口
+- **代码位置**: `include/camera_subsystem/metrics/system_monitor.h` (待创建)
+
+##### F. 内存管理策略
+
+**[ARCH-013] 缺少内存预算控制**
+- **问题**: 内存使用无法限制
+- **建议**: 引入MemoryBudget配置类
+- **代码位置**: `include/camera_subsystem/core/memory_budget.h` (待创建)
+
+**[ARCH-014] 缺少内存压力检测**
+- **问题**: 内存压力无法感知
+- **建议**: 实现MemoryMonitor类，支持压力告警
+- **代码位置**: `include/camera_subsystem/core/memory_monitor.h` (待创建)
+
+##### G. 跨平台抽象
+
+**[ARCH-015] 缺少平台能力探测**
+- **问题**: 无法探测平台能力
+- **建议**: 引入PlatformCapabilities接口
+- **代码位置**: `include/camera_subsystem/platform/platform_capabilities.h` (待创建)
+
+**[ARCH-016] Android HAL层未实现**
+- **问题**: 无法适配Android平台
+- **建议**: 预留HAL3接口设计
+- **代码位置**: `include/camera_subsystem/platform/android/hal3_wrapper.h` (待创建)
+
+---
+
+## 3.1 Buffer 生命周期与复用池
+
+针对“统一 Buffer 生命周期与复用池”和“背压与丢帧策略”给出明确架构设计，确保在边缘设备上稳定、低延迟运行。
 
 ### 3.1 Buffer 生命周期与复用池
 
@@ -167,7 +289,8 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 1. `BufferPool` 统一管理 Buffer，使用预分配与复用策略。
 2. `FrameHandle` 仅持有 Buffer 的引用（或句柄），不拥有内存。
 3. Buffer 状态机：`Free -> InUse -> InFlight -> Free`。
-4. 当前实现为 **拷贝模式**（V4L2 MMAP -> BufferPool），后续升级为 **DMA-BUF 零拷贝**。
+4. 当前实现为 **拷贝模式**（V4L2 MMAP -> BufferPool）。
+5. 后续升级为 **DMA-BUF 零拷贝**，避免拷贝成本。
 
 **生命周期流程**
 1. CameraSource 从 `BufferPool` 申请可用 Buffer。
@@ -200,6 +323,10 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
    - 超过阈值时执行丢帧策略。
 3. **订阅者层（Subscriber）**
    - 对低优先级订阅者可以“只保留最新帧”。
+
+**当前落地**
+1. 采集层池耗尽丢帧
+2. Broker 队列上限丢帧
 
 **丢帧策略（可配置）**
 1. `DropNewest`：实时性优先，保持较低延迟。

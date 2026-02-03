@@ -1,6 +1,6 @@
 # CameraSubsystem 项目概览
 
-**最后更新:** 2026-02-02
+**最后更新:** 2026-02-03
 
 ## 项目简介
 
@@ -182,7 +182,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ### 当前版本
 - **版本号**: v0.1
 - **状态**: 开发中
-- **完成度**: 约 60%
+- **完成度**: 约 65%
 
 ### 已完成模块
 - ✅ 核心数据结构设计
@@ -219,14 +219,16 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 2. `FrameHandle` 持有 Buffer 引用而非所有权，依靠 RAII 归还。
 3. 生命周期状态：`Free -> InUse -> InFlight -> Free`。
 4. 归还后由 CameraSource 重新 `QBUF`，保持采集连续性。
-5. 当前实现为 **拷贝模式**，后续升级为 **DMA-BUF 零拷贝**。
+5. 当前实现为 **拷贝模式**（V4L2 MMAP -> BufferPool）。
+6. 后续升级为 **DMA-BUF 零拷贝**。
 
 **背压与丢帧策略**
 1. 采集层：池耗尽时优先丢弃最新帧，避免阻塞采集线程。
 2. 分发层：队列超阈值或延迟过大触发丢帧策略。
 3. 订阅者层：低优先级订阅者可“仅保留最新帧”。
 4. 支持策略：`DropNewest`、`DropOldest`、`DropByPriority`。
-5. 观测指标：丢帧数、队列深度、FPS、延迟分布。
+5. 当前落地：采集层池耗尽丢帧 + Broker 队列上限丢帧。
+6. 观测指标：丢帧数、队列深度、FPS、延迟分布。
 
 ## 快速开始
 
@@ -393,5 +395,5 @@ int main()
 
 ---
 
-**最后更新**: 2026-01-28
+**最后更新**: 2026-02-03
 **文档版本**: v0.1

@@ -7,7 +7,7 @@ Camera 推流与 AI 基座子系统架构设计文档
 核心方向:     Camera / V4L2 -> Zero-Copy Pub/Sub -> NPU / AI
 文档作者:     架构设计团队
 创建日期:     2026-01-27
-最后更新:     2026-01-27
+最后更新:     2026-02-03
 
 
 1. 设计概述
@@ -169,11 +169,16 @@ Camera 推流与 AI 基座子系统架构设计文档
          (DQBUF)       (DMA-BUF)      (FrameHandle)  (Dispatch)     (OnFrame)
 
     Buffer 生命周期:
-        1. CameraSource 从 V4L2 驱动获取 Buffer
-        2. 封装为 FrameHandle,包含 Buffer 引用
+        1. CameraSource 从 V4L2 驱动获取 Buffer (MMAP)
+        2. 拷贝到 BufferPool 并封装为 FrameHandle
         3. 通过 FrameBroker 分发给所有订阅者
-        4. 订阅者处理完毕后,自动触发 Buffer 归还
-        5. CameraSource 将 Buffer 重新入队到 V4L2 驱动
+        4. 订阅者处理完毕后,自动归还 BufferPool
+        5. CameraSource 将驱动 Buffer 重新入队 (QBUF)
+
+    背压与丢帧策略:
+        1. 采集层池耗尽时丢帧,避免阻塞采集线程
+        2. 分发层队列超阈值时丢帧,保障实时性
+        3. 后续支持按优先级/延迟阈值策略化
 
 
 3. 核心数据结构设计
