@@ -98,7 +98,7 @@
 
 系统采用分层架构,自底向上分为平台抽象层、数据源层、分发总线层和应用业务层。
 
-```
+```text
 ┌───────────────────────────────────────────────────────────────────────┐
 │                      Application Layer (AI/App)                       │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────┐   │
@@ -149,7 +149,7 @@
 
 ### 2.3 数据流向图
 
-```
+```text
 Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
      (DQBUF)       (DMA-BUF)      (FrameHandle)  (Dispatch)     (OnFrame)
 ```
@@ -460,7 +460,9 @@ struct FrameHandle
 
 ```bash
 sudo usermod -aG video $USER
+
 # 重新登录后生效
+
 ```
 
 或临时使用 sudo 运行压测程序。
@@ -470,13 +472,17 @@ sudo usermod -aG video $USER
 所有压测可执行文件输出到项目根目录 `bin/` 下：
 
 ```bash
+
 # PlatformLayer 压测
+
 ./bin/platform_stress_test 5
 
 # FrameBroker 压测
+
 ./bin/frame_broker_stress_test 5
 
 # CameraSource 压测（默认 20 秒）
+
 sudo ./bin/camera_source_stress_test 20 /dev/video0
 ```
 
@@ -493,10 +499,13 @@ sudo ./bin/camera_source_stress_test 20 /dev/video0
 ### 4.5 代码格式化
 
 ```bash
+
 # 全量格式化（排除 third_party）
+
 ./scripts/format.sh
 
 # 仅格式化 Git 变更文件
+
 ./scripts/format.sh changed
 ```
 
@@ -988,13 +997,13 @@ const char* GetErrorString(ErrorCode code);
 
 **格式:**
 
-```
+```text
 [Timestamp] [Thread] [Level] [Module] Message
 ```
 
 **示例:**
 
-```
+```text
 [2026-01-27 12:34:56.789] [12345] [INFO]  [camera_source] Camera 0 initialized
 [2026-01-27 12:34:56.790] [12346] [ERROR] [frame_broker] Failed to dispatch frame: invalid subscriber
 ```
@@ -1388,4 +1397,3 @@ ErrorCode Initialize(const CameraConfig& config);
 ---
 
 **文档结束**
-

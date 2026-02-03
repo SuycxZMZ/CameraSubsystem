@@ -594,7 +594,7 @@ namespace camera_subsystem
 
 ### 9.2 目录结构
 
-```
+```text
 camera_subsystem/
 ├── include/
 │   └── camera_subsystem/
