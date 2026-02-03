@@ -140,7 +140,7 @@ int main(int argc, char* argv[])
 
     camera_source.SetFrameCallbackWithBuffer(
         [&broker](const core::FrameHandle& frame,
-                  const std::shared_ptr<core::BufferBlock>& buffer_ref)
+                  const std::shared_ptr<core::BufferGuard>& buffer_ref)
         {
             broker.PublishFrame(frame, buffer_ref);
 

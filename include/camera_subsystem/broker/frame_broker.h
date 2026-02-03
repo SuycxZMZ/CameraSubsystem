@@ -9,7 +9,7 @@
 #define CAMERA_SUBSYSTEM_BROKER_FRAME_BROKER_H
 
 #include "camera_subsystem/broker/frame_subscriber.h"
-#include "camera_subsystem/core/buffer_pool.h"
+#include "camera_subsystem/core/buffer_guard.h"
 #include "camera_subsystem/core/frame_handle.h"
 #include "camera_subsystem/core/types.h"
 
@@ -91,7 +91,7 @@ public:
      */
     void PublishFrame(const core::FrameHandle& frame);
     void PublishFrame(const core::FrameHandle& frame,
-                      const std::shared_ptr<core::BufferBlock>& buffer_ref);
+                      const std::shared_ptr<core::BufferGuard>& buffer_ref);
 
     /**
      * @brief 设置最大队列长度
@@ -113,7 +113,7 @@ private:
     {
         core::FrameHandle frame;
         std::shared_ptr<IFrameSubscriber> subscriber;
-        std::shared_ptr<core::BufferBlock> buffer_ref;
+        std::shared_ptr<core::BufferGuard> buffer_ref; // ARCH-001: 绑定 Buffer 生命周期
         uint8_t priority = 0;
         uint64_t sequence = 0;
     };

@@ -8,13 +8,14 @@
 #ifndef CAMERA_SUBSYSTEM_CAMERA_CAMERA_SOURCE_H
 #define CAMERA_SUBSYSTEM_CAMERA_CAMERA_SOURCE_H
 
-#include "camera_subsystem/core/buffer_pool.h"
+#include "camera_subsystem/core/buffer_guard.h"
 #include "camera_subsystem/core/camera_config.h"
 #include "camera_subsystem/core/frame_handle.h"
 
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -35,7 +36,7 @@ public:
     using FrameCallback = std::function<void(const core::FrameHandle&)>;
     using FrameCallbackWithBuffer =
         std::function<void(const core::FrameHandle&,
-                           const std::shared_ptr<core::BufferBlock>&)>;
+                           const std::shared_ptr<core::BufferGuard>&)>;
 
     CameraSource();
     ~CameraSource();

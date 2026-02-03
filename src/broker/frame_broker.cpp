@@ -138,7 +138,7 @@ void FrameBroker::PublishFrame(const core::FrameHandle& frame)
 }
 
 void FrameBroker::PublishFrame(const core::FrameHandle& frame,
-                               const std::shared_ptr<core::BufferBlock>& buffer_ref)
+                               const std::shared_ptr<core::BufferGuard>& buffer_ref)
 {
     if (!is_running_)
     {
@@ -169,6 +169,12 @@ void FrameBroker::PublishFrame(const core::FrameHandle& frame,
         subscribers.begin(), subscribers.end(),
         [](const std::shared_ptr<IFrameSubscriber>& a, const std::shared_ptr<IFrameSubscriber>& b)
         { return a->GetPriority() > b->GetPriority(); });
+
+    if (buffer_ref)
+    {
+        // ARCH-002: Buffer 从 InUse 进入 InFlight 状态
+        buffer_ref->MarkInFlight();
+    }
 
     published_frames_.fetch_add(1);
 

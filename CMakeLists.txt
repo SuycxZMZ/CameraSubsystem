@@ -24,6 +24,7 @@ set(CORE_SOURCES
     src/core/frame_handle.cpp
     src/core/camera_config.cpp
     src/core/buffer_pool.cpp
+    src/core/buffer_guard.cpp
 )
 
 set(PLATFORM_SOURCES

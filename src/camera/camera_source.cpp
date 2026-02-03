@@ -236,6 +236,7 @@ void CameraSource::CaptureLoop()
             break;
         }
 
+        // ARCH-001: 使用 BufferGuard 明确 Buffer 所有权
         auto buffer_ref = buffer_pool_.Acquire();
         if (!buffer_ref)
         {
@@ -267,10 +268,10 @@ void CameraSource::CaptureLoop()
             used_size = buffers_[buf.index].length;
         }
 
-        const size_t copy_size = std::min(used_size, buffer_ref->size);
-        std::memcpy(buffer_ref->data, buffers_[buf.index].start, copy_size);
+        const size_t copy_size = std::min(used_size, buffer_ref->Size());
+        std::memcpy(buffer_ref->Data(), buffers_[buf.index].start, copy_size);
 
-        frame.virtual_address_ = buffer_ref->data;
+        frame.virtual_address_ = buffer_ref->Data();
         frame.buffer_size_ = copy_size;
 
         FillFrameLayout(frame, copy_size);

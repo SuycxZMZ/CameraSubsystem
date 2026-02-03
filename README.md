@@ -17,23 +17,27 @@
 本系统旨在构建一个高性能、低延迟、可扩展的 Camera 数据流基座,作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源。
 
 **工业级性能目标:**
+
 - 基于 DMA-BUF 和共享内存实现零拷贝传输,避免 CPU 负担沉重的内存拷贝操作
 - 端到端延迟控制在 10ms 以内 (4K@30fps)
 - 支持 4K@60fps 高帧率稳定采集与分发
 - 内存占用优化,每个 Camera 实例内存开销 < 100MB
 
 **并发能力:**
+
 - 支持多 Camera 实例并行采集 (不设架构层硬上限,路数由平台能力与资源预算决定,可达 12/16 路或更多)
 - 支持多订阅者 (AI、编码、录制) 同时消费同一帧数据 (订阅者数量由配置与资源预算决定,通过 QoS 策略保障关键路径)
 - 线程池动态扩展,支持 CPU 核心数自适应
 
 **工业级稳定性:**
+
 - 严格的 RAII 资源管理,杜绝资源泄漏
 - 明确的线程生命周期控制,避免死锁和竞态条件
 - 完善的错误处理与恢复机制,支持设备热插拔
 - 7x24 小时稳定运行,MTBF > 10000 小时
 
 **可维护性与可扩展性:**
+
 - 跨平台抽象,核心逻辑与平台 API (Linux V4L2/Android HAL) 解耦
 - 模块化设计,支持插件式扩展
 - 完善的日志和监控体系
@@ -41,30 +45,36 @@
 ### 1.2 设计原则
 
 **接口隔离原则:**
+
 - 上层业务仅依赖抽象接口,不感知底层硬件细节
 - 平台相关操作完全封装在 PlatformLayer 中
 
 **数据驱动设计:**
+
 - 以 FrameHandle 为核心数据载体
 - 通过发布订阅模式解耦生产者和消费者
 
 **线程安全设计:**
+
 - 所有共享资源访问受锁保护
 - 关键路径使用无锁结构 (如原子操作) 优化
 - 明确的线程所有权和生命周期管理
 
 **资源所有权明确:**
+
 - 通过引用计数或句柄生命周期明确 Buffer 归属权
 - 防止内存泄漏或悬空指针
 - 使用智能指针管理对象生命周期
 
 **单一职责原则:**
+
 - 每个模块职责单一明确
 - 高内聚低耦合
 
 ### 1.3 适用范围
 
 **包含:**
+
 - Camera 设备管理 (设备发现、打开、配置、关闭)
 - V4L2 流控 (格式协商、Buffer 管理、流控制)
 - 帧数据封装 (FrameHandle 构建、元数据管理)
@@ -73,6 +83,7 @@
 - 平台抽象层 (Epoll、Thread、Log 跨平台封装)
 
 **不包含:**
+
 - 具体的 AI 算法实现
 - 音视频编码协议实现 (如 H.264/H.265 编码器内部逻辑)
 - 跨进程通信 (IPC) 机制
@@ -144,6 +155,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ```
 
 **Buffer 生命周期:**
+
 1. CameraSource 从 V4L2 驱动获取 Buffer
 2. 封装为 FrameHandle,包含 Buffer 引用
 3. 通过 FrameBroker 分发给所有订阅者
@@ -165,7 +177,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 
 | 评审项 | 评审意见 | 优先级 | 状态 |
 |--------|---------|--------|------|
-| Buffer生命周期管理 | BufferPool与FrameHandle绑定关系不清晰，缺乏状态机管理和泄漏检测 | 高 | 待处理 |
+| Buffer生命周期管理 | BufferPool与FrameHandle绑定关系不清晰，缺乏状态机管理和泄漏检测 | 高 | 已完成 |
 | 背压策略配置性 | 丢帧策略硬编码，缺乏动态调整和阈值配置 | 高 | 待处理 |
 | 错误恢复机制 | 设备断开后缺乏自动重连和降级策略 | 中 | 待处理 |
 | 线程亲和性配置 | 无法配置线程CPU亲和性和大小核分离 | 中 | 待处理 |
@@ -178,36 +190,42 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ##### A. Buffer生命周期管理
 
 **[ARCH-001] Buffer所有权不明确**
+
 - **问题**: FrameHandle与Buffer的引用关系模糊，容易导致悬空指针
 - **影响**: 可能导致内存泄漏或崩溃
-- **建议**: 引入BufferGuard类，使用RAII明确所有权
-- **代码位置**: `include/camera_subsystem/core/buffer_guard.h` (待创建)
-- **见代码**: `src/camera/camera_source.cpp` - 需要添加BufferGuard集成
+- **落地方案**: 引入BufferGuard类，使用RAII明确所有权
+- **代码位置**: `include/camera_subsystem/core/buffer_guard.h`
+- **见代码**: `src/camera/camera_source.cpp`, `src/broker/frame_broker.cpp`
 
 **[ARCH-002] 缺少Buffer状态机**
+
 - **问题**: Buffer状态流转不清晰，难以追踪生命周期
-- **建议**: 实现Buffer状态枚举：Free → InUse → InFlight → Free
-- **代码位置**: `include/camera_subsystem/core/buffer_state.h` (待创建)
+- **落地方案**: 实现Buffer状态枚举：Free → InUse → InFlight → Free
+- **代码位置**: `include/camera_subsystem/core/buffer_state.h`
 
 **[ARCH-003] Buffer泄漏检测**
+
 - **问题**: 长时间运行可能存在Buffer泄漏
-- **建议**: 添加Buffer泄漏检测和告警机制
-- **代码位置**: `include/camera_subsystem/core/buffer_pool.h` - 需要添加泄漏检测
+- **落地方案**: 添加Buffer泄漏检测和告警机制
+- **代码位置**: `include/camera_subsystem/core/buffer_pool.h`
 
 ##### B. 背压策略配置性
 
 **[ARCH-004] 丢帧策略硬编码**
+
 - **问题**: DropNewest/DropOldest等策略固定，无法动态调整
 - **建议**: 引入BackpressurePolicy配置类，支持运行时策略切换
 - **代码位置**: `include/camera_subsystem/broker/backpressure_policy.h` (待创建)
 - **见代码**: `src/broker/frame_broker.cpp` - 需要集成策略配置
 
 **[ARCH-005] 缺少背压阈值配置**
+
 - **问题**: 队列大小和延迟阈值固定
 - **建议**: 添加动态阈值调整算法
 - **代码位置**: `include/camera_subsystem/broker/broker_config.h` (待创建)
 
 **[ARCH-006] 订阅者优先级静态**
+
 - **问题**: 优先级在注册时固定，无法动态调整
 - **建议**: 实现自适应优先级调整机制
 - **代码位置**: `src/broker/frame_broker.cpp` - 需要添加动态优先级调整
@@ -215,11 +233,13 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ##### C. 错误恢复机制
 
 **[ARCH-007] 缺少设备监控和自动重连**
+
 - **问题**: 设备断开后需要手动重启
 - **建议**: 引入DeviceMonitor类，实现自动重连和降级策略
 - **代码位置**: `include/camera_subsystem/camera/device_monitor.h` (待创建)
 
 **[ARCH-008] 缺少降级策略**
+
 - **问题**: 高负载时无法自动降级
 - **建议**: 实现自动降级（降低帧率/分辨率）
 - **代码位置**: `include/camera_subsystem/camera/degradation_policy.h` (待创建)
@@ -227,11 +247,13 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ##### D. 线程亲和性配置
 
 **[ARCH-009] 缺少CPU亲和性配置**
+
 - **问题**: 无法配置线程CPU亲和性
 - **建议**: 引入ThreadAffinity配置类
 - **代码位置**: `include/camera_subsystem/platform/thread_affinity.h` (待创建)
 
 **[ARCH-010] 缺少大小核分离调度**
+
 - **问题**: Worker线程无法区分大小核
 - **建议**: 实现CPU拓扑探测和大小核分离调度
 - **代码位置**: `include/camera_subsystem/platform/cpu_topology.h` (待创建)
@@ -239,11 +261,13 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ##### E. 可观测性
 
 **[ARCH-011] 缺少Metrics收集接口**
+
 - **问题**: 无法统一收集性能指标
 - **建议**: 引入MetricsCollector类，支持Prometheus/Grafana
 - **代码位置**: `include/camera_subsystem/metrics/metrics_collector.h` (待创建)
 
 **[ARCH-012] 缺少实时监控接口**
+
 - **问题**: 无法实时监控系统状态
 - **建议**: 实现SystemMonitor类，提供REST/gRPC接口
 - **代码位置**: `include/camera_subsystem/metrics/system_monitor.h` (待创建)
@@ -251,11 +275,13 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ##### F. 内存管理策略
 
 **[ARCH-013] 缺少内存预算控制**
+
 - **问题**: 内存使用无法限制
 - **建议**: 引入MemoryBudget配置类
 - **代码位置**: `include/camera_subsystem/core/memory_budget.h` (待创建)
 
 **[ARCH-014] 缺少内存压力检测**
+
 - **问题**: 内存压力无法感知
 - **建议**: 实现MemoryMonitor类，支持压力告警
 - **代码位置**: `include/camera_subsystem/core/memory_monitor.h` (待创建)
@@ -263,29 +289,31 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ##### G. 跨平台抽象
 
 **[ARCH-015] 缺少平台能力探测**
+
 - **问题**: 无法探测平台能力
 - **建议**: 引入PlatformCapabilities接口
 - **代码位置**: `include/camera_subsystem/platform/platform_capabilities.h` (待创建)
 
 **[ARCH-016] Android HAL层未实现**
+
 - **问题**: 无法适配Android平台
 - **建议**: 预留HAL3接口设计
 - **代码位置**: `include/camera_subsystem/platform/android/hal3_wrapper.h` (待创建)
 
 ---
 
-## 3.1 Buffer 生命周期与复用池
+### 3.1 Buffer 生命周期与复用池
 
 针对“统一 Buffer 生命周期与复用池”和“背压与丢帧策略”给出明确架构设计，确保在边缘设备上稳定、低延迟运行。
 
-### 3.1 Buffer 生命周期与复用池
-
 **目标**
+
 1. 全链路零拷贝，避免在热路径中分配与复制。
 2. 明确 Buffer 所有权，避免悬空指针与资源泄漏。
 3. 支持多平面格式与 DMA-BUF 的可扩展设计。
 
 **核心设计**
+
 1. `BufferPool` 统一管理 Buffer，使用预分配与复用策略。
 2. `FrameHandle` 仅持有 Buffer 的引用（或句柄），不拥有内存。
 3. Buffer 状态机：`Free -> InUse -> InFlight -> Free`。
@@ -293,6 +321,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 5. 后续升级为 **DMA-BUF 零拷贝**，避免拷贝成本。
 
 **生命周期流程**
+
 1. CameraSource 从 `BufferPool` 申请可用 Buffer。
 2. V4L2 `DQBUF` 后拷贝到池中，并封装为 `FrameHandle` 分发。
 3. FrameBroker 仅复制 `FrameHandle` 的元数据与引用，不复制数据。
@@ -300,13 +329,16 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 5. CameraSource 将驱动 Buffer `QBUF` 回驱动，进入下一轮采集。
 
 **线程安全与性能**
+
 1. `BufferPool` 内部使用 MPMC 队列或互斥锁保护。
 2. Buffer 归还采用 RAII（智能指针 + 自定义 deleter）。
 3. 统计指标：池深度、可用数量、复用次数、丢帧数。
 
 **扩展规划**
+
 1. 多平面 Buffer：记录 plane offsets/stride/size。
 2. DMA-BUF：记录 fd 与 plane fd，支持零拷贝传给 NPU/编码器。
+3. 
 
 ### 3.2 背压与丢帧策略
 
@@ -316,6 +348,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 3. 为不同订阅者提供差异化 QoS。
 
 **策略分层**
+
 1. **采集层（CameraSource）**
    - 当 `BufferPool` 耗尽时优先丢弃最新帧，避免阻塞采集线程。
 2. **分发层（FrameBroker）**
@@ -325,20 +358,24 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
    - 对低优先级订阅者可以“只保留最新帧”。
 
 **当前落地**
+
 1. 采集层池耗尽丢帧
 2. Broker 队列上限丢帧
 
 **丢帧策略（可配置）**
+
 1. `DropNewest`：实时性优先，保持较低延迟。
 2. `DropOldest`：吞吐优先，尽量保留最新帧。
 3. `DropByPriority`：低优先级先丢，高优先级保留。
 
 **背压触发条件**
+
 1. 队列长度超过 `max_queue_size`。
 2. 端到端延迟超过 `max_latency_ms`。
 3. 连续处理耗时超出目标帧间隔。
 
 **可观测性**
+
 1. 丢帧数、队列深度、FPS、平均/95P 延迟。
 2. 按订阅者统计（便于定位慢消费者）。
 
@@ -481,6 +518,7 @@ sudo ./bin/camera_source_stress_test 20 /dev/video0
 - 指标与观测性（FPS、延迟、队列深度）
 
 **设计要点:**
+
 - POD 结构,可在 C/C++ 边界安全传递
 - 支持多平面格式 (如 NV12)
 - 包含 Stride 信息,处理对齐和 Padding
@@ -603,6 +641,7 @@ struct CameraConfig
 6. 所有订阅者处理完毕后,Buffer 引用计数归零,自动归还
 
 **优先级调度:**
+
 - 订阅者可指定优先级 (0-255)
 - 任务队列按优先级排序
 - 高优先级任务优先处理
@@ -621,12 +660,14 @@ struct CameraConfig
 ### 5.1 线程角色划分
 
 **Capture Thread (CameraSource 内部):**
+
 - **职责:** 阻塞等待 V4L2 设备事件,执行 DQBUF 获取帧数据,封装 FrameHandle,投递任务到 FrameBroker
 - **优先级:** 高优先级 (SCHED_FIFO 或 nice -20)
 - **数量:** 每个 CameraSource 一个线程
 - **CPU 亲和性:** 绑定到独立 CPU 核心 (可选)
 
 **Worker Threads (FrameBroker 持有):**
+
 - **职责:** 从任务队列获取帧,查找订阅者列表,执行订阅者 OnFrame 回调
 - **优先级:** 中等优先级 (默认)
 - **数量:** 可配置,建议等于 CPU 核心数或核心数-1
@@ -636,6 +677,7 @@ struct CameraConfig
 ### 5.2 同步与锁策略
 
 **任务队列:**
+
 - 实现方式: std::mutex + std::condition_variable
 - 无锁优化: 考虑使用 boost::lockfree::queue 或基于 std::atomic 的环形缓冲区
 - 容量限制: 防止内存溢出,建议最大容量 1000 个任务
@@ -792,12 +834,14 @@ camera_manager->SetSuggestedCameraCount(limits.suggested_camera_count_);
 为避免死锁和 UAF (Use-After-Free),必须严格遵守以下顺序:
 
 1. **停止生产**
+
    ```cpp
    camera->StopStreaming();
    // 此时不再有新帧产生
    ```
 
 2. **停止分发**
+
    ```cpp
    broker->Stop();
    // 设置 is_running_ = false
@@ -805,6 +849,7 @@ camera_manager->SetSuggestedCameraCount(limits.suggested_camera_count_);
    ```
 
 3. **等待任务处理完成**
+
    ```cpp
    broker->Join();
    // 等待所有 Worker 线程安全退出
@@ -812,11 +857,13 @@ camera_manager->SetSuggestedCameraCount(limits.suggested_camera_count_);
    ```
 
 4. **注销订阅** (可选,依赖弱引用可自动处理)
+
    ```cpp
    broker->Unsubscribe(ai_subscriber);
    ```
 
 5. **销毁对象**
+
    ```cpp
    ai_subscriber.reset();
    camera.reset();
@@ -824,6 +871,7 @@ camera_manager->SetSuggestedCameraCount(limits.suggested_camera_count_);
    ```
 
 6. **关闭日志系统**
+
    ```cpp
    PlatformLogger::Shutdown();
    ```
@@ -831,6 +879,7 @@ camera_manager->SetSuggestedCameraCount(limits.suggested_camera_count_);
 ### 6.3 资源释放策略
 
 **Buffer 归还机制:**
+
 - 采用引用计数 std::shared_ptr 管理 Buffer 生命周期
 - FrameHandle 内部包含一个 shared_ptr<BufferGuard>
 - BufferGuard 析构函数自动触发 VIDIOC_QBUF
@@ -838,12 +887,14 @@ camera_manager->SetSuggestedCameraCount(limits.suggested_camera_count_);
 - Buffer 自动归还给驱动
 
 **RAII 资源管理:**
+
 - 所有资源封装在 RAII 类中
 - 构造函数获取资源,析构函数释放资源
 - 使用智能指针管理对象生命周期
 - 避免手动 new/delete
 
 **异常安全:**
+
 - 使用 try-catch 捕获异常
 - 异常发生时自动清理资源
 - 不抛出异常的接口标记为 noexcept
@@ -852,6 +903,7 @@ camera_manager->SetSuggestedCameraCount(limits.suggested_camera_count_);
 ### 6.4 错误恢复
 
 **设备断开恢复:**
+
 - 检测到设备错误后自动停止采集
 - 关闭设备 fd
 - 等待设备重新连接 (轮询或 inotify 监听)
@@ -859,6 +911,7 @@ camera_manager->SetSuggestedCameraCount(limits.suggested_camera_count_);
 - 恢复采集
 
 **采集错误恢复:**
+
 - DQBUF 失败: 记录日志,继续尝试
 - Buffer 耗尽: 等待 Buffer 归还
 - Epoll 错误: 重新创建 Epoll 实例
@@ -927,23 +980,27 @@ const char* GetErrorString(ErrorCode code);
 使用 spdlog 封装,支持按模块分级。
 
 **Logger 命名:**
+
 - camera_source: CameraSource 模块
 - frame_broker: FrameBroker 模块
 - platform: PlatformLayer 模块
 - main: 主程序
 
 **格式:**
+
 ```
 [Timestamp] [Thread] [Level] [Module] Message
 ```
 
 **示例:**
+
 ```
 [2026-01-27 12:34:56.789] [12345] [INFO]  [camera_source] Camera 0 initialized
 [2026-01-27 12:34:56.790] [12346] [ERROR] [frame_broker] Failed to dispatch frame: invalid subscriber
 ```
 
 **日志级别:**
+
 - TRACE: 最详细的调试信息
 - DEBUG: 调试信息
 - INFO: 一般信息
@@ -952,6 +1009,7 @@ const char* GetErrorString(ErrorCode code);
 - CRITICAL: 严重错误,可能导致系统崩溃
 
 **日志策略:**
+
 - **热路径 (OnFrame 回调内):**
   - 默认不打印 INFO 日志
   - 仅打印 ERROR 日志
@@ -965,6 +1023,7 @@ const char* GetErrorString(ErrorCode code);
   - 方便排查问题
 
 **日志文件:**
+
 - 按日期滚动 (每天一个文件)
 - 单个文件大小限制 (如 100MB)
 - 保留最近 N 天的日志 (如 7 天)
@@ -980,11 +1039,13 @@ const char* GetErrorString(ErrorCode code);
 ### 8.1 格式与排版
 
 **缩进:**
+
 - 统一使用 4 个空格
 - 禁止使用 Tab 字符
 - 编辑器配置: expandtab, tabstop=4, shiftwidth=4
 
 **大括号:**
+
 - 左大括号 { 和右大括号 } 独立占一行
 
 ```cpp
@@ -1005,16 +1066,19 @@ public:
 ```
 
 **行宽:**
+
 - 建议不超过 100 字符
 - 必要时可适当放宽,但不超过 120 字符
 - 长表达式适当换行
 
 **空行:**
+
 - 函数之间空 2 行
 - 逻辑块之间空 1 行
 - 类定义结束后空 1 行
 
 **空格:**
+
 - 操作符前后加空格 (a = b + c)
 - 逗号后加空格 (function(a, b, c))
 - 括号内不加空格 (if (condition))
@@ -1122,6 +1186,7 @@ const int kMaxWorkerThreads = 16;
 ### 8.4 注释规范
 
 **文件头注释:**
+
 ```cpp
 /**
  * @file camera_source.h
@@ -1132,6 +1197,7 @@ const int kMaxWorkerThreads = 16;
 ```
 
 **类注释:**
+
 ```cpp
 /**
  * @class CameraSource
@@ -1143,6 +1209,7 @@ const int kMaxWorkerThreads = 16;
 ```
 
 **函数注释:**
+
 ```cpp
 /**
  * @brief 初始化 Camera 设备
@@ -1168,21 +1235,25 @@ ErrorCode Initialize(const CameraConfig& config);
 ### 9.1 性能指标
 
 **吞吐量:**
+
 - 支持 4K@60fps 稳定采集
 - 多路并发采集能力随平台扩展 (示例: 12/16 路 1080p@30fps,以平台实测与资源预算为准)
 - 多订阅者同时消费能力由资源预算与 QoS 策略决定 (关键路径优先,非关键路径可退化)
 
 **延迟:**
+
 - 端到端延迟 < 10ms (4K@30fps)
 - 采集延迟 < 2ms
 - 分发延迟 < 3ms
 
 **资源占用:**
+
 - 单路 4K@30fps 内存占用 < 100MB
 - CPU 占用率 < 30% (单核)
 - 无内存泄漏 (长时间运行测试)
 
 **稳定性:**
+
 - 7x24 小时稳定运行
 - MTBF > 10000 小时
 - 支持设备热插拔
@@ -1190,23 +1261,27 @@ ErrorCode Initialize(const CameraConfig& config);
 ### 9.2 测试要求
 
 **单元测试:**
+
 - 每个模块必须有单元测试
 - 测试覆盖率 > 80%
 - 使用 Google Test 框架
 
 **集成测试:**
+
 - 端到端流程测试
 - 多 Camera 并发测试
 - 多订阅者测试
 - 异常场景测试
 
 **性能测试:**
+
 - 压力测试 (高帧率、长时间运行)
 - 内存泄漏检测 (Valgrind/ASan)
 - CPU 性能分析 (perf)
 - 延迟测试
 
 **兼容性测试:**
+
 - 不同 Camera 设备测试
 - 不同分辨率和格式测试
 - Linux 不同版本测试
@@ -1218,6 +1293,7 @@ ErrorCode Initialize(const CameraConfig& config);
 ### 10.1 详细设计文档
 
 产出以下详细设计文档:
+
 - CameraSource API 定义文档
 - FrameBroker API 定义文档
 - PlatformLayer API 定义文档
@@ -1227,6 +1303,7 @@ ErrorCode Initialize(const CameraConfig& config);
 ### 10.2 Buffer 管理机制
 
 设计具体的 BufferPool 类:
+
 - 处理 DMA-BUF 的导入/导出
 - 实现引用计数逻辑
 - 支持 Buffer 复用
@@ -1235,6 +1312,7 @@ ErrorCode Initialize(const CameraConfig& config);
 ### 10.3 性能测试
 
 设计压力测试用例:
+
 - 4K@60fps 长时间运行测试 (24 小时)
 - 多路并发测试 (按平台能力阶梯压测,如 12/16+ 路 1080p@30fps)
 - 多订阅者测试 (按资源预算压测,验证 QoS 与退化策略)
@@ -1243,6 +1321,7 @@ ErrorCode Initialize(const CameraConfig& config);
 ### 10.4 Android HAL 适配
 
 实现 PlatformLayer 的 Android 版本:
+
 - 对接 Camera HAL3
 - 适配 Android Binder IPC
 - 支持 Android Log 系统
@@ -1251,6 +1330,7 @@ ErrorCode Initialize(const CameraConfig& config);
 ### 10.5 监控与诊断
 
 实现监控和诊断功能:
+
 - 性能指标采集
 - 实时监控接口
 - 诊断日志
@@ -1259,6 +1339,7 @@ ErrorCode Initialize(const CameraConfig& config);
 ### 10.6 文档完善
 
 完善以下文档:
+
 - 用户手册
 - 开发者指南
 - API 参考文档
@@ -1287,20 +1368,24 @@ ErrorCode Initialize(const CameraConfig& config);
 ### 11.3 版本历史
 
 **v0.3 (2026-01-27):**
+
 - 完善架构设计,补充工业级规范
 - 添加性能指标和测试要求
 - 完善错误处理和日志规范
 - 添加生命周期管理详细说明
 
 **v0.2 (2026-01-26):**
+
 - 初步架构设计
 - 核心组件定义
 - 基本数据结构设计
 
 **v0.1 (2026-01-25):**
+
 - 文档创建
 - 需求分析
 
 ---
 
 **文档结束**
+
