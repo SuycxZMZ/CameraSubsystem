@@ -3,6 +3,37 @@
  * @brief CameraSource 压力测试程序
  * @author CameraSubsystem Team
  * @date 2026-01-31
+ * 
+ * @usage
+ * 用法: ./camera_source_stress_test [duration_seconds] [device_path] [output_dir]
+ * 
+ * 参数:
+ *   duration_seconds: 测试持续时间（秒），默认 20 秒
+ *   device_path: Camera 设备路径，默认 /dev/video0
+ *   output_dir: 图片输出目录，默认 ./stress_frames
+ * 
+ * 示例:
+ *   # 默认测试（20 秒，/dev/video0）
+ *   sudo ./camera_source_stress_test
+ * 
+ *   # 自定义测试（30 秒，/dev/video1）
+ *   sudo ./camera_source_stress_test 30 /dev/video1
+ *
+ *   # 自定义输出目录
+ *   sudo ./camera_source_stress_test 20 /dev/video0 ./stress_frames
+ * 
+ * 输出:
+ *   - 每秒输出一行统计日志：sec | frames | fps | dispatched | dropped | queue | image
+ *   - 每秒保存一张图片到 stress_frames/ 目录（最多保留 10 张，循环覆盖）
+ *   - 图片格式根据 Camera 输出格式自动选择：
+ *     * MJPEG → .jpg
+ *     * RGB888/RGBA8888 → .ppm
+ *     * YUYV/NV12/H264/H265 → .pgm（灰度或原始 Y 平面）
+ * 
+ * 注意:
+ *   - 需要 root 权限或 video 组权限才能访问 Camera 设备
+ *   - 程序会打印图片输出目录绝对路径和保存失败原因
+ *   - 使用 v4l2-ctl --list-formats-ext 查看设备支持的格式
  */
 
 #include "camera_subsystem/broker/frame_broker.h"
@@ -11,6 +42,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
@@ -38,6 +70,162 @@ struct FrameSnapshot
 
 std::mutex g_frame_mutex_;
 FrameSnapshot g_latest_frame_;
+
+bool IsDirectoryWritable(const std::filesystem::path& dir_path, std::string* error_message)
+{
+    if (!error_message)
+    {
+        return false;
+    }
+
+    *error_message = std::string();
+
+    if (!std::filesystem::exists(dir_path))
+    {
+        *error_message = "directory does not exist";
+        return false;
+    }
+
+    if (!std::filesystem::is_directory(dir_path))
+    {
+        *error_message = "path is not a directory";
+        return false;
+    }
+
+    errno = 0;
+    if (access(dir_path.c_str(), W_OK) != 0)
+    {
+        *error_message = std::string("no write permission: ") + std::strerror(errno);
+        return false;
+    }
+
+    return true;
+}
+
+bool SaveSnapshotToFile(const FrameSnapshot& snapshot,
+                        const std::filesystem::path& output_dir,
+                        uint64_t slot,
+                        std::string* saved_path,
+                        std::string* error_message)
+{
+    if (!saved_path || !error_message)
+    {
+        return false;
+    }
+
+    *saved_path = std::string();
+    *error_message = std::string();
+
+    if (snapshot.data.empty())
+    {
+        *error_message = "snapshot data is empty";
+        return false;
+    }
+
+    if (snapshot.width == 0 || snapshot.height == 0)
+    {
+        *error_message = "invalid frame size";
+        return false;
+    }
+
+    std::filesystem::path file_path;
+    std::ofstream out;
+
+    if (snapshot.format == core::PixelFormat::kMJPEG)
+    {
+        file_path = output_dir / ("frame_" + std::to_string(slot) + ".jpg");
+        errno = 0;
+        out.open(file_path, std::ios::binary);
+        if (!out.is_open())
+        {
+            *error_message = std::string("failed to open file: ") + std::strerror(errno);
+            return false;
+        }
+        out.write(reinterpret_cast<const char*>(snapshot.data.data()),
+                  static_cast<std::streamsize>(snapshot.data.size()));
+    }
+    else if (snapshot.format == core::PixelFormat::kRGB888 ||
+             snapshot.format == core::PixelFormat::kRGBA8888)
+    {
+        file_path = output_dir / ("frame_" + std::to_string(slot) + ".ppm");
+        errno = 0;
+        out.open(file_path, std::ios::binary);
+        if (!out.is_open())
+        {
+            *error_message = std::string("failed to open file: ") + std::strerror(errno);
+            return false;
+        }
+        out << "P6\n" << snapshot.width << " " << snapshot.height << "\n255\n";
+        if (snapshot.format == core::PixelFormat::kRGB888)
+        {
+            out.write(reinterpret_cast<const char*>(snapshot.data.data()),
+                      static_cast<std::streamsize>(snapshot.data.size()));
+        }
+        else
+        {
+            for (size_t i = 0; i + 3 < snapshot.data.size(); i += 4)
+            {
+                out.write(reinterpret_cast<const char*>(&snapshot.data[i]), 3);
+            }
+        }
+    }
+    else if (snapshot.format == core::PixelFormat::kYUYV)
+    {
+        file_path = output_dir / ("frame_" + std::to_string(slot) + ".pgm");
+        errno = 0;
+        out.open(file_path, std::ios::binary);
+        if (!out.is_open())
+        {
+            *error_message = std::string("failed to open file: ") + std::strerror(errno);
+            return false;
+        }
+        out << "P5\n" << snapshot.width << " " << snapshot.height << "\n255\n";
+
+        const size_t luma_size = static_cast<size_t>(snapshot.width) * snapshot.height;
+        std::vector<uint8_t> luma;
+        luma.reserve(luma_size);
+        for (size_t i = 0; i < luma_size; ++i)
+        {
+            const size_t src = i * 2;
+            if (src < snapshot.data.size())
+            {
+                luma.push_back(snapshot.data[src]);
+            }
+            else
+            {
+                luma.push_back(0);
+            }
+        }
+
+        out.write(reinterpret_cast<const char*>(luma.data()),
+                  static_cast<std::streamsize>(luma.size()));
+    }
+    else
+    {
+        file_path = output_dir / ("frame_" + std::to_string(slot) + ".pgm");
+        errno = 0;
+        out.open(file_path, std::ios::binary);
+        if (!out.is_open())
+        {
+            *error_message = std::string("failed to open file: ") + std::strerror(errno);
+            return false;
+        }
+        out << "P5\n" << snapshot.width << " " << snapshot.height << "\n255\n";
+        const size_t luma_size = static_cast<size_t>(snapshot.width) * snapshot.height;
+        const size_t write_size = std::min(luma_size, snapshot.data.size());
+        out.write(reinterpret_cast<const char*>(snapshot.data.data()),
+                  static_cast<std::streamsize>(write_size));
+    }
+
+    if (!out.good())
+    {
+        *error_message = std::string("write failed: ") + std::strerror(errno);
+        return false;
+    }
+
+    *saved_path = file_path.string();
+    return true;
+}
 
 void SignalHandler(int signal)
 {
@@ -103,6 +291,12 @@ int main(int argc, char* argv[])
         device_path = argv[2];
     }
 
+    std::filesystem::path output_dir = "stress_frames";
+    if (argc > 3)
+    {
+        output_dir = argv[3];
+    }
+
     platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_stress",
                                   "CameraSource stress test start, duration=%ds, device=%s",
                                   duration_seconds, device_path.c_str());
@@ -164,14 +358,66 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    const std::string output_dir = "stress_frames";
     std::error_code ec;
-    std::filesystem::create_directories(output_dir, ec);
+    std::filesystem::path output_dir_abs = std::filesystem::absolute(output_dir);
+    std::filesystem::create_directories(output_dir_abs, ec);
+    if (ec)
+    {
+        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_stress",
+                                      "Failed to create output dir: %s, error=%s",
+                                      output_dir_abs.c_str(),
+                                      ec.message().c_str());
+        camera_source.Stop();
+        broker.Stop();
+        platform::PlatformLogger::Shutdown();
+        return 1;
+    }
+
+    std::string writable_error;
+    if (!IsDirectoryWritable(output_dir_abs, &writable_error))
+    {
+        std::filesystem::path fallback_dir =
+            std::filesystem::temp_directory_path() / "camera_subsystem_stress_frames";
+        std::error_code fallback_ec;
+        std::filesystem::create_directories(fallback_dir, fallback_ec);
+
+        std::string fallback_error;
+        if (!fallback_ec && IsDirectoryWritable(fallback_dir, &fallback_error))
+        {
+            platform::PlatformLogger::Log(core::LogLevel::kWarning, "camera_stress",
+                                          "Output dir not writable: %s, reason=%s. "
+                                          "Fallback to: %s",
+                                          output_dir_abs.c_str(),
+                                          writable_error.c_str(),
+                                          fallback_dir.c_str());
+            output_dir_abs = fallback_dir;
+        }
+        else
+        {
+            platform::PlatformLogger::Log(core::LogLevel::kError, "camera_stress",
+                                          "Output dir not writable: %s, reason=%s. "
+                                          "Fallback dir unavailable: %s, reason=%s",
+                                          output_dir_abs.c_str(),
+                                          writable_error.c_str(),
+                                          fallback_dir.c_str(),
+                                          fallback_error.c_str());
+            camera_source.Stop();
+            broker.Stop();
+            platform::PlatformLogger::Shutdown();
+            return 1;
+        }
+    }
+
+    platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_stress",
+                                  "Image output directory: %s",
+                                  output_dir_abs.c_str());
 
     auto start_time = std::chrono::steady_clock::now();
     auto last_report = start_time;
     uint64_t last_frame_count = 0;
     uint64_t image_index = 0;
+    uint64_t saved_image_count = 0;
+    uint64_t save_fail_count = 0;
 
     platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_stress",
                                   "sec | frames | fps | dispatched | dropped | queue | image");
@@ -216,69 +462,26 @@ int main(int argc, char* argv[])
             if (!snapshot.data.empty())
             {
                 const uint64_t slot = image_index % 10;
-                std::string file_path;
-
-                if (snapshot.format == core::PixelFormat::kMJPEG)
+                std::string saved_path;
+                std::string error_message;
+                if (SaveSnapshotToFile(snapshot,
+                                       output_dir_abs,
+                                       slot,
+                                       &saved_path,
+                                       &error_message))
                 {
-                    file_path = output_dir + "/frame_" + std::to_string(slot) + ".jpg";
-                    std::ofstream out(file_path, std::ios::binary);
-                    out.write(reinterpret_cast<const char*>(snapshot.data.data()),
-                              static_cast<std::streamsize>(snapshot.data.size()));
-                }
-                else if (snapshot.format == core::PixelFormat::kRGB888 ||
-                         snapshot.format == core::PixelFormat::kRGBA8888)
-                {
-                    file_path = output_dir + "/frame_" + std::to_string(slot) + ".ppm";
-                    std::ofstream out(file_path, std::ios::binary);
-                    out << "P6\n" << snapshot.width << " " << snapshot.height << "\n255\n";
-                    if (snapshot.format == core::PixelFormat::kRGB888)
-                    {
-                        out.write(reinterpret_cast<const char*>(snapshot.data.data()),
-                                  static_cast<std::streamsize>(snapshot.data.size()));
-                    }
-                    else
-                    {
-                        for (size_t i = 0; i + 3 < snapshot.data.size(); i += 4)
-                        {
-                            out.write(reinterpret_cast<const char*>(&snapshot.data[i]), 3);
-                        }
-                    }
-                }
-                else if (snapshot.format == core::PixelFormat::kYUYV)
-                {
-                    file_path = output_dir + "/frame_" + std::to_string(slot) + ".pgm";
-                    std::ofstream out(file_path, std::ios::binary);
-                    out << "P5\n" << snapshot.width << " " << snapshot.height << "\n255\n";
-                    const size_t luma_size =
-                        static_cast<size_t>(snapshot.width) * snapshot.height;
-                    std::vector<uint8_t> luma;
-                    luma.reserve(luma_size);
-                    for (size_t i = 0; i < luma_size; ++i)
-                    {
-                        const size_t src = i * 2;
-                        if (src < snapshot.data.size())
-                        {
-                            luma.push_back(snapshot.data[src]);
-                        }
-                        else
-                        {
-                            luma.push_back(0);
-                        }
-                    }
-                    out.write(reinterpret_cast<const char*>(luma.data()),
-                              static_cast<std::streamsize>(luma.size()));
+                    saved_image_count++;
                 }
                 else
                 {
-                    // NV12/H264/H265 统一保存为灰度或原始数据
-                    file_path = output_dir + "/frame_" + std::to_string(slot) + ".pgm";
-                    std::ofstream out(file_path, std::ios::binary);
-                    out << "P5\n" << snapshot.width << " " << snapshot.height << "\n255\n";
-                    const size_t luma_size =
-                        static_cast<size_t>(snapshot.width) * snapshot.height;
-                    const size_t write_size = std::min(luma_size, snapshot.data.size());
-                    out.write(reinterpret_cast<const char*>(snapshot.data.data()),
-                              static_cast<std::streamsize>(write_size));
+                    save_fail_count++;
+                    platform::PlatformLogger::Log(core::LogLevel::kWarning, "camera_stress",
+                                                  "Failed to save frame slot=%lu, format=%s, "
+                                                  "reason=%s, output_dir=%s",
+                                                  slot,
+                                                  core::PixelFormatToString(snapshot.format),
+                                                  error_message.c_str(),
+                                                  output_dir_abs.c_str());
                 }
             }
             else
@@ -303,9 +506,12 @@ int main(int argc, char* argv[])
     }
 
     platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_stress",
-                                  "Summary: frames=%lu received=%lu",
+                                  "Summary: frames=%lu received=%lu saved=%lu save_failed=%lu dir=%s",
                                   camera_source.GetFrameCount(),
-                                  total_received);
+                                  total_received,
+                                  saved_image_count,
+                                  save_fail_count,
+                                  output_dir_abs.c_str());
 
     platform::PlatformLogger::Shutdown();
     return 0;
