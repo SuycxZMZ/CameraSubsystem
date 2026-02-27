@@ -97,9 +97,15 @@ CameraSubsystem/
 - ✅ CameraConfig 单元测试（11个测试用例）
 - ✅ 类型转换测试
 - ✅ BufferPool 单元测试
+- ✅ BufferGuard 单元测试（新增）
+- ✅ BufferState 状态机测试（新增）
+- ✅ FrameHandleEx 单元测试（新增）
 
 **新增组件:**
 - ✅ `buffer_pool.h/cpp` - BufferPool 统一生命周期与复用池
+- ✅ `buffer_guard.h/cpp` - BufferGuard RAII 所有权管理
+- ✅ `buffer_state.h` - Buffer 状态机定义
+- ✅ `frame_handle_ex.h/cpp` - FrameHandleEx 扩展结构（绑定 Buffer 生命周期）
 
 ### 2. 平台抽象层 (Platform) ✅
 
@@ -255,13 +261,16 @@ CameraSubsystem/
 
 ## 架构设计细化（Buffer 生命周期与背压策略）
 
-**Buffer 生命周期与复用池**
+**Buffer 生命周期与复用池** ✅ 已完善
 1. `BufferPool` 统一管理预分配 Buffer，避免热路径频繁分配。
 2. `FrameHandle` 仅持有引用，使用 RAII 归还 Buffer。
-3. 生命周期状态：`Free -> InUse -> InFlight -> Free`。
-4. 归还后由 CameraSource 重新 `QBUF`，保证采集连续性。
-5. 当前实现为 **拷贝模式**（V4L2 MMAP -> BufferPool -> Broker/Subscriber）。
-6. 后续升级为 **DMA-BUF 零拷贝**，避免拷贝成本。
+3. `FrameHandleEx` 扩展结构持有 `shared_ptr<BufferGuard>`，绑定 Buffer 生命周期。
+4. 生命周期状态：`Free -> InUse -> InFlight -> Free`（新增 `Error` 状态）。
+5. 状态机支持回退：`InFlight -> InUse`（取消分发时）。
+6. 析构安全：BufferPool 析构时等待所有 BufferGuard 归还（最多 5 秒）。
+7. 归还后由 CameraSource 重新 `QBUF`，保证采集连续性。
+8. 当前实现为 **拷贝模式**（V4L2 MMAP -> BufferPool -> Broker/Subscriber）。
+9. 后续升级为 **DMA-BUF 零拷贝**，避免拷贝成本。
 
 **背压与丢帧策略**
 1. 采集层：池耗尽时优先丢弃最新帧，避免阻塞采集线程。
@@ -280,6 +289,9 @@ CameraSubsystem/
 
 ## 技术债务
 
+- [x] 修复 FrameHandle 悬空指针风险（P0）✅ 2026-02-27
+- [x] 修复 BufferPool 析构竞态条件（P1）✅ 2026-02-27
+- [x] 完善状态机转换机制（P1）✅ 2026-02-27
 - [ ] 添加更多的错误处理和边界检查
 - [ ] 实现内存池管理
 - [ ] 添加性能分析工具

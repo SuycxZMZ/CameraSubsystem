@@ -113,3 +113,20 @@ target_link_libraries(test_buffer_pool
 )
 
 add_test(NAME test_buffer_pool COMMAND test_buffer_pool)
+
+# Buffer 生命周期管理单元测试（不依赖 GTest）
+add_executable(test_buffer_lifecycle
+    unit/test_buffer_lifecycle.cpp
+)
+
+set_target_properties(test_buffer_lifecycle PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin"
+)
+
+target_link_libraries(test_buffer_lifecycle
+    PRIVATE
+        camera_subsystem_core
+        pthread
+)
+
+add_test(NAME test_buffer_lifecycle COMMAND test_buffer_lifecycle)

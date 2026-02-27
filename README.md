@@ -189,25 +189,50 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 
 ##### A. Buffer生命周期管理
 
-**[ARCH-001] Buffer所有权不明确**
+**[ARCH-001] Buffer所有权不明确** ✅ 已修复
 
 - **问题**: FrameHandle与Buffer的引用关系模糊，容易导致悬空指针
 - **影响**: 可能导致内存泄漏或崩溃
-- **落地方案**: 引入BufferGuard类，使用RAII明确所有权
-- **代码位置**: `include/camera_subsystem/core/buffer_guard.h`
+- **落地方案**: 
+  1. 引入BufferGuard类，使用RAII明确所有权
+  2. 新增FrameHandleEx扩展结构，持有shared_ptr<BufferGuard>绑定生命周期
+  3. 保留FrameHandle POD结构用于跨语言边界
+- **代码位置**: 
+  - `include/camera_subsystem/core/buffer_guard.h`
+  - `include/camera_subsystem/core/frame_handle_ex.h` (新增)
 - **见代码**: `src/camera/camera_source.cpp`, `src/broker/frame_broker.cpp`
+- **修复日期**: 2026-02-27
 
-**[ARCH-002] 缺少Buffer状态机**
+**[ARCH-002] 缺少Buffer状态机** ✅ 已修复
 
 - **问题**: Buffer状态流转不清晰，难以追踪生命周期
-- **落地方案**: 实现Buffer状态枚举：Free → InUse → InFlight → Free
+- **落地方案**: 
+  1. 实现Buffer状态枚举：Free → InUse → InFlight → Free → Error
+  2. 增加状态回退机制：InFlight → InUse
+  3. 增加状态转换验证
 - **代码位置**: `include/camera_subsystem/core/buffer_state.h`
+- **修复日期**: 2026-02-27
 
-**[ARCH-003] Buffer泄漏检测**
+**[ARCH-003] Buffer泄漏检测** ✅ 已修复
 
 - **问题**: 长时间运行可能存在Buffer泄漏
-- **落地方案**: 添加Buffer泄漏检测和告警机制
+- **落地方案**: 
+  1. 添加Buffer泄漏检测和告警机制
+  2. 增加活跃BufferGuard计数追踪
+  3. 析构时等待所有Buffer归还（带超时保护）
 - **代码位置**: `include/camera_subsystem/core/buffer_pool.h`
+- **修复日期**: 2026-02-27
+
+**[ARCH-017] BufferPool析构竞态条件** ✅ 已修复
+
+- **问题**: BufferPool析构时可能还有BufferGuard持有Buffer，导致崩溃
+- **影响**: 可能导致崩溃或泄漏告警误报
+- **落地方案**: 
+  1. 增加active_guard_count_追踪活跃BufferGuard数量
+  2. 析构时等待所有BufferGuard归还（最多5秒）
+  3. 超时后打印告警并强制清理
+- **代码位置**: `include/camera_subsystem/core/buffer_pool.h`
+- **修复日期**: 2026-02-27
 
 ##### B. 背压策略配置性
 

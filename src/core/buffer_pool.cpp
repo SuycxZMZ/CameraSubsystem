@@ -9,7 +9,9 @@
 #include "camera_subsystem/core/buffer_guard.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <thread>
 
 namespace camera_subsystem {
 namespace core {
@@ -22,6 +24,18 @@ BufferPool::BufferPool()
 
 BufferPool::~BufferPool()
 {
+    // ARCH-017: 等待所有 BufferGuard 归还（最多 5 秒）
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (active_guard_count_.load() > 0)
+    {
+        if (std::chrono::steady_clock::now() > deadline)
+        {
+            std::fprintf(stderr, "BufferPool destructor timeout: %u buffers still in use\n",
+                         active_guard_count_.load());
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     Clear();
 }
 
@@ -78,6 +92,7 @@ std::shared_ptr<BufferGuard> BufferPool::Acquire()
     stats_.max_in_use = std::max(stats_.max_in_use, stats_.in_use);
 
     buffers_[id].state = BufferState::kInUse;
+    active_guard_count_.fetch_add(1);  // ARCH-017: 增加活跃计数
 
     return std::shared_ptr<BufferGuard>(new BufferGuard(this, id, &buffers_[id].block));
 }
@@ -171,6 +186,12 @@ void BufferPool::ReleaseInternal(uint32_t buffer_id)
     free_ids_.push(buffer_id);
     stats_.release_count++;
     stats_.available = free_ids_.size();
+    
+    // ARCH-017: 减少活跃计数
+    if (active_guard_count_.load() > 0)
+    {
+        active_guard_count_.fetch_sub(1);
+    }
 }
 
 void BufferPool::MarkInFlight(uint32_t buffer_id)
@@ -192,6 +213,56 @@ void BufferPool::MarkInFlight(uint32_t buffer_id)
         stats_.in_flight++;
         stats_.max_in_flight = std::max(stats_.max_in_flight, stats_.in_flight);
     }
+}
+
+void BufferPool::CancelInFlight(uint32_t buffer_id)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!initialized_ || buffer_id >= buffers_.size())
+    {
+        return;
+    }
+
+    if (buffers_[buffer_id].state == BufferState::kInFlight)
+    {
+        buffers_[buffer_id].state = BufferState::kInUse;
+        if (stats_.in_flight > 0)
+        {
+            stats_.in_flight--;
+        }
+        stats_.in_use++;
+    }
+}
+
+void BufferPool::MarkError(uint32_t buffer_id)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!initialized_ || buffer_id >= buffers_.size())
+    {
+        return;
+    }
+
+    buffers_[buffer_id].state = BufferState::kError;
+}
+
+bool BufferPool::TransitionState(uint32_t buffer_id, BufferState from, BufferState to)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!initialized_ || buffer_id >= buffers_.size())
+    {
+        return false;
+    }
+
+    if (buffers_[buffer_id].state != from)
+    {
+        return false;
+    }
+
+    buffers_[buffer_id].state = to;
+    return true;
 }
 
 } // namespace core

@@ -94,6 +94,9 @@ private:
     friend class BufferGuard;
     void ReleaseInternal(uint32_t buffer_id);
     void MarkInFlight(uint32_t buffer_id);
+    void CancelInFlight(uint32_t buffer_id);  // 新增：取消 InFlight 状态
+    void MarkError(uint32_t buffer_id);       // 新增：标记错误状态
+    bool TransitionState(uint32_t buffer_id, BufferState from, BufferState to);  // 新增：状态转换验证
     std::vector<uint32_t> CollectLeaksLocked() const;
 
     struct BufferEntry
@@ -110,6 +113,7 @@ private:
     bool initialized_;
 
     Stats stats_;
+    std::atomic<uint32_t> active_guard_count_{0};  // 新增：活跃的 BufferGuard 数量
 };
 
 } // namespace core

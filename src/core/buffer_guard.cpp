@@ -88,6 +88,22 @@ void BufferGuard::MarkInFlight()
     }
 }
 
+void BufferGuard::CancelInFlight()
+{
+    if (pool_ && !released_)
+    {
+        pool_->CancelInFlight(id_);
+    }
+}
+
+void BufferGuard::MarkError()
+{
+    if (pool_ && !released_)
+    {
+        pool_->MarkError(id_);
+    }
+}
+
 void BufferGuard::Release()
 {
     if (!released_ && pool_)

@@ -44,6 +44,18 @@ public:
      */
     void MarkInFlight();
 
+    /**
+     * @brief 取消 InFlight 状态，回退到 InUse（ARCH-002 扩展）
+     * 
+     * 用于分发失败时回退状态
+     */
+    void CancelInFlight();
+
+    /**
+     * @brief 标记 Buffer 为错误状态（ARCH-002 扩展）
+     */
+    void MarkError();
+
 private:
     friend class BufferPool;
 
