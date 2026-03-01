@@ -79,6 +79,7 @@
 - V4L2 流控 (格式协商、Buffer 管理、流控制)
 - 帧数据封装 (FrameHandle 构建、元数据管理)
 - 进程内高性能分发 (发布订阅、任务队列、线程池)
+- 发布端/订阅端解耦架构 (支持多个订阅端,含 IPC 控制面与数据面约定)
 - 线程池管理 (任务调度、负载均衡)
 - 平台抽象层 (Epoll、Thread、Log 跨平台封装)
 
@@ -86,7 +87,7 @@
 
 - 具体的 AI 算法实现
 - 音视频编码协议实现 (如 H.264/H.265 编码器内部逻辑)
-- 跨进程通信 (IPC) 机制
+- 完整分布式集群通信与远程网络传输
 - UI 渲染逻辑
 - 网络传输协议
 
@@ -161,6 +162,80 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 3. 通过 FrameBroker 分发给所有订阅者
 4. 订阅者处理完毕后,自动触发 Buffer 归还
 5. CameraSource 将 Buffer 重新入队到 V4L2 驱动
+
+### 2.4 发布端/订阅端解耦架构（阶段调整）
+
+为满足“发布端健壮隔离、订阅端可独立演进”的用户故事，当前架构采用发布端/订阅端解耦模型：
+
+1. `camera_publisher`：唯一发布端实例，负责设备持有与分发。
+2. `camera_subscriber`：一个或多个订阅端实例，独立接入业务处理。
+
+```text
+subscriber_1 -------\
+subscriber_2 --------+--> [Control IPC] --> publisher
+subscriber_n -------/             |
+                                  +--> CameraSessionManager (按路管理)
+                                  +--> CameraSource(/dev/videoX)
+                                  +--> [Data IPC] --> subscribers
+```
+
+**设计约束（必须满足）**
+
+1. 系统仅允许一个发布端实例持有采集设备。
+2. 发布端与订阅端运行单元隔离，订阅端异常不得影响采集主链路稳定性。
+3. 某一路 Camera 只有在存在订阅时才启动采集。
+4. 当该路订阅数降为 0 时，发布端停止该路采集并释放资源。
+
+**按订阅启停策略（每路 Camera）**
+
+1. `Subscribe(camera_id)`:
+   - 引用计数 `ref_count[camera_id] += 1`
+   - 若从 `0 -> 1`，执行 `CameraSource::Initialize + Start`
+2. `Unsubscribe(camera_id)`:
+   - 引用计数 `ref_count[camera_id] -= 1`
+   - 若从 `1 -> 0`，执行 `CameraSource::Stop + Release`
+3. 推荐增加 `grace_period_ms`（如 1000ms）避免频繁抖动启停。
+
+**典型用户故事（开发阶段示例）**
+
+1. 示例中使用 1 个发布端与 1 个订阅端，便于联调验证。
+2. 订阅端每接收一帧，`sleep 5ms` 模拟上层处理耗时。
+3. 每隔 1 秒保存 1 张图片。
+4. 仅保留 1 张最新图片，使用固定文件名覆盖保存（例如 `latest.jpg` / `latest.pgm`）。
+
+在实际场景中，可同时存在多个订阅端（不同业务模块）并发订阅同一路或多路 Camera。
+
+**协议头约定（可扩展，跨平台）**
+
+统一在公共头文件定义发布端和订阅端协议，建议路径：
+`include/camera_subsystem/ipc/camera_channel_contract.h`
+
+建议最小定义：
+
+```cpp
+#define CAMERA_SUBSYSTEM_DEFAULT_CAMERA "/dev/video0"
+
+enum class CameraBusType : uint32_t
+{
+    kDefault = 0,
+    kMipi,
+    kUsb,
+    kVirtual
+};
+
+struct CameraEndpoint
+{
+    CameraBusType bus_type;
+    uint32_t bus_index;
+    char device_path[128];
+};
+```
+
+扩展要求：
+
+1. 协议包含版本号与能力位，支持向后兼容。
+2. Camera 描述必须支持多路 MIPI、多路 USB 与平台私有扩展。
+3. 控制面（订阅/退订/心跳）与数据面（帧传输）分离。
 
 ---
 
@@ -550,6 +625,24 @@ sudo ./bin/camera_source_stress_test 20 /dev/video0
 - 统一 Buffer 生命周期与复用池
 - 采集/分发线程亲和性与调度策略
 - 指标与观测性（FPS、延迟、队列深度）
+
+### 4.8 典型用户故事（发布端/订阅端）
+
+开发阶段以“1 个发布端 + 1 个订阅端”的示例进行联调，但架构支持多个订阅端并发接入：
+
+1. 发布端：唯一实例，负责 Camera 打开、采集、分发、订阅引用计数管理。
+2. 订阅端：可有一个或多个实例，模拟 AI/编码/预览等上层模块。
+
+订阅端模拟规则：
+
+1. 每帧处理固定 `sleep 5ms`。
+2. 每秒保存 1 张图。
+3. 最多保存 1 张，固定文件名覆盖。
+
+设备约定：
+
+1. 默认设备使用 `CAMERA_SUBSYSTEM_DEFAULT_CAMERA`，当前默认值 `/dev/video0`。
+2. 后续通过协议头扩展 MIPI/USB 多路设备映射，不在订阅端硬编码设备路径。
 
 **设计要点:**
 

@@ -86,6 +86,29 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
      (DQBUF)       (DMA-BUF)      (FrameHandle)  (Dispatch)     (OnFrame)
 ```
 
+### 发布端/订阅端解耦架构调整
+
+当前项目增加发布端/订阅端解耦演进方向，满足“唯一发布端 + 多订阅端”的业务场景：
+
+1. 唯一发布端实例 `camera_publisher` 统一管理摄像头与分发。
+2. 一个或多个订阅端实例 `camera_subscriber` 独立接入。
+3. 某路 Camera 仅在存在订阅时启动采集，无订阅时停止并释放资源。
+
+典型用户故事（开发阶段示例）：
+
+1. 示例使用 1 个发布端 + 1 个订阅端做联调。
+2. 订阅端收到一帧后 `sleep 5ms` 模拟上层处理。
+3. 订阅端每 1 秒保存 1 张图片。
+4. 最多保留 1 张，固定文件名覆盖。
+
+实际场景中，可以有多个订阅端并发订阅同一路或多路 Camera。
+
+协议协定（规划）：
+
+1. 公共头文件：`include/camera_subsystem/ipc/camera_channel_contract.h`
+2. 默认设备宏：`CAMERA_SUBSYSTEM_DEFAULT_CAMERA`（默认 `/dev/video0`）
+3. 支持可扩展 Camera 类型：默认、MIPI、USB、平台私有类型。
+
 ### 核心组件
 
 #### 1. CameraSource
@@ -243,6 +266,9 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 | ARCH-006 | 订阅者优先级静态 | ⏳ 计划中 | 自适应优先级 |
 | ARCH-007 | 设备自动重连 | ⏳ 计划中 | 设备监控与恢复 |
 | ARCH-008 | 降级策略 | ⏳ 计划中 | 降帧/降分辨率 |
+| ARCH-018 | 发布端/订阅端解耦模式 | 🚧 进行中 | 单发布端 + 多订阅端隔离 |
+| ARCH-019 | 按订阅启停 Camera | 🚧 进行中 | 无订阅不采集，避免资源空耗 |
+| ARCH-020 | 跨平台协议头协定 | 🚧 进行中 | 默认设备宏 + MIPI/USB 可扩展 |
 
 ### 架构完善与待优化项
 
