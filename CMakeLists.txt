@@ -37,12 +37,18 @@ set(UTILS_SOURCES
     src/utils/signal_handler.cpp
 )
 
+set(IPC_SOURCES
+    src/ipc/camera_control_server.cpp
+    src/ipc/camera_control_client.cpp
+)
+
 set(BROKER_SOURCES
     src/broker/frame_broker.cpp
 )
 
 set(CAMERA_SOURCES
     src/camera/camera_source.cpp
+    src/camera/camera_session_manager.cpp
 )
 
 # 创建库
@@ -116,6 +122,20 @@ target_compile_options(camera_subsystem_utils
         ${CAMERA_SUBSYSTEM_WARNING_FLAGS}
 )
 
+add_library(camera_subsystem_ipc STATIC
+    ${IPC_SOURCES}
+)
+
+target_include_directories(camera_subsystem_ipc
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+target_compile_options(camera_subsystem_ipc
+    PRIVATE
+        ${CAMERA_SUBSYSTEM_WARNING_FLAGS}
+)
+
 # 链接依赖
 target_link_libraries(camera_subsystem_broker
     PUBLIC
@@ -127,6 +147,13 @@ target_link_libraries(camera_subsystem_camera
     PUBLIC
         camera_subsystem_core
         camera_subsystem_platform
+)
+
+target_link_libraries(camera_subsystem_ipc
+    PUBLIC
+        camera_subsystem_camera
+        camera_subsystem_platform
+        camera_subsystem_core
 )
 
 # 查找依赖
@@ -184,6 +211,9 @@ target_link_libraries(camera_subsystem_platform
 
 # 安装规则
 install(DIRECTORY include/camera_subsystem DESTINATION include)
+
+# 示例程序
+add_subdirectory(examples)
 
 # 启用测试 (优先系统安装,其次 third_party/googletest,否则跳过)
 include(CTest)
