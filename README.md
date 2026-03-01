@@ -1,12 +1,32 @@
-# Camera 推流与 AI 基座子系统架构设计文档
+# Camera 推流与 AI 基座子系统设计与开发文档
 
-**文档版本:** v0.3 (工业级完善版)  
+**文档版本:** v0.4 (阶段里程碑版)  
 **目标平台:** Linux / Debian @ RK3576 (预留 Android 迁移)  
 **开发语言:** C/C++ 混合 (数据层 C POD, 框架层 C++17)  
 **核心方向:** Camera / V4L2 -> Zero-Copy Pub/Sub -> NPU / AI  
 **文档作者:** 架构设计团队  
 **创建日期:** 2026-01-27  
-**最后更新:** 2026-02-03
+**最后更新:** 2026-03-01
+
+---
+
+## 当前里程碑（2026-03-01）
+
+当前版本已实现“核心发布端 + 订阅端”双进程联调闭环（Ubuntu + V4L2）：
+
+- 核心发布端独占设备访问（V4L2 入口唯一）
+- 控制面 IPC（订阅/退订）+ 数据面 IPC（帧头+帧数据）
+- 按订阅引用计数启停采集会话（无订阅不采集）
+- 发布端/订阅端双进程示例可直接运行（默认设备 `CAMERA_SUBSYSTEM_DEFAULT_CAMERA`）
+- 单元测试与压测流程可运行，当前 `build.sh` 可通过
+
+文档导航：
+
+- 项目概览：`docs/PROJECT_OVERVIEW.md`
+- 实现进度：`IMPLEMENTATION_STATUS.md`
+- 架构评审：`docs/ARCHITECTURE_REVIEW.md`
+- 命名规范：`NAMING_CONVENTION.md`
+- API 参考：`API_REFERENCE.md`
 
 ---
 
@@ -245,162 +265,21 @@ struct CameraEndpoint
 
 ### 3.0 架构评审意见
 
-**评审日期:** 2026-02-02  
-**评审人:** 高级架构师团队
+当前版本将架构评审独立维护为专门文档，避免在 README 中堆叠过多评审细节。
 
-#### 3.0.1 评审总述
+- 评审文档：`docs/ARCHITECTURE_REVIEW.md`
+- 评审更新日期：2026-03-01
+- 当前状态：ARCH-001/002/003 已完成；ARCH-018/019/020 进入“可运行原型”阶段
 
-经过深入的架构评审，系统整体设计合理，但在以下方面存在改进空间：
+评审摘要：
 
-| 评审项 | 评审意见 | 优先级 | 状态 |
-|--------|---------|--------|------|
-| Buffer生命周期管理 | BufferPool与FrameHandle绑定关系不清晰，缺乏状态机管理和泄漏检测 | 高 | 已完成 |
-| 背压策略配置性 | 丢帧策略硬编码，缺乏动态调整和阈值配置 | 高 | 待处理 |
-| 错误恢复机制 | 设备断开后缺乏自动重连和降级策略 | 中 | 待处理 |
-| 线程亲和性配置 | 无法配置线程CPU亲和性和大小核分离 | 中 | 待处理 |
-| 可观测性 | 缺乏统一的Metrics收集和实时监控接口 | 中 | 待处理 |
-| 内存管理策略 | 缺乏内存预算控制和压力检测 | 中 | 待处理 |
-| 跨平台抽象 | Android HAL层未实现，平台能力探测不完整 | 低 | 待处理 |
-
-#### 3.0.2 详细评审意见
-
-##### A. Buffer生命周期管理
-
-**[ARCH-001] Buffer所有权不明确** ✅ 已修复
-
-- **问题**: FrameHandle与Buffer的引用关系模糊，容易导致悬空指针
-- **影响**: 可能导致内存泄漏或崩溃
-- **落地方案**: 
-  1. 引入BufferGuard类，使用RAII明确所有权
-  2. 新增FrameHandleEx扩展结构，持有shared_ptr<BufferGuard>绑定生命周期
-  3. 保留FrameHandle POD结构用于跨语言边界
-- **代码位置**: 
-  - `include/camera_subsystem/core/buffer_guard.h`
-  - `include/camera_subsystem/core/frame_handle_ex.h` (新增)
-- **见代码**: `src/camera/camera_source.cpp`, `src/broker/frame_broker.cpp`
-- **修复日期**: 2026-02-27
-
-**[ARCH-002] 缺少Buffer状态机** ✅ 已修复
-
-- **问题**: Buffer状态流转不清晰，难以追踪生命周期
-- **落地方案**: 
-  1. 实现Buffer状态枚举：Free → InUse → InFlight → Free → Error
-  2. 增加状态回退机制：InFlight → InUse
-  3. 增加状态转换验证
-- **代码位置**: `include/camera_subsystem/core/buffer_state.h`
-- **修复日期**: 2026-02-27
-
-**[ARCH-003] Buffer泄漏检测** ✅ 已修复
-
-- **问题**: 长时间运行可能存在Buffer泄漏
-- **落地方案**: 
-  1. 添加Buffer泄漏检测和告警机制
-  2. 增加活跃BufferGuard计数追踪
-  3. 析构时等待所有Buffer归还（带超时保护）
-- **代码位置**: `include/camera_subsystem/core/buffer_pool.h`
-- **修复日期**: 2026-02-27
-
-**[ARCH-017] BufferPool析构竞态条件** ✅ 已修复
-
-- **问题**: BufferPool析构时可能还有BufferGuard持有Buffer，导致崩溃
-- **影响**: 可能导致崩溃或泄漏告警误报
-- **落地方案**: 
-  1. 增加active_guard_count_追踪活跃BufferGuard数量
-  2. 析构时等待所有BufferGuard归还（最多5秒）
-  3. 超时后打印告警并强制清理
-- **代码位置**: `include/camera_subsystem/core/buffer_pool.h`
-- **修复日期**: 2026-02-27
-
-##### B. 背压策略配置性
-
-**[ARCH-004] 丢帧策略硬编码**
-
-- **问题**: DropNewest/DropOldest等策略固定，无法动态调整
-- **建议**: 引入BackpressurePolicy配置类，支持运行时策略切换
-- **代码位置**: `include/camera_subsystem/broker/backpressure_policy.h` (待创建)
-- **见代码**: `src/broker/frame_broker.cpp` - 需要集成策略配置
-
-**[ARCH-005] 缺少背压阈值配置**
-
-- **问题**: 队列大小和延迟阈值固定
-- **建议**: 添加动态阈值调整算法
-- **代码位置**: `include/camera_subsystem/broker/broker_config.h` (待创建)
-
-**[ARCH-006] 订阅者优先级静态**
-
-- **问题**: 优先级在注册时固定，无法动态调整
-- **建议**: 实现自适应优先级调整机制
-- **代码位置**: `src/broker/frame_broker.cpp` - 需要添加动态优先级调整
-
-##### C. 错误恢复机制
-
-**[ARCH-007] 缺少设备监控和自动重连**
-
-- **问题**: 设备断开后需要手动重启
-- **建议**: 引入DeviceMonitor类，实现自动重连和降级策略
-- **代码位置**: `include/camera_subsystem/camera/device_monitor.h` (待创建)
-
-**[ARCH-008] 缺少降级策略**
-
-- **问题**: 高负载时无法自动降级
-- **建议**: 实现自动降级（降低帧率/分辨率）
-- **代码位置**: `include/camera_subsystem/camera/degradation_policy.h` (待创建)
-
-##### D. 线程亲和性配置
-
-**[ARCH-009] 缺少CPU亲和性配置**
-
-- **问题**: 无法配置线程CPU亲和性
-- **建议**: 引入ThreadAffinity配置类
-- **代码位置**: `include/camera_subsystem/platform/thread_affinity.h` (待创建)
-
-**[ARCH-010] 缺少大小核分离调度**
-
-- **问题**: Worker线程无法区分大小核
-- **建议**: 实现CPU拓扑探测和大小核分离调度
-- **代码位置**: `include/camera_subsystem/platform/cpu_topology.h` (待创建)
-
-##### E. 可观测性
-
-**[ARCH-011] 缺少Metrics收集接口**
-
-- **问题**: 无法统一收集性能指标
-- **建议**: 引入MetricsCollector类，支持Prometheus/Grafana
-- **代码位置**: `include/camera_subsystem/metrics/metrics_collector.h` (待创建)
-
-**[ARCH-012] 缺少实时监控接口**
-
-- **问题**: 无法实时监控系统状态
-- **建议**: 实现SystemMonitor类，提供REST/gRPC接口
-- **代码位置**: `include/camera_subsystem/metrics/system_monitor.h` (待创建)
-
-##### F. 内存管理策略
-
-**[ARCH-013] 缺少内存预算控制**
-
-- **问题**: 内存使用无法限制
-- **建议**: 引入MemoryBudget配置类
-- **代码位置**: `include/camera_subsystem/core/memory_budget.h` (待创建)
-
-**[ARCH-014] 缺少内存压力检测**
-
-- **问题**: 内存压力无法感知
-- **建议**: 实现MemoryMonitor类，支持压力告警
-- **代码位置**: `include/camera_subsystem/core/memory_monitor.h` (待创建)
-
-##### G. 跨平台抽象
-
-**[ARCH-015] 缺少平台能力探测**
-
-- **问题**: 无法探测平台能力
-- **建议**: 引入PlatformCapabilities接口
-- **代码位置**: `include/camera_subsystem/platform/platform_capabilities.h` (待创建)
-
-**[ARCH-016] Android HAL层未实现**
-
-- **问题**: 无法适配Android平台
-- **建议**: 预留HAL3接口设计
-- **代码位置**: `include/camera_subsystem/platform/android/hal3_wrapper.h` (待创建)
+| 评审主题 | 当前结论 |
+|------|------|
+| Buffer 生命周期治理 | 已落地（RAII + 状态机 + 泄漏检测） |
+| 发布端/订阅端解耦 | 已落地基础控制面与数据面 IPC，支持双进程示例 |
+| 背压策略可配置化 | 基础版已落地（池耗尽/队列上限丢帧），策略参数化待完成 |
+| 设备恢复与降级 | 待落地（自动重连、降帧/降分辨率策略） |
+| 可观测性与指标 | 待落地统一指标接口（FPS/延迟/队列深度/丢帧率） |
 
 ---
 
@@ -627,6 +506,8 @@ sudo ./bin/camera_source_stress_test 20 /dev/video0
 - 统一 Buffer 生命周期与复用池
 - 采集/分发线程亲和性与调度策略
 - 指标与观测性（FPS、延迟、队列深度）
+
+架构评审与分项跟踪见：`docs/ARCHITECTURE_REVIEW.md`
 
 ### 4.8 典型用户故事（发布端/订阅端）
 
