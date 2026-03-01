@@ -1088,4 +1088,79 @@ int main()
 
 ---
 
+## 16. CameraSessionManager 接口（新增）
+
+用于核心发布端会话治理，支撑“按订阅启停”语义。
+
+核心能力：
+- 核心发布端单实例注册与反注册
+- 按 CameraEndpoint 维护订阅引用计数
+- 首次订阅触发 start 回调，最后退订触发 stop 回调
+
+关键接口：
+- `bool RegisterCorePublisher(const std::string& core_publisher_id);`
+- `bool UnregisterCorePublisher(const std::string& core_publisher_id);`
+- `bool Subscribe(const std::string& client_id, CameraClientRole role, const CameraEndpoint& endpoint);`
+- `bool Unsubscribe(const std::string& client_id, const CameraEndpoint& endpoint);`
+- `uint32_t GetSubscriberCount(const CameraEndpoint& endpoint) const;`
+
+对应头文件：
+- `include/camera_subsystem/camera/camera_session_manager.h`
+
+---
+
+## 17. 控制面 IPC 接口（新增）
+
+控制面用于子发布端/订阅端与核心发布端之间的订阅管理。
+
+协议头文件：
+- `include/camera_subsystem/ipc/camera_control_ipc.h`
+- `include/camera_subsystem/ipc/camera_channel_contract.h`
+
+服务端与客户端：
+- `CameraControlServer`：`include/camera_subsystem/ipc/camera_control_server.h`
+- `CameraControlClient`：`include/camera_subsystem/ipc/camera_control_client.h`
+
+关键命令：
+- `kSubscribe`
+- `kUnsubscribe`
+- `kPing`
+
+关键状态码：
+- `kOk`
+- `kInvalidMessage`
+- `kInvalidRole`
+- `kCorePublisherUnavailable`
+- `kSessionOperationFailed`
+
+---
+
+## 18. 数据面协议（示例）
+
+当前示例程序通过 Unix Domain Socket 传输帧头 + 帧数据：
+
+- 头文件：`include/camera_subsystem/ipc/camera_data_ipc.h`
+- 结构：`CameraDataFrameHeader`
+- 默认 socket：`/tmp/camera_subsystem_data.sock`
+
+说明：
+- 该数据面协议为示例实现，用于双进程联调。
+- 生产环境建议补充版本协商、能力位、鉴权与重传/拥塞控制策略。
+
+---
+
+## 19. 示例程序
+
+- 核心发布端：`bin/camera_publisher_example`
+- 订阅端：`bin/camera_subscriber_example`
+
+基础运行：
+
+```bash
+./bin/camera_publisher_example
+./bin/camera_subscriber_example
+```
+
+---
+
 **文档结束**

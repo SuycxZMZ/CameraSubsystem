@@ -1,6 +1,6 @@
 # CameraSubsystem 项目概览
 
-**最后更新:** 2026-02-03
+**最后更新:** 2026-03-01
 
 ## 项目简介
 
@@ -291,9 +291,9 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 
 ### 当前版本
 
-- **版本号**: v0.1
+- **版本号**: v0.2
 - **状态**: 开发中
-- **完成度**: 约 70%
+- **完成度**: 约 80%
 
 ### 已完成模块
 
@@ -304,21 +304,26 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 - ✅ CameraSource（V4L2 + MMAP 采集）
 - ✅ BufferPool（统一生命周期与复用池，拷贝模式）
 - ✅ Buffer 生命周期治理（BufferGuard / BufferState / 泄漏检测）
+- ✅ CameraSessionManager（按订阅引用计数启停）
+- ✅ 控制面 IPC（CameraControlServer/Client）
+- ✅ 数据面 IPC（示例协议与双进程收发链路）
 - ✅ 构建系统配置
 - ✅ 单元测试框架
 - ✅ 压测程序（PlatformLayer / FrameBroker / CameraSource）
+- ✅ 双进程示例程序（`camera_publisher_example` / `camera_subscriber_example`）
 
 ### 进行中模块
 
 - 🚧 CameraSource 高级能力（多平面 / DMA-BUF）
 - 🚧 背压策略完善（延迟阈值 / DropPolicy 参数化）
+- 🚧 设备恢复机制（自动重连 / 降级策略）
 
 ### 计划中模块
 
 - ⏳ 工具类实现
 - ⏳ 集成测试
 - ⏳ 性能测试
-- ⏳ 示例代码
+- ⏳ 统一指标与观测接口（Metrics/Tracing）
 
 ### 架构评审落实
 
@@ -332,9 +337,11 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 | ARCH-006 | 订阅者优先级静态 | ⏳ 计划中 | 自适应优先级 |
 | ARCH-007 | 设备自动重连 | ⏳ 计划中 | 设备监控与恢复 |
 | ARCH-008 | 降级策略 | ⏳ 计划中 | 降帧/降分辨率 |
-| ARCH-018 | 发布端/订阅端解耦模式 | 🚧 进行中 | 核心发布端（V4L2 直连）+ 多子发布端/订阅端隔离 |
-| ARCH-019 | 按订阅启停 Camera | 🚧 进行中 | 无订阅不采集，避免资源空耗 |
-| ARCH-020 | 跨平台协议头协定 | 🚧 进行中 | 默认设备宏 + MIPI/USB 可扩展 |
+| ARCH-018 | 发布端/订阅端解耦模式 | 🚧 进行中（基础落地） | 控制面 + 数据面 IPC 已打通示例链路 |
+| ARCH-019 | 按订阅启停 Camera | 🚧 进行中（基础落地） | SessionManager 已实现引用计数启停 |
+| ARCH-020 | 跨平台协议头协定 | 🚧 进行中（基础落地） | 设备端点与控制协议头已落地 |
+
+架构评审详情见：`docs/ARCHITECTURE_REVIEW.md`
 
 ### 架构完善与待优化项
 
@@ -466,43 +473,30 @@ ctest --output-on-failure
 
 ### 使用示例
 
-```cpp
-#include "camera_subsystem/core/camera_config.h"
-#include "camera_subsystem/broker/frame_subscriber.h"
+推荐直接使用当前双进程示例进行联调验证：
 
-using namespace camera_subsystem;
-
-// 创建订阅者
-class MySubscriber : public broker::IFrameSubscriber
-{
-public:
-    void OnFrame(const core::FrameHandle& frame) override
-    {
-        // 处理帧数据
-        printf("Received frame: %u\n", frame.frame_id_);
-    }
-
-    const char* GetSubscriberName() const override
-    {
-        return "MySubscriber";
-    }
-};
-
-int main()
-{
-    // 初始化日志系统
-    platform::PlatformLogger::Initialize("camera.log", core::LogLevel::kInfo);
-
-    // 创建配置
-    core::CameraConfig config = core::CameraConfig::GetDefault();
-
-    // TODO: 创建 CameraSource 和 FrameBroker
-    // TODO: 注册订阅者
-    // TODO: 开始采集
-
-    return 0;
-}
+```bash
+# 终端 1：核心发布端（默认 /dev/video0）
+./bin/camera_publisher_example
 ```
+
+```bash
+# 终端 2：订阅端（默认输出目录 ./subscriber_frames）
+./bin/camera_subscriber_example
+```
+
+可选参数：
+
+```bash
+./bin/camera_publisher_example [device_path] [control_socket] [data_socket]
+./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket]
+```
+
+运行行为：
+
+- 两端默认无限运行，按 `Ctrl+C` 退出
+- 订阅端每秒打印统计并保存 1 张图片（最多 10 张循环覆盖）
+- 默认设备宏：`CAMERA_SUBSYSTEM_DEFAULT_CAMERA`（默认值 `/dev/video0`）
 
 ## 贡献指南
 
