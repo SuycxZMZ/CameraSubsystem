@@ -3,6 +3,16 @@
  * @brief CameraConfig 单元测试
  * @author CameraSubsystem Team
  * @date 2026-01-28
+ *
+ * 测试目标：
+ * 1. 验证 CameraConfig 默认构造、参数构造与重置逻辑。
+ * 2. 验证 IsValid 对分辨率、帧率、buffer_count、io_method 的约束。
+ * 3. 验证默认配置 GetDefault 的字段值是否符合预期。
+ *
+ * 测试流程：
+ * 1. 构造不同配置实例并逐项断言字段值。
+ * 2. 覆盖边界参数（最小/最大 buffer_count 等）验证 IsValid。
+ * 3. 调用 Reset/GetDefault 并检查状态回归与默认值一致性。
  */
 
 #include "camera_subsystem/core/camera_config.h"

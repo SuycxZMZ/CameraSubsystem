@@ -3,6 +3,17 @@
  * @brief BufferPool 单元测试
  * @author CameraSubsystem Team
  * @date 2026-02-02
+ *
+ * 测试目标：
+ * 1. 验证 BufferPool 初始化、获取、归还与复用逻辑。
+ * 2. 验证统计计数器（acquire/release/fail）与状态计数一致性。
+ * 3. 验证 InFlight 状态转换及泄漏检查行为。
+ *
+ * 测试流程：
+ * 1. 初始化不同规模的 BufferPool 并执行连续 Acquire。
+ * 2. 触发池耗尽场景，校验返回空指针与失败计数增长。
+ * 3. 释放后再次 Acquire，验证 Buffer ID 复用。
+ * 4. 执行 MarkInFlight 与 CheckLeaks，校验状态机与统计输出。
  */
 
 #include <gtest/gtest.h>

@@ -4,13 +4,28 @@
  * @author CameraSubsystem Team
  * @date 2026-01-28
  *
- * 本程序用于对PlatformLayer进行高压力测试，验证其稳定性和性能
- * 测试内容：
- * 1. 多线程并发创建和销毁
- * 2. 高频率日志输出
- * 3. Epoll事件处理
- * 4. 线程亲和性和优先级设置
- * 5. 长时间运行稳定性
+ * 用法：
+ *   ./platform_stress_test [duration_seconds]
+ *
+ * 参数：
+ *   duration_seconds: 压测时长（秒），默认 5 秒
+ *
+ * 测试目的：
+ * 1. 验证 PlatformThread 在高并发创建/销毁场景下的稳定性。
+ * 2. 验证 PlatformLogger 在高频日志写入场景下的可用性。
+ * 3. 验证 PlatformEpoll 在事件驱动场景下的吞吐与行为正确性。
+ *
+ * 测试流程：
+ * 1. 初始化日志系统并注册 SIGINT/SIGTERM 信号处理。
+ * 2. 启动日志压力线程，持续产生日志写入负载。
+ * 3. 执行线程生命周期测试（批量创建、启动、回收）。
+ * 4. 执行 epoll 事件压力测试（eventfd + epoll 轮询）。
+ * 5. 每秒打印统计信息，达到时长或收到信号后优雅退出。
+ *
+ * 结果判定：
+ * 1. 进程在限定时间内可正常退出且无死锁/崩溃。
+ * 2. 统计计数（日志条数、线程执行数、epoll 事件数）持续增长。
+ * 3. 退出日志中无明显错误级别异常。
  */
 
 #include "camera_subsystem/platform/platform_epoll.h"

@@ -3,6 +3,17 @@
  * @brief FrameHandle 单元测试
  * @author CameraSubsystem Team
  * @date 2026-01-28
+ *
+ * 测试目标：
+ * 1. 验证 FrameHandle 默认状态、Reset 行为与有效性判定逻辑。
+ * 2. 验证平面大小/偏移访问接口在合法与越界场景下的行为。
+ * 3. 验证核心枚举与错误码的字符串映射结果。
+ *
+ * 测试流程：
+ * 1. 构造默认对象并检查关键字段初始值。
+ * 2. 填充有效元数据后执行 IsValid 与平面访问相关断言。
+ * 3. 执行 Reset，验证对象回归初始状态。
+ * 4. 调用类型转换函数，验证返回字符串非空且语义正确。
  */
 
 #include "camera_subsystem/core/frame_handle.h"

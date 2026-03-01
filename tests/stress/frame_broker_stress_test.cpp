@@ -3,6 +3,28 @@
  * @brief FrameBroker 压力测试程序
  * @author CameraSubsystem Team
  * @date 2026-01-31
+ *
+ * 用法：
+ *   ./frame_broker_stress_test [duration_seconds]
+ *
+ * 参数：
+ *   duration_seconds: 压测时长（秒），默认 5 秒
+ *
+ * 测试目的：
+ * 1. 验证 FrameBroker 在多订阅者下的并发分发稳定性。
+ * 2. 验证优先级队列与分发线程在持续发布场景下的行为。
+ * 3. 验证统计指标（发布数、分发任务数、丢弃数、队列深度）准确性。
+ *
+ * 测试流程：
+ * 1. 构造固定格式测试帧并创建多个模拟订阅者。
+ * 2. 启动 FrameBroker 工作线程池并完成订阅注册。
+ * 3. 主线程持续发布测试帧，周期性读取并打印 Broker 统计信息。
+ * 4. 到达指定时长后停止发布，等待队列清空并汇总结果。
+ *
+ * 结果判定：
+ * 1. 程序在限定时长内可正常退出且无异常崩溃。
+ * 2. published/dispatched 指标单调增长，queue 受上限控制。
+ * 3. 订阅者接收计数与 Broker 统计结果趋势一致。
  */
 
 #include "camera_subsystem/broker/frame_broker.h"

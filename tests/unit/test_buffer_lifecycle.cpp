@@ -4,6 +4,21 @@
  * @author CameraSubsystem Team
  * @date 2026-02-27
  * 
+ * 用法：
+ *   ./bin/test_buffer_lifecycle
+ *
+ * 测试目标：
+ * 1. 验证 BufferGuard RAII 自动归还机制。
+ * 2. 验证 BufferState 状态机转换（InUse/InFlight/Error）行为。
+ * 3. 验证 BufferPool 析构阶段的安全等待与泄漏容错。
+ * 4. 验证 FrameHandleEx 与 BufferGuard 的生命周期绑定关系。
+ *
+ * 测试流程：
+ * 1. 初始化 BufferPool 并获取 BufferGuard，检查统计值变化。
+ * 2. 依次调用 MarkInFlight/CancelInFlight/MarkError，检查状态转换。
+ * 3. 构造“池先析构、guard 后释放”场景，确认不会崩溃。
+ * 4. 构造 FrameHandleEx 并绑定 guard，验证引用释放后自动归还。
+ *
  * 测试覆盖：
  * 1. BufferGuard RAII 机制
  * 2. BufferState 状态机转换
