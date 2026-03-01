@@ -72,6 +72,7 @@ CameraSubsystem/
 **状态:** 已完成并测试
 
 **实现内容:**
+
 - ✅ `types.h/cpp` - 类型定义
   - PixelFormat 枚举
   - MemoryType 枚举
@@ -93,6 +94,7 @@ CameraSubsystem/
   - 重置方法（Reset）
 
 **测试覆盖:**
+
 - ✅ FrameHandle 单元测试（12个测试用例）
 - ✅ CameraConfig 单元测试（11个测试用例）
 - ✅ 类型转换测试
@@ -102,6 +104,7 @@ CameraSubsystem/
 - ✅ FrameHandleEx 单元测试（新增）
 
 **新增组件:**
+
 - ✅ `buffer_pool.h/cpp` - BufferPool 统一生命周期与复用池
 - ✅ `buffer_guard.h/cpp` - BufferGuard RAII 所有权管理
 - ✅ `buffer_state.h` - Buffer 状态机定义
@@ -112,6 +115,7 @@ CameraSubsystem/
 **状态:** 已完成
 
 **实现内容:**
+
 - ✅ `platform_logger.h/cpp` - 日志系统封装（spdlog）
 - ✅ `platform_thread.h/cpp` - 线程封装
 - ✅ `platform_epoll.h/cpp` - Epoll封装
@@ -121,6 +125,7 @@ CameraSubsystem/
 **状态:** 已完成
 
 **实现内容:**
+
 - ✅ `frame_subscriber.h` - 订阅者接口定义
 - ✅ `frame_broker.h/cpp` - 分发中心实现
 
@@ -129,12 +134,14 @@ CameraSubsystem/
 **状态:** 已完成基础实现
 
 **已实现:**
+
 - ✅ `camera_source.h/cpp` - Camera数据源实现（V4L2 + MMAP）
 - ✅ 设备打开/格式配置/帧采集/回调分发
 - ✅ BufferPool 复用池接入（拷贝模式）
 - ✅ 基础背压：池耗尽时丢帧
 
 **待实现:**
+
 - ⏳ V4L2 多平面与 DMA-BUF 支持
 - ⏳ 高级 Buffer 管理机制
 
@@ -143,9 +150,11 @@ CameraSubsystem/
 **状态:** 部分完成
 
 **已实现:**
+
 - ✅ signal_handler 信号处理工具
 
 **待实现:**
+
 - ⏳ 字符串工具类
 - ⏳ 时间工具类
 - ⏳ 数学工具类
@@ -155,6 +164,7 @@ CameraSubsystem/
 **状态:** 基本完成
 
 **实现内容:**
+
 - ✅ `CMakeLists.txt` - 主CMake配置文件
 - ✅ `tests/CMakeLists.txt` - 测试配置文件
 - ✅ 库目标定义
@@ -172,6 +182,7 @@ CameraSubsystem/
 **状态:** 部分完成
 
 **已实现测试:**
+
 - ✅ FrameHandle 单元测试（12个测试用例，全部通过）
 - ✅ CameraConfig 单元测试（11个测试用例，全部通过）
 - ✅ PlatformLayer 压测程序（platform_stress_test）
@@ -179,6 +190,7 @@ CameraSubsystem/
 - ✅ CameraSource 压测程序（camera_source_stress_test）
 
 **待添加测试:**
+
 - ⏳ PlatformLayer 单元测试
 - ⏳ FrameBroker 单元测试
 - ⏳ CameraSource 单元测试
@@ -188,6 +200,7 @@ CameraSubsystem/
 ## 文档状态
 
 **已完成文档:**
+
 - ✅ README.md - 项目主文档
 - ✅ structure.md - 架构设计文档
 - ✅ API_REFERENCE.md - API接口文档
@@ -195,6 +208,7 @@ CameraSubsystem/
 - ✅ IMPLEMENTATION_STATUS.md - 本文件
 
 **待添加文档:**
+
 - ⏳ 开发者指南
 - ⏳ 用户手册
 - ⏳ 部署指南
@@ -255,7 +269,7 @@ CameraSubsystem/
 - 完成零拷贝主链路（V4L2 DMABUF -> FrameHandle -> Broker -> Consumer）
 - 引入背压与丢帧策略（按订阅者优先级/延迟阈值）✅ 基础版本已实现（池耗尽丢帧）
 - 统一 Buffer 生命周期与复用池（减少 malloc/free 抖动）✅ 基础版本已实现（拷贝模式）
-- 发布端/订阅端解耦模型（唯一发布端 + 多订阅端）
+- 发布端/订阅端解耦模型（唯一核心发布端 + 多子发布端/订阅端）
 - 按订阅启停 Camera（无订阅不采集，避免资源空耗）
 - 协议头协定与默认设备宏（支持 MIPI/USB 可扩展）
 - 增加可观测性指标（FPS、队列深度、丢帧率、延迟分布）
@@ -266,11 +280,12 @@ CameraSubsystem/
 
 为与 `README.md` 与 `docs/PROJECT_OVERVIEW.md` 保持一致，当前阶段定义如下：
 
-1. 架构目标是“唯一发布端 + 多订阅端”，不将“1 发布端 + 1 订阅端”作为架构限制。
-2. `1 发布端 + 1 订阅端` 仅作为开发阶段联调的典型用户故事示例。
-3. 典型示例中，订阅端每帧 `sleep 5ms` 模拟上层处理，并每秒覆盖保存 1 张图片。
-4. 业务场景下，允许多个订阅端并发订阅同一路或多路 Camera。
-5. 某路 Camera 仅在存在订阅时启动；订阅归零时停止并释放该路资源。
+1. 架构目标是“唯一核心发布端（V4L2 直连）+ 多子发布端/订阅端”，不将“1 发布端 + 1 订阅端”作为架构限制。
+2. 核心发布端是唯一底层设备入口；对同一路 Camera（同一 `/dev/videoX`）仅允许核心发布端持有采集句柄。
+3. 子发布端作为核心发布端的订阅者，可执行编解码/转封装并向下游再发布。
+4. 纯订阅端直接消费核心发布端或子发布端的数据，进行 AI/业务处理。
+5. `1 核心发布端 + 1 订阅端` 仅作为开发阶段联调示例；业务场景可多子发布端/多订阅端并发。
+6. 某路 Camera 仅在存在订阅时启动；订阅归零时停止并释放该路资源。
 
 协议协定（规划）：
 
@@ -278,9 +293,75 @@ CameraSubsystem/
 2. 默认设备宏：`CAMERA_SUBSYSTEM_DEFAULT_CAMERA`（默认值 `/dev/video0`）
 3. 可扩展 Camera 类型：默认、MIPI、USB、平台私有类型
 
+示例程序（双进程）：
+
+1. 核心发布端：`bin/camera_publisher_example`
+2. 订阅端：`bin/camera_subscriber_example`
+
+启动步骤：
+
+1. 先启动发布端（终端 1）：
+
+```bash
+./bin/camera_publisher_example
+```
+
+2. 再启动订阅端（终端 2）：
+
+```bash
+./bin/camera_subscriber_example
+```
+
+3. 两端默认无限运行，按 `Ctrl+C` 退出（`SIGINT/SIGTERM` 优雅退出）。
+
+参数说明：
+
+1. 发布端：
+
+```bash
+./bin/camera_publisher_example [device_path] [control_socket] [data_socket]
+```
+
+- `device_path`：默认 `CAMERA_SUBSYSTEM_DEFAULT_CAMERA`（通常 `/dev/video0`）
+- `control_socket`：默认 `/tmp/camera_subsystem_control.sock`
+- `data_socket`：默认 `/tmp/camera_subsystem_data.sock`
+
+2. 订阅端：
+
+```bash
+./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket]
+```
+
+- `output_dir`：默认 `./subscriber_frames`
+- `control_socket`：默认 `/tmp/camera_subsystem_control.sock`
+- `data_socket`：默认 `/tmp/camera_subsystem_data.sock`
+
+运行期输出：
+
+1. 发布端每秒打印：`sec | frames | fps | clients | sent_bytes | send_fail`
+2. 订阅端每秒打印：`sec | frames | fps | received_bytes | save_fail | image`
+3. 订阅端每秒保存 1 张图片，槽位 `0~9` 循环覆盖。
+
+故障排查：
+
+1. `connect control socket failed` / `connect data socket failed`：
+   确认发布端已启动并运行，且控制面与数据面 socket 路径参数一致。
+2. Camera 打开失败（如 `/dev/video0`）：
+   检查设备节点 `ls /dev/video0` 与用户权限（`video` 组），必要时用 `sudo` 验证。
+3. socket bind 失败（Address already in use）：
+   清理残留 socket 文件后重试：
+
+```bash
+rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
+```
+
+4. 订阅端无图或 `save_fail` 增长：
+   检查输出目录写权限，并先用 `camera_source_stress_test` 验证采集链路。
+
 ## 架构设计细化（Buffer 生命周期与背压策略）
 
 **Buffer 生命周期与复用池** ✅ 已完善
+
 1. `BufferPool` 统一管理预分配 Buffer，避免热路径频繁分配。
 2. `FrameHandle` 仅持有引用，使用 RAII 归还 Buffer。
 3. `FrameHandleEx` 扩展结构持有 `shared_ptr<BufferGuard>`，绑定 Buffer 生命周期。
@@ -292,6 +373,7 @@ CameraSubsystem/
 9. 后续升级为 **DMA-BUF 零拷贝**，避免拷贝成本。
 
 **背压与丢帧策略**
+
 1. 采集层：池耗尽时优先丢弃最新帧，避免阻塞采集线程。
 2. 分发层：队列超阈值或延迟过大触发丢帧策略。
 3. 订阅者层：低优先级订阅者可“仅保留最新帧”。
@@ -320,7 +402,7 @@ CameraSubsystem/
 - [ ] 完善多平面与 DMA-BUF 实现细节
 - [ ] 将 BufferPool 与 DMA-BUF 零拷贝打通
 - [ ] 背压策略参数化（延迟阈值/优先级规则）
-- [ ] ARCH-018：发布端/订阅端解耦模式落地
+- [ ] ARCH-018：核心发布端（V4L2 直连）+ 多子发布端/订阅端解耦模式落地
 - [ ] ARCH-019：按订阅启停 Camera 会话管理
 - [ ] ARCH-020：跨平台协议头协定与设备描述扩展
 

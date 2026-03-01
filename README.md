@@ -165,26 +165,28 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 
 ### 2.4 发布端/订阅端解耦架构（阶段调整）
 
-为满足“发布端健壮隔离、订阅端可独立演进”的用户故事，当前架构采用发布端/订阅端解耦模型：
+为满足“采集主链路稳定隔离、上层模块独立演进”的用户故事，当前架构采用“唯一核心发布端（V4L2 直连）+ 多子发布端/订阅端”模型：
 
-1. `camera_publisher`：唯一发布端实例，负责设备持有与分发。
-2. `camera_subscriber`：一个或多个订阅端实例，独立接入业务处理。
+1. `camera_publisher_core`：核心发布端，唯一允许与 V4L2/设备节点直接交互，负责采集会话管理与首级分发。
+2. `camera_sub_publisher`：子发布端（可选），先订阅核心发布端数据，执行编解码/转封装后再向下游发布。
+3. `camera_subscriber`：纯订阅端，一个或多个实例，直接消费数据做 AI/业务处理。
 
 ```text
-subscriber_1 -------\
-subscriber_2 --------+--> [Control IPC] --> publisher
+sub_publisher_1 ----\
+subscriber_1 -------+--> [Control IPC] --> publisher_core
 subscriber_n -------/             |
                                   +--> CameraSessionManager (按路管理)
                                   +--> CameraSource(/dev/videoX)
-                                  +--> [Data IPC] --> subscribers
+                                  +--> [Data IPC] --> sub_publishers / subscribers
 ```
 
 **设计约束（必须满足）**
 
-1. 系统仅允许一个发布端实例持有采集设备。
-2. 发布端与订阅端运行单元隔离，订阅端异常不得影响采集主链路稳定性。
-3. 某一路 Camera 只有在存在订阅时才启动采集。
-4. 当该路订阅数降为 0 时，发布端停止该路采集并释放资源。
+1. 对同一路 Camera 设备（同一 `/dev/videoX`），仅允许核心发布端持有底层采集句柄。
+2. 子发布端与纯订阅端不得直接访问 V4L2，仅通过核心发布端的 IPC 数据面接入。
+3. 发布端与订阅端运行单元隔离，订阅侧异常不得影响采集主链路稳定性。
+4. 某一路 Camera 只有在存在订阅时才启动采集。
+5. 当该路订阅数降为 0 时，核心发布端停止该路采集并释放资源。
 
 **按订阅启停策略（每路 Camera）**
 
@@ -198,12 +200,12 @@ subscriber_n -------/             |
 
 **典型用户故事（开发阶段示例）**
 
-1. 示例中使用 1 个发布端与 1 个订阅端，便于联调验证。
+1. 示例中使用 1 个核心发布端与 1 个订阅端，便于联调验证。
 2. 订阅端每接收一帧，`sleep 5ms` 模拟上层处理耗时。
 3. 每隔 1 秒保存 1 张图片。
 4. 仅保留 1 张最新图片，使用固定文件名覆盖保存（例如 `latest.jpg` / `latest.pgm`）。
 
-在实际场景中，可同时存在多个订阅端（不同业务模块）并发订阅同一路或多路 Camera。
+在实际场景中，可同时存在多个子发布端和多个纯订阅端，并发订阅同一路或多路 Camera。
 
 **协议头约定（可扩展，跨平台）**
 
@@ -438,11 +440,11 @@ struct CameraEndpoint
 
 1. 多平面 Buffer：记录 plane offsets/stride/size。
 2. DMA-BUF：记录 fd 与 plane fd，支持零拷贝传给 NPU/编码器。
-3. 
 
 ### 3.2 背压与丢帧策略
 
 **目标**
+
 1. 在高负载下保证关键路径稳定（实时性优先）。
 2. 避免队列无限增长导致内存抖动与延迟失控。
 3. 为不同订阅者提供差异化 QoS。
@@ -628,21 +630,93 @@ sudo ./bin/camera_source_stress_test 20 /dev/video0
 
 ### 4.8 典型用户故事（发布端/订阅端）
 
-开发阶段以“1 个发布端 + 1 个订阅端”的示例进行联调，但架构支持多个订阅端并发接入：
+开发阶段以“1 个核心发布端 + 1 个订阅端”的示例进行联调，但架构支持多个子发布端与多个订阅端并发接入：
 
-1. 发布端：唯一实例，负责 Camera 打开、采集、分发、订阅引用计数管理。
-2. 订阅端：可有一个或多个实例，模拟 AI/编码/预览等上层模块。
+1. 核心发布端：唯一 V4L2 入口，负责 Camera 打开、采集、首级分发、订阅引用计数管理。
+2. 子发布端（可选）：订阅核心流后执行编解码或协议转换，再向下游发布。
+3. 订阅端：一个或多个实例，模拟 AI/编码/预览等上层模块。
 
 订阅端模拟规则：
 
 1. 每帧处理固定 `sleep 5ms`。
 2. 每秒保存 1 张图。
-3. 最多保存 1 张，固定文件名覆盖。
+3. 最多保存 10 张，循环覆盖。
 
 设备约定：
 
 1. 默认设备使用 `CAMERA_SUBSYSTEM_DEFAULT_CAMERA`，当前默认值 `/dev/video0`。
 2. 后续通过协议头扩展 MIPI/USB 多路设备映射，不在订阅端硬编码设备路径。
+
+示例程序（双进程）：
+
+1. 核心发布端：`bin/camera_publisher_example`
+2. 订阅端：`bin/camera_subscriber_example`
+
+启动步骤：
+
+1. 先启动发布端（终端 1）：
+
+```bash
+./bin/camera_publisher_example
+```
+
+2. 再启动订阅端（终端 2）：
+
+```bash
+./bin/camera_subscriber_example
+```
+
+3. 两端默认无限运行，按 `Ctrl+C` 退出。发布端与订阅端都实现了 `SIGINT/SIGTERM` 优雅退出。
+
+参数说明：
+
+1. 发布端：
+
+```bash
+./bin/camera_publisher_example [device_path] [control_socket] [data_socket]
+```
+
+- `device_path`：默认 `CAMERA_SUBSYSTEM_DEFAULT_CAMERA`（通常 `/dev/video0`）
+- `control_socket`：默认 `/tmp/camera_subsystem_control.sock`
+- `data_socket`：默认 `/tmp/camera_subsystem_data.sock`
+
+2. 订阅端：
+
+```bash
+./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket]
+```
+
+- `output_dir`：默认 `./subscriber_frames`
+- `control_socket`：默认 `/tmp/camera_subsystem_control.sock`
+- `data_socket`：默认 `/tmp/camera_subsystem_data.sock`
+
+运行期输出风格：
+
+1. 发布端每秒打印：`sec | frames | fps | clients | sent_bytes | send_fail`
+2. 订阅端每秒打印：`sec | frames | fps | received_bytes | save_fail | image`
+3. 订阅端每秒保存 1 张图片，槽位 `0~9` 循环覆盖。
+
+故障排查：
+
+1. 订阅端提示 `connect control socket failed` 或 `connect data socket failed`：
+
+- 检查发布端是否已启动并保持运行。
+- 检查订阅端参数中的 socket 路径是否与发布端一致。
+
+1. 发布端提示 Camera 打开失败（例如 `/dev/video0`）：
+
+- 检查设备节点是否存在：`ls /dev/video0`
+- 检查权限：当前用户需有 `video` 组权限，或使用 `sudo` 运行进行排查。
+
+1. 发布端提示 socket bind 失败（Address already in use）：
+
+- 说明旧进程异常退出后 socket 文件未清理。
+- 可先删除后重试：`rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock`
+
+1. 订阅端持续无图保存或 `save_fail` 增长：
+
+- 检查 `output_dir` 是否可写。
+- 检查摄像头是否正常出帧（可先用 `camera_source_stress_test` 验证采集链路）。
 
 **设计要点:**
 
@@ -811,6 +885,7 @@ struct CameraConfig
 - 满队列策略: 丢弃最旧的任务或阻塞等待
 
 **订阅表:**
+
 - 读操作 (分发时) 远多于写操作 (注册/注销)
 - 使用 std::shared_mutex
 - 分发时获取读锁 (shared_lock)
@@ -818,28 +893,33 @@ struct CameraConfig
 - 定期清理失效订阅者 (弱引用 lock 失败)
 
 **Buffer 管理:**
+
 - 使用 std::shared_ptr 管理引用计数
 - 原子操作保证线程安全
 - 引用计数归零时触发归还
 
 **统计信息:**
+
 - 使用 std::mutex 保护
 - 原子变量用于高频更新 (如帧计数)
 
 ### 5.3 死锁预防
 
 **设计原则:**
+
 - 所有锁的获取顺序固定
 - 避免嵌套锁
 - 使用 RAII 自动释放锁
 - 设置锁超时机制 (可选)
 
 **锁顺序:**
+
 1. subscription_map_mutex_ (读写锁)
 2. task_queue_mutex_
 3. stats_mutex_
 
 **避免在持有锁时:**
+
 - 调用用户回调 (OnFrame)
 - 执行耗时操作
 - 等待其他资源

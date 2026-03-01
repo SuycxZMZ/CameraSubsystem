@@ -88,20 +88,86 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 
 ### 发布端/订阅端解耦架构调整
 
-当前项目增加发布端/订阅端解耦演进方向，满足“唯一发布端 + 多订阅端”的业务场景：
+当前项目增加发布端/订阅端解耦演进方向，满足“唯一核心发布端（V4L2 直连）+ 多子发布端/订阅端”的业务场景：
 
-1. 唯一发布端实例 `camera_publisher` 统一管理摄像头与分发。
-2. 一个或多个订阅端实例 `camera_subscriber` 独立接入。
-3. 某路 Camera 仅在存在订阅时启动采集，无订阅时停止并释放资源。
+1. 核心发布端实例 `camera_publisher_core` 统一管理摄像头与分发，并独占设备访问。
+2. 子发布端实例 `camera_sub_publisher`（可选）作为核心发布端的订阅者，执行编解码/转封装后可再发布。
+3. 一个或多个纯订阅端实例 `camera_subscriber` 独立接入业务处理。
+4. 某路 Camera 仅在存在订阅时启动采集，无订阅时停止并释放资源。
 
 典型用户故事（开发阶段示例）：
 
-1. 示例使用 1 个发布端 + 1 个订阅端做联调。
+1. 示例使用 1 个核心发布端 + 1 个订阅端做联调。
 2. 订阅端收到一帧后 `sleep 5ms` 模拟上层处理。
 3. 订阅端每 1 秒保存 1 张图片。
-4. 最多保留 1 张，固定文件名覆盖。
+4. 最多保留 10 张，槽位 `0~9` 循环覆盖。
 
-实际场景中，可以有多个订阅端并发订阅同一路或多路 Camera。
+实际场景中，可以有多个子发布端和多个订阅端并发订阅同一路或多路 Camera。
+
+示例程序（双进程）：
+
+1. 核心发布端：`bin/camera_publisher_example`
+2. 订阅端：`bin/camera_subscriber_example`
+
+启动步骤：
+
+1. 先启动发布端（终端 1）：
+
+```bash
+./bin/camera_publisher_example
+```
+
+2. 再启动订阅端（终端 2）：
+
+```bash
+./bin/camera_subscriber_example
+```
+
+3. 两端默认无限运行，按 `Ctrl+C` 退出（`SIGINT/SIGTERM` 优雅退出）。
+
+参数说明：
+
+1. 发布端：
+
+```bash
+./bin/camera_publisher_example [device_path] [control_socket] [data_socket]
+```
+
+- `device_path`：默认 `CAMERA_SUBSYSTEM_DEFAULT_CAMERA`（通常 `/dev/video0`）
+- `control_socket`：默认 `/tmp/camera_subsystem_control.sock`
+- `data_socket`：默认 `/tmp/camera_subsystem_data.sock`
+
+2. 订阅端：
+
+```bash
+./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket]
+```
+
+- `output_dir`：默认 `./subscriber_frames`
+- `control_socket`：默认 `/tmp/camera_subsystem_control.sock`
+- `data_socket`：默认 `/tmp/camera_subsystem_data.sock`
+
+运行期输出：
+
+1. 发布端每秒打印：`sec | frames | fps | clients | sent_bytes | send_fail`
+2. 订阅端每秒打印：`sec | frames | fps | received_bytes | save_fail | image`
+3. 订阅端每秒保存 1 张图片，槽位 `0~9` 循环覆盖。
+
+故障排查：
+
+1. `connect control socket failed` / `connect data socket failed`：
+   确认发布端已启动并运行，且控制面与数据面 socket 路径参数一致。
+2. Camera 打开失败（如 `/dev/video0`）：
+   检查设备节点 `ls /dev/video0` 与用户权限（`video` 组），必要时用 `sudo` 验证。
+3. socket bind 失败（Address already in use）：
+   清理残留 socket 文件后重试：
+
+```bash
+rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
+```
+
+4. 订阅端无图或 `save_fail` 增长：
+   检查输出目录写权限，并先用 `camera_source_stress_test` 验证采集链路。
 
 协议协定（规划）：
 
@@ -266,7 +332,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 | ARCH-006 | 订阅者优先级静态 | ⏳ 计划中 | 自适应优先级 |
 | ARCH-007 | 设备自动重连 | ⏳ 计划中 | 设备监控与恢复 |
 | ARCH-008 | 降级策略 | ⏳ 计划中 | 降帧/降分辨率 |
-| ARCH-018 | 发布端/订阅端解耦模式 | 🚧 进行中 | 单发布端 + 多订阅端隔离 |
+| ARCH-018 | 发布端/订阅端解耦模式 | 🚧 进行中 | 核心发布端（V4L2 直连）+ 多子发布端/订阅端隔离 |
 | ARCH-019 | 按订阅启停 Camera | 🚧 进行中 | 无订阅不采集，避免资源空耗 |
 | ARCH-020 | 跨平台协议头协定 | 🚧 进行中 | 默认设备宏 + MIPI/USB 可扩展 |
 
@@ -281,6 +347,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ### 详细设计摘要（Buffer 生命周期与背压）
 
 **Buffer 生命周期与复用池**
+
 1. `BufferPool` 统一管理预分配 Buffer，避免热路径分配与拷贝。
 2. `FrameHandle` 持有 Buffer 引用而非所有权，依靠 RAII 归还。
 3. 生命周期状态：`Free -> InUse -> InFlight -> Free`。
@@ -289,6 +356,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 6. 后续升级为 **DMA-BUF 零拷贝**。
 
 **背压与丢帧策略**
+
 1. 采集层：池耗尽时优先丢弃最新帧，避免阻塞采集线程。
 2. 分发层：队列超阈值或延迟过大触发丢帧策略。
 3. 订阅者层：低优先级订阅者可“仅保留最新帧”。
@@ -309,6 +377,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 ### spdlog 安装与集成（推荐）
 
 本项目的 CMake 已支持以下优先级：
+
 1. `find_package(spdlog CONFIG)`（系统已安装时）
 2. `third_party/spdlog`（推荐）
 3. `third_party/spdlog_stub`（仅兜底）
@@ -316,9 +385,7 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 推荐将 spdlog 作为子模块放入 `third_party/spdlog`：
 
 ```bash
-
 # 在仓库根目录执行
-
 git submodule add https://github.com/gabime/spdlog.git third_party/spdlog
 git submodule update --init --recursive
 ```
@@ -340,6 +407,7 @@ rm -rf build
 ### Google Test 安装与配置（推荐）
 
 本项目的 CMake 已支持以下优先级：
+
 1. `find_package(GTest CONFIG)`（系统已安装时）
 2. `third_party/googletest`（推荐）
 3. 未找到时跳过测试目标（不影响库构建）
@@ -347,9 +415,7 @@ rm -rf build
 推荐将 googletest 作为子模块放入 `third_party/googletest`：
 
 ```bash
-
 # 在仓库根目录执行
-
 git submodule add https://github.com/google/googletest.git third_party/googletest
 git submodule update --init --recursive
 ```
