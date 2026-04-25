@@ -5,7 +5,7 @@ add_executable(camera_publisher_example
 )
 
 set_target_properties(camera_publisher_example PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
 )
 
 target_link_libraries(camera_publisher_example
@@ -21,7 +21,7 @@ add_executable(camera_subscriber_example
 )
 
 set_target_properties(camera_subscriber_example PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
 )
 
 target_link_libraries(camera_subscriber_example

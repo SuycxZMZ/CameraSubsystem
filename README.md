@@ -6,29 +6,91 @@
 **核心方向:** Camera / V4L2 -> Zero-Copy Pub/Sub -> NPU / AI  
 **文档作者:** 架构设计团队  
 **创建日期:** 2026-01-27  
-**最后更新:** 2026-03-01
+**最后更新:** 2026-04-25
+
+> **文档硬规范**
+>
+> - 本项目所有流程图、框图、时序图、状态机图、目录结构图等图示必须使用 Mermaid fenced code block（语言标识为 `mermaid`）。
+> - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
+> - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
+> - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
 
 ---
 
-## 当前里程碑（2026-03-01）
+## 目录
 
-当前版本已实现“核心发布端 + 订阅端”双进程联调闭环（Ubuntu + V4L2）：
+- [工程入口与文档导航](#工程入口与文档导航)
+  - [工程结构概览](#工程结构概览)
+  - [项目文档索引](#项目文档索引)
+  - [常用入口](#常用入口)
+- [当前里程碑（2026-04-25）](#当前里程碑2026-04-25)
+- [1. 设计概述](#1-设计概述)
+- [2. 总体架构设计](#2-总体架构设计)
+- [3. 架构设计深化（Buffer 生命周期与背压策略）](#3-架构设计深化buffer-生命周期与背压策略)
+- [4. 核心数据结构设计](#4-核心数据结构设计)
+- [4. 开发与调试指南（Ubuntu + V4L2 / RK3576）](#4-开发与调试指南ubuntu--v4l2--rk3576)
+- [5. 线程模型与并发控制](#5-线程模型与并发控制)
+- [6. 生命周期与资源管理](#6-生命周期与资源管理)
+- [7. 错误处理与日志](#7-错误处理与日志)
+- [8. 编码规范与命名约定](#8-编码规范与命名约定)
+- [9. 性能指标与测试要求](#9-性能指标与测试要求)
+- [10. 后续工作计划](#10-后续工作计划)
+- [11. 附录](#11-附录)
+
+---
+
+## 工程入口与文档导航
+
+README 是团队默认入口，负责说明工程结构、核心文档、常用构建与联调路径。细节性设计应优先沉淀到对应专题文档，再从 README 链接过去。
+
+### 工程结构概览
+
+| 路径 | 用途 |
+|------|------|
+| [`include/camera_subsystem/`](include/camera_subsystem/) | 对外头文件，按 core / camera / broker / ipc / platform / utils 分层 |
+| [`src/`](src/) | 模块实现，与 `include/camera_subsystem/` 的模块边界保持一致 |
+| [`examples/`](examples/) | 发布端 / 订阅端双进程示例 |
+| [`tests/`](tests/) | 单元测试与压力测试 |
+| [`scripts/`](scripts/) | 本机构建、RK3576 交叉编译、格式化与统计脚本 |
+| [`cmake/toolchains/`](cmake/toolchains/) | 交叉编译工具链配置，目前包含 RK3576 |
+| [`docs/`](docs/) | 项目概览、架构评审等专题文档 |
+| [`third_party/`](third_party/) | 第三方依赖源码或 stub，项目文档规范不约束上游文档 |
+
+### 项目文档索引
+
+| 文档 | 适合阅读场景 |
+|------|--------------|
+| [README.md](README.md) | 团队入口、当前里程碑、架构主线、构建与联调路径 |
+| [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md) | 快速了解项目定位、技术栈、状态与快速开始 |
+| [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) | 查看架构评审结论、风险、ARCH-* 跟踪项 |
+| [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | 查看模块完成度、测试状态、技术债务与下一步计划 |
+| [API_REFERENCE.md](API_REFERENCE.md) | 查询公开接口、数据结构、IPC 和示例用法 |
+| [NAMING_CONVENTION.md](NAMING_CONVENTION.md) | 查询命名、代码格式、跨平台与文件组织约定 |
+| [structure.md](structure.md) | 查看较完整的架构设计长文和历史设计语境 |
+
+### 常用入口
+
+| 任务 | 命令或入口 |
+|------|------------|
+| 本机完整构建与测试 | `./scripts/build.sh` |
+| RK3576 交叉编译 | `./scripts/build-rk3576.sh` |
+| 代码格式化 | `./scripts/format.sh` |
+| 代码量统计 | `./scripts/count_loc.sh` |
+| 发布端示例 | `./bin/camera_publisher_example` 或 `./bin/rk3576/camera_publisher_example` |
+| 订阅端示例 | `./bin/camera_subscriber_example` 或 `./bin/rk3576/camera_subscriber_example` |
+
+---
+
+## 当前里程碑（2026-04-25）
+
+当前版本已实现“核心发布端 + 订阅端”双进程联调闭环，并新增 RK3576 交叉编译入口：
 
 - 核心发布端独占设备访问（V4L2 入口唯一）
 - 控制面 IPC（订阅/退订）+ 数据面 IPC（帧头+帧数据）
 - 按订阅引用计数启停采集会话（无订阅不采集）
 - 发布端/订阅端双进程示例可直接运行（默认设备 `CAMERA_SUBSYSTEM_DEFAULT_CAMERA`）
 - 单元测试与压测流程可运行，当前 `build.sh` 可通过
-
-文档导航：
-
-- 项目概览：`docs/PROJECT_OVERVIEW.md`
-- 实现进度：`IMPLEMENTATION_STATUS.md`
-- 架构评审：`docs/ARCHITECTURE_REVIEW.md`
-- 命名规范：`NAMING_CONVENTION.md`
-- API 参考：`API_REFERENCE.md`
-
----
+- RK3576 官方工具链交叉编译可通过，产物输出到 `bin/rk3576/`
 
 ## 1. 设计概述
 
@@ -119,44 +181,35 @@
 
 系统采用分层架构,自底向上分为平台抽象层、数据源层、分发总线层和应用业务层。
 
-```text
-┌───────────────────────────────────────────────────────────────────────┐
-│                      Application Layer (AI/App)                       │
-│  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────┐   │
-│  │  AI Inference  │  │ Video Encoder  │  │ Debug/Record/Display   │   │
-│  │  (Subscriber)  │  │  (Subscriber)  │  │  (Subscriber)          │   │
-│  └───────┬────────┘  └───────┬────────┘  └──────────┬─────────────┘   │
-└──────────┼───────────────────┼──────────────────────┼─────────────────┘
-           │ (OnFrame)         │ (OnFrame)            │ (OnFrame)
-┌──────────┼───────────────────┼──────────────────────┼─────────────────┐
-│          v                   v                      v                 │
-│                   Frame Broker Layer (Core)                           │
-│  ┌─────────────────────────────────────────────────────────────────┐  │
-│  │                    FrameBroker (Manager)                        │  │
-│  │  - Subscription Registry (Weak Ptr)                             │  │
-│  │  - Task Dispatcher & Priority Queue                             │  │
-│  │  - Worker Thread Pool                                           │  │
-│  └─────────────────────────────────────────────────────────────────┘  │
-└───────────────────────────────────────────────────────────────────────┘
-                                        ↑
-                                        │ (Publish)
-┌───────────────────────────────────────────────────────────────────────┐
-│                      Camera Source Layer                              │
-│  ┌─────────────────────────────────────────────────────────────────┐  │
-│  │                    CameraSource                                 │  │
-│  │  - V4L2 Device Control (Open/Start/Stop)                        │  │
-│  │  - Buffer Pool Management (DMA-BUF/mmap)                        │  │
-│  │  - Capture Thread (Epoll Wait)                                  │  │
-│  └─────────────────────────────────────────────────────────────────┘  │
-└───────────────────────────────────────────────────────────────────────┘
-                                        ↑
-                                        │ (Ioctl / Mmap)
-┌───────────────────────────────────────────────────────────────────────┐
-│                     Platform Abstraction Layer                        │
-│  ┌────────────────┐  ┌────────────────┐  ┌───────────────────────┐    │
-│  │  PlatformEpoll │  │ PlatformThread │  │  PlatformLogger       │    │
-│  └────────────────┘  └────────────────┘  └───────────────────────┘    │
-└───────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph App["Application Layer (AI/App)"]
+        AI["AI Inference<br/>(Subscriber)"]
+        Encoder["Video Encoder<br/>(Subscriber)"]
+        Debug["Debug / Record / Display<br/>(Subscriber)"]
+    end
+
+    subgraph BrokerLayer["Frame Broker Layer (Core)"]
+        Broker["FrameBroker (Manager)<br/>Subscription Registry<br/>Task Dispatcher & Priority Queue<br/>Worker Thread Pool"]
+    end
+
+    subgraph CameraLayer["Camera Source Layer"]
+        Source["CameraSource<br/>V4L2 Device Control<br/>Buffer Pool Management<br/>Capture Thread (Epoll Wait)"]
+    end
+
+    subgraph PlatformLayer["Platform Abstraction Layer"]
+        Epoll["PlatformEpoll"]
+        Thread["PlatformThread"]
+        Logger["PlatformLogger"]
+    end
+
+    AI -->|OnFrame| Broker
+    Encoder -->|OnFrame| Broker
+    Debug -->|OnFrame| Broker
+    Source -->|Publish| Broker
+    Epoll -->|Ioctl / Mmap| Source
+    Thread -->|Thread| Source
+    Logger -->|Log| Source
 ```
 
 ### 2.2 核心组件职责
@@ -170,9 +223,12 @@
 
 ### 2.3 数据流向图
 
-```text
-Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
-     (DQBUF)       (DMA-BUF)      (FrameHandle)  (Dispatch)     (OnFrame)
+```mermaid
+flowchart LR
+    Hardware["Camera Hardware"] --> Driver["V4L2 Driver"]
+    Driver -->|DQBUF / DMA-BUF| Source["CameraSource"]
+    Source -->|FrameHandle| Broker["FrameBroker"]
+    Broker -->|Dispatch / OnFrame| Subscribers["Subscribers"]
 ```
 
 **Buffer 生命周期:**
@@ -191,13 +247,26 @@ Camera Hardware -> V4L2 Driver -> CameraSource -> FrameBroker -> Subscribers
 2. `camera_sub_publisher`：子发布端（可选），先订阅核心发布端数据，执行编解码/转封装后再向下游发布。
 3. `camera_subscriber`：纯订阅端，一个或多个实例，直接消费数据做 AI/业务处理。
 
-```text
-sub_publisher_1 ----\
-subscriber_1 -------+--> [Control IPC] --> publisher_core
-subscriber_n -------/             |
-                                  +--> CameraSessionManager (按路管理)
-                                  +--> CameraSource(/dev/videoX)
-                                  +--> [Data IPC] --> sub_publishers / subscribers
+```mermaid
+flowchart LR
+    SubPublisher["sub_publisher_1"]
+    Subscriber1["subscriber_1"]
+    SubscriberN["subscriber_n"]
+    ControlIPC["Control IPC"]
+    Core["publisher_core"]
+    Session["CameraSessionManager<br/>按路管理"]
+    Source["CameraSource<br/>/dev/videoX"]
+    DataIPC["Data IPC"]
+    Consumers["sub_publishers / subscribers"]
+
+    SubPublisher --> ControlIPC
+    Subscriber1 --> ControlIPC
+    SubscriberN --> ControlIPC
+    ControlIPC --> Core
+    Core --> Session
+    Session --> Source
+    Source --> DataIPC
+    DataIPC --> Consumers
 ```
 
 **设计约束（必须满足）**
@@ -427,15 +496,33 @@ struct FrameHandle
 
 ---
 
-## 4. 开发与调试指南（Ubuntu + V4L2）
+## 4. 开发与调试指南（Ubuntu + V4L2 / RK3576）
 
-本项目当前可在 Ubuntu 上直接使用 V4L2 采集进行调试（RK3576 交叉编译暂未启用）。
+本项目可在 Ubuntu 上直接使用 V4L2 采集进行调试，也支持使用 Luckfox Omni3576 SDK
+自带 GCC 10.3 aarch64 工具链交叉编译 RK3576 / Debian 运行产物。
 
 ### 4.1 构建
+
+本机 Ubuntu 构建并运行测试：
 
 ```bash
 ./scripts/build.sh
 ```
+
+RK3576 交叉编译：
+
+```bash
+./scripts/build-rk3576.sh
+```
+
+默认约定 SDK 位于项目同级目录 `../Omni3576-sdk`。如果 SDK 在其他位置，设置：
+
+```bash
+OMNI3576_SDK_ROOT=/path/to/Omni3576-sdk ./scripts/build-rk3576.sh
+```
+
+交叉编译使用 `cmake/toolchains/rk3576.cmake`，默认关闭单元测试与宿主机系统依赖查找，
+产物输出到 `bin/rk3576/`。
 
 ### 4.2 摄像头权限
 
@@ -492,12 +579,13 @@ sudo ./bin/camera_source_stress_test 20 /dev/video0
 
 ### 4.6 边缘设备与交叉编译（RK3576 / Debian）
 
-当前阶段优先在 Ubuntu 上使用 V4L2 调试。面向 RK3576 的交叉编译计划如下：
+RK3576 交叉编译入口已经启用：
 
-- 规划 CMake Toolchain 文件（例如 `cmake/toolchains/rk3576.cmake`）
-- 使用 aarch64 交叉编译器与 sysroot（由 SDK 提供）
-- 设备侧依赖：V4L2、pthread、libdrm（后续补充）
-- CI 增加交叉编译与最小运行时包产物
+- Toolchain 文件：`cmake/toolchains/rk3576.cmake`
+- 官方工具链前缀：`aarch64-none-linux-gnu-`
+- SDK 默认路径：`../Omni3576-sdk`
+- 运行产物：`bin/rk3576/camera_publisher_example` 和 `bin/rk3576/camera_subscriber_example`
+- 当前依赖：V4L2、pthread、标准 C/C++ 运行库；后续接入 RGA / RKNN / MPP 时再补充 sysroot 依赖
 
 ### 4.7 架构完善与待优化项
 

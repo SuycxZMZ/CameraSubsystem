@@ -2,7 +2,18 @@ cmake_minimum_required(VERSION 3.10)
 project(CameraSubsystem VERSION 0.1.0 LANGUAGES CXX)
 
 # 构建选项
-option(CAMERA_SUBSYSTEM_BUILD_TESTS "Build unit tests" ON)
+set(CAMERA_SUBSYSTEM_BUILD_TESTS_DEFAULT ON)
+set(CAMERA_SUBSYSTEM_USE_SYSTEM_DEPS_DEFAULT ON)
+if (CMAKE_CROSSCOMPILING)
+    set(CAMERA_SUBSYSTEM_BUILD_TESTS_DEFAULT OFF)
+    set(CAMERA_SUBSYSTEM_USE_SYSTEM_DEPS_DEFAULT OFF)
+endif ()
+
+option(CAMERA_SUBSYSTEM_BUILD_TESTS "Build unit tests" ${CAMERA_SUBSYSTEM_BUILD_TESTS_DEFAULT})
+option(CAMERA_SUBSYSTEM_USE_SYSTEM_DEPS
+    "Use dependencies discovered from the host/system package paths"
+    ${CAMERA_SUBSYSTEM_USE_SYSTEM_DEPS_DEFAULT}
+)
 
 # 为 clangd 生成 compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -11,6 +22,17 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if (NOT DEFINED CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR)
+    if (CMAKE_CROSSCOMPILING)
+        set(CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR "${PROJECT_SOURCE_DIR}/bin/${CMAKE_SYSTEM_PROCESSOR}")
+    else ()
+        set(CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR "${PROJECT_SOURCE_DIR}/bin")
+    endif ()
+endif ()
+set(CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
+    CACHE PATH "Directory for runtime binaries"
+)
 
 set(CAMERA_SUBSYSTEM_WARNING_FLAGS
     -Wall
@@ -157,7 +179,12 @@ target_link_libraries(camera_subsystem_ipc
 )
 
 # 查找依赖
+set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+set(CAMERA_SUBSYSTEM_THREAD_LIBS Threads::Threads)
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND CAMERA_SUBSYSTEM_THREAD_LIBS pthread)
+endif ()
 
 # spdlog: 优先使用系统安装,其次使用 third_party,最后回退到 stub
 set(CAMERA_SUBSYSTEM_THIRD_PARTY_DIR "${PROJECT_SOURCE_DIR}/third_party")
@@ -166,11 +193,13 @@ set(CAMERA_SUBSYSTEM_SPDLOG_STUB_DIR "${CAMERA_SUBSYSTEM_THIRD_PARTY_DIR}/spdlog
 
 set(SPDLOG_TARGET "")
 
-find_package(spdlog CONFIG QUIET)
-if (TARGET spdlog::spdlog)
-    set(SPDLOG_TARGET spdlog::spdlog)
-elseif (TARGET spdlog::spdlog_header_only)
-    set(SPDLOG_TARGET spdlog::spdlog_header_only)
+if (CAMERA_SUBSYSTEM_USE_SYSTEM_DEPS)
+    find_package(spdlog CONFIG QUIET)
+    if (TARGET spdlog::spdlog)
+        set(SPDLOG_TARGET spdlog::spdlog)
+    elseif (TARGET spdlog::spdlog_header_only)
+        set(SPDLOG_TARGET spdlog::spdlog_header_only)
+    endif ()
 endif ()
 
 if (NOT SPDLOG_TARGET AND EXISTS "${CAMERA_SUBSYSTEM_SPDLOG_DIR}/CMakeLists.txt")
@@ -205,7 +234,7 @@ endif ()
 # 链接外部库
 target_link_libraries(camera_subsystem_platform
     PUBLIC
-        Threads::Threads
+        ${CAMERA_SUBSYSTEM_THREAD_LIBS}
         ${SPDLOG_TARGET}
 )
 
@@ -221,7 +250,9 @@ if (CAMERA_SUBSYSTEM_BUILD_TESTS AND BUILD_TESTING)
     set(CAMERA_SUBSYSTEM_GTEST_DIR "${CAMERA_SUBSYSTEM_THIRD_PARTY_DIR}/googletest")
 
     # 先尝试系统安装（Config 模式）
-    find_package(GTest CONFIG QUIET)
+    if (CAMERA_SUBSYSTEM_USE_SYSTEM_DEPS)
+        find_package(GTest CONFIG QUIET)
+    endif ()
 
     # 系统未安装时，回退到 third_party/googletest
     if (NOT GTest_FOUND AND EXISTS "${CAMERA_SUBSYSTEM_GTEST_DIR}/CMakeLists.txt")

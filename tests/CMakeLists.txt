@@ -4,7 +4,7 @@ add_executable(platform_stress_test
 )
 
 set_target_properties(platform_stress_test PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
 )
 
 target_link_libraries(platform_stress_test
@@ -22,7 +22,7 @@ add_executable(frame_broker_stress_test
 )
 
 set_target_properties(frame_broker_stress_test PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
 )
 
 target_link_libraries(frame_broker_stress_test
@@ -40,7 +40,7 @@ add_executable(camera_source_stress_test
 )
 
 set_target_properties(camera_source_stress_test PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
 )
 
 target_link_libraries(camera_source_stress_test
@@ -152,7 +152,7 @@ add_executable(test_buffer_lifecycle
 )
 
 set_target_properties(test_buffer_lifecycle PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
 )
 
 target_link_libraries(test_buffer_lifecycle

@@ -5,7 +5,33 @@
 **开发语言:** C/C++ 混合 (数据层 C POD, 框架层 C++17)  
 **文档作者:** 架构设计团队  
 **创建日期:** 2026-01-27  
-**最后更新:** 2026-02-03
+**最后更新:** 2026-04-25
+
+> **文档硬规范**
+>
+> - 本项目所有流程图、框图、时序图、状态机图、目录结构图等图示必须使用 Mermaid fenced code block（语言标识为 `mermaid`）。
+> - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
+> - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
+> - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
+
+---
+
+## 目录
+
+- [1. 文档概述](#1-文档概述)
+- [2. 命名规范总则](#2-命名规范总则)
+- [3. 类名规范](#3-类名规范)
+- [4. 函数名规范](#4-函数名规范)
+- [5. 变量名规范](#5-变量名规范)
+- [6. 常量命名规范](#6-常量命名规范)
+- [7. 枚举命名规范](#7-枚举命名规范)
+- [8. 命名空间规范](#8-命名空间规范)
+- [9. 文件命名规范](#9-文件命名规范)
+- [10. 类型别名规范](#10-类型别名规范)
+- [11. 模板参数规范](#11-模板参数规范)
+- [12. 命名示例](#12-命名示例)
+- [13. 命名检查清单](#13-命名检查清单)
+- [14. 命名规范速查表](#14-命名规范速查表)
 
 ---
 
@@ -594,36 +620,39 @@ namespace camera_subsystem
 
 ### 9.2 目录结构
 
-```text
-camera_subsystem/
-├── include/
-│   └── camera_subsystem/
-│       ├── core/
-│       │   ├── frame_handle.h
-│       │   ├── camera_config.h
-│       │   └── error_code.h
-│       ├── camera/
-│       │   └── camera_source.h
-│       ├── broker/
-│       │   ├── frame_broker.h
-│       │   └── frame_subscriber.h
-│       └── platform/
-│           ├── platform_thread.h
-│           ├── platform_epoll.h
-│           └── platform_logger.h
-├── src/
-│   ├── camera/
-│   │   └── camera_source.cpp
-│   ├── broker/
-│   │   ├── frame_broker.cpp
-│   │   └── frame_subscriber.cpp
-│   └── platform/
-│       ├── platform_thread.cpp
-│       ├── platform_epoll.cpp
-│       └── platform_logger.cpp
-└── tests/
-    ├── unit/
-    └── integration/
+```mermaid
+flowchart TB
+    Root["camera_subsystem/"]
+    Root --> Include["include/"]
+    Include --> Public["camera_subsystem/"]
+    Public --> Core["core/"]
+    Core --> FrameHandle["frame_handle.h"]
+    Core --> CameraConfig["camera_config.h"]
+    Core --> ErrorCode["error_code.h"]
+    Public --> Camera["camera/"]
+    Camera --> CameraSourceH["camera_source.h"]
+    Public --> Broker["broker/"]
+    Broker --> FrameBrokerH["frame_broker.h"]
+    Broker --> FrameSubscriberH["frame_subscriber.h"]
+    Public --> Platform["platform/"]
+    Platform --> ThreadH["platform_thread.h"]
+    Platform --> EpollH["platform_epoll.h"]
+    Platform --> LoggerH["platform_logger.h"]
+
+    Root --> Src["src/"]
+    Src --> SrcCamera["camera/"]
+    SrcCamera --> CameraSourceCpp["camera_source.cpp"]
+    Src --> SrcBroker["broker/"]
+    SrcBroker --> FrameBrokerCpp["frame_broker.cpp"]
+    SrcBroker --> FrameSubscriberCpp["frame_subscriber.cpp"]
+    Src --> SrcPlatform["platform/"]
+    SrcPlatform --> ThreadCpp["platform_thread.cpp"]
+    SrcPlatform --> EpollCpp["platform_epoll.cpp"]
+    SrcPlatform --> LoggerCpp["platform_logger.cpp"]
+
+    Root --> Tests["tests/"]
+    Tests --> Unit["unit/"]
+    Tests --> Integration["integration/"]
 ```
 
 ---
