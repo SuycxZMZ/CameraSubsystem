@@ -1,6 +1,6 @@
 /**
  * @file camera_source.h
- * @brief Camera 数据源（模拟实现）
+ * @brief Camera 数据源（V4L2/MMAP 采集实现）
  * @author CameraSubsystem Team
  * @date 2026-01-31
  */
@@ -25,10 +25,10 @@ namespace camera_subsystem {
 namespace camera {
 
 /**
- * @brief Camera 数据源（模拟实现）
+ * @brief Camera 数据源（V4L2/MMAP 采集实现）
  *
- * 当前版本基于 V4L2 进行采集，用于 Ubuntu 上调试，
- * 后续可扩展为 RK3576 交叉编译环境。
+ * 当前版本基于 V4L2 MMAP 进行采集，并拷贝到 BufferPool 供分发链路使用。
+ * RK3576 交叉编译已接入，DMA-BUF 零拷贝仍是后续生产化路线。
  */
 class CameraSource
 {

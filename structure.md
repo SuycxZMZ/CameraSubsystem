@@ -14,6 +14,11 @@
 > - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
+> - 评审建议、风险、ARCH-* 跟踪项只维护在 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)，其他文档只链接引用，避免重复漂移。
+
+> **定位说明**
+>
+> 本文档是完整架构设计长文，保留历史设计语境和细节推演。当前工程入口以 [README.md](README.md) 为准，评审建议以 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 为准，接口事实以 [API_REFERENCE.md](API_REFERENCE.md) 为准。
 
 ## 目录
 

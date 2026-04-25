@@ -1,9 +1,9 @@
-# CameraSubsystem 架构评审文档
+# CameraSubsystem 架构评审与建议
 
-**文档版本:** v0.3
-**评审范围:** 当前主干代码（截至 2026-04-25）
-**评审日期:** 2026-04-25
-**关联文档:** `README.md`、`docs/PROJECT_OVERVIEW.md`、`IMPLEMENTATION_STATUS.md`
+**文档版本:** v0.4<br>
+**评审范围:** 当前主干代码与项目文档（截至 2026-04-25）<br>
+**评审角色:** 高级系统架构师<br>
+**关联文档:** [README.md](../README.md)、[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)、[API_REFERENCE.md](../API_REFERENCE.md)
 
 > **文档硬规范**
 >
@@ -11,136 +11,271 @@
 > - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
+> - 评审建议、风险、ARCH-* 跟踪项只维护在本文档，其他文档只链接引用，避免重复漂移。
 
 ---
 
 ## 目录
 
 - [1. 评审目标](#1-评审目标)
-- [2. 当前架构基线（已落地）](#2-当前架构基线已落地)
-- [3. 评审结论（按优先级）](#3-评审结论按优先级)
-- [4. 架构项跟踪（ARCH-*）](#4-架构项跟踪arch-)
-- [5. 风险与待优化项](#5-风险与待优化项)
-- [6. 下一阶段验收标准（建议）](#6-下一阶段验收标准建议)
-- [7. 评审结论摘要](#7-评审结论摘要)
+- [2. 总体结论](#2-总体结论)
+- [3. 当前系统架构基线](#3-当前系统架构基线)
+- [4. 系统架构评审](#4-系统架构评审)
+- [5. 代码架构评审](#5-代码架构评审)
+- [6. 从原始文档抽取的评审建议](#6-从原始文档抽取的评审建议)
+- [7. 风险清单与优先级](#7-风险清单与优先级)
+- [8. 架构项跟踪（ARCH-*）](#8-架构项跟踪arch-)
+- [9. 下一阶段验收标准](#9-下一阶段验收标准)
+- [10. 结论摘要](#10-结论摘要)
 
 ---
 
 ## 1. 评审目标
 
-本次评审聚焦三个问题：
+本次评审聚焦三个层面：
 
-1. 当前实现是否满足“核心发布端唯一设备入口 + 多子发布端/订阅端并发接入”。
-2. 关键链路（生命周期、会话治理、IPC）是否形成可运行闭环。
-3. 下一阶段是否具备可执行的工程化推进路径（而非仅概念设计）。
-
----
-
-## 2. 当前架构基线（已落地）
-
-### 2.1 进程模型与职责
-
-- 核心发布端：
-  - 唯一允许直连 V4L2 设备节点。
-  - 管理采集会话（按订阅引用计数启停）。
-  - 承载控制面服务端与数据面分发。
-- 子发布端（可选）：
-  - 作为订阅者接入核心发布端。
-  - 进行编解码/转封装后再向下游发布（当前为架构位，示例未完整实现）。
-- 纯订阅端：
-  - 消费帧数据做 AI/业务处理。
-
-### 2.2 关键模块落地状态
-
-- `CameraSessionManager`：已落地
-  - 核心发布端单实例约束
-  - 引用计数订阅治理
-  - 首订阅启动、最后退订停止
-- 控制面 IPC：已落地（基础版）
-  - `CameraControlServer` / `CameraControlClient`
-  - Subscribe / Unsubscribe / Ping
-- 数据面 IPC：已落地（示例版）
-  - `CameraDataFrameHeader` + 帧数据
-  - 双进程示例可运行
-- Buffer 生命周期治理：已落地
-  - `BufferGuard` + `BufferPool` + 状态机 + 泄漏检测
+1. **系统架构**：当前分层、进程模型、数据通路是否支撑 RK3576 上长期运行。
+2. **代码架构**：模块边界、线程模型、生命周期管理、IPC 协议是否具备继续演进的稳定基础。
+3. **评审建议归档**：将 README、PROJECT_OVERVIEW、IMPLEMENTATION_STATUS、structure 等文档中分散的架构建议集中维护到本文档，避免主文档重复堆叠。
 
 ---
 
-## 3. 评审结论（按优先级）
+## 2. 总体结论
 
-### P0（必须满足）
+当前 CameraSubsystem 已经从“单进程概念原型”进入“可运行的核心发布端 + 订阅端双进程原型”阶段，方向正确，工程边界也比早期清晰：核心发布端独占 V4L2、控制面 IPC 管理订阅关系、数据面 IPC 做示例帧传输、BufferPool/BufferGuard 解决了基础生命周期问题，RK3576 官方工具链也已接入。
 
-- ✅ **设备入口唯一性**：满足。  
-  同一路设备句柄由核心发布端独占，不在订阅端直接打开设备。
-- ✅ **会话启停闭环**：满足。  
-  订阅引用从 `0 -> 1` 启动采集，从 `1 -> 0` 停止采集。
-- ✅ **双进程联调可运行**：满足。  
-  发布端与订阅端示例可运行，支持 Ctrl+C 优雅退出。
+但从生产级边缘系统角度看，目前仍是 **可运行原型**，不是稳定生产架构。下一阶段必须优先解决四件事：
 
-### P1（应尽快完善）
-
-- ⚠️ **背压策略参数化不足**：仅具备基础丢帧策略，缺少策略配置中心。
-- ⚠️ **设备故障恢复不足**：尚无统一自动重连与降级策略。
-- ⚠️ **观测性不足**：指标未统一抽象为可采集接口。
-
-### P2（阶段性规划）
-
-- ⏳ **DMA-BUF 零拷贝主链路**：当前仍为拷贝模式主路径。
-- ✅ **RK3576 交叉编译产物规范化**：官方 GCC 10.3 aarch64 工具链、CMake toolchain 与 `build-rk3576.sh` 已落地；板端运行验证仍需执行。
-- ⏳ **生产级协议增强**：控制/数据面需增加能力协商、鉴权与稳态机制。
+1. 将数据面从“socket 复制示例”升级为可部署的数据通路，明确拷贝模式与零拷贝模式边界。
+2. 将背压、队列、优先级和延迟阈值从硬编码能力升级为可配置策略。
+3. 补齐设备断连、订阅端异常、核心发布端重启后的恢复闭环。
+4. 建立统一 Metrics/Tracing 接口，否则 RK3576 板端问题很难定位。
 
 ---
 
-## 4. 架构项跟踪（ARCH-*）
+## 3. 当前系统架构基线
 
-| 编号 | 主题 | 状态 | 说明 |
-|------|------|------|------|
-| ARCH-001 | Buffer 所有权不明确 | ✅ 已完成 | `BufferGuard` + RAII |
-| ARCH-002 | Buffer 状态机缺失 | ✅ 已完成 | Free/InUse/InFlight/Error |
-| ARCH-003 | Buffer 泄漏检测 | ✅ 已完成 | CheckLeaks + 析构等待 |
-| ARCH-004 | 丢帧策略硬编码 | 🚧 进行中 | 基础策略已落地，参数化未完成 |
-| ARCH-005 | 背压阈值配置 | ⏳ 计划中 | 需独立配置与动态调整 |
-| ARCH-006 | 订阅者优先级静态 | ⏳ 计划中 | 需动态优先级机制 |
-| ARCH-007 | 设备自动重连 | ⏳ 计划中 | 需会话恢复策略 |
-| ARCH-008 | 降级策略 | ⏳ 计划中 | 降帧/降分辨率策略 |
-| ARCH-018 | 发布端/订阅端解耦 | 🚧 进行中（基础落地） | 控制/数据面 IPC 与示例已打通 |
-| ARCH-019 | 按订阅启停 Camera | 🚧 进行中（基础落地） | `CameraSessionManager` 已落地 |
-| ARCH-020 | 协议头协定扩展 | 🚧 进行中（基础落地） | endpoint/role/控制协议已落地 |
-| ARCH-021 | RK3576 交叉编译入口 | ✅ 已完成 | `cmake/toolchains/rk3576.cmake` + `scripts/build-rk3576.sh` |
+```mermaid
+flowchart TB
+    subgraph CorePublisher["核心发布端进程"]
+        ControlServer["CameraControlServer<br/>控制面 IPC"]
+        SessionManager["CameraSessionManager<br/>订阅引用计数 / 按路启停"]
+        Source["CameraSource<br/>V4L2 / MMAP 采集"]
+        DataServer["DataSocketServer<br/>示例数据面 IPC"]
+    end
 
----
+    subgraph Consumers["下游进程"]
+        SubPublisher["子发布端（规划）"]
+        SubscriberA["订阅端 A"]
+        SubscriberB["订阅端 B"]
+    end
 
-## 5. 风险与待优化项
+    SubPublisher -->|Subscribe / Unsubscribe| ControlServer
+    SubscriberA -->|Subscribe / Unsubscribe| ControlServer
+    SubscriberB -->|Subscribe / Unsubscribe| ControlServer
+    ControlServer --> SessionManager
+    SessionManager -->|0->1 Start / 1->0 Stop| Source
+    Source --> DataServer
+    DataServer -->|FrameHeader + FrameBytes| SubPublisher
+    DataServer -->|FrameHeader + FrameBytes| SubscriberA
+    DataServer -->|FrameHeader + FrameBytes| SubscriberB
+```
 
-1. **高负载下延迟抖动不可控**
-   - 风险：队列积压导致端到端延迟不可预测。
-   - 建议：引入“延迟阈值 + 优先级 + 队列深度”联合策略。
-2. **设备异常恢复流程不完整**
-   - 风险：断连后需人工干预恢复。
-   - 建议：实现设备监控、分级重试与会话恢复。
-3. **数据面协议缺少稳态机制**
-   - 风险：复杂场景下缺少版本协商与容错机制。
-   - 建议：补齐协议版本、能力位、重传/丢包处理策略。
-4. **边缘部署可观测性不足**
-   - 风险：现场问题难定位。
-   - 建议：统一 Metrics 接口并输出关键时序指标。
+已落地模块：
 
----
-
-## 6. 下一阶段验收标准（建议）
-
-以下标准建议作为下一里程碑（v0.3）验收项：
-
-1. 完成 DMA-BUF 主链路打通，并提供与拷贝模式对比数据。
-2. 完成背压策略参数化，并支持运行时配置。
-3. 完成设备断连恢复最小闭环（检测、重连、会话恢复）。
-4. 输出统一指标：FPS、队列深度、丢帧率、端到端延迟。
-5. 在 RK3576 Debian 12 板端完成 `bin/rk3576/` 产物最小运行验证。
+| 模块 | 当前状态 | 评审判断 |
+|------|----------|----------|
+| `CameraSource` | V4L2 + MMAP 采集，拷贝到 BufferPool | 可用于 Ubuntu/RK3576 初期调试，尚非零拷贝主链路 |
+| `FrameBroker` | 订阅者管理、优先级队列、多 worker 分发 | 基础结构合理，策略与观测不足 |
+| `BufferPool` / `BufferGuard` | 预分配、RAII 归还、状态机、泄漏检测 | 方向正确，需进一步约束销毁时序与多消费者生命周期 |
+| `CameraSessionManager` | 核心发布端单实例、按订阅引用启停 | 职责清晰，但回调持锁执行需要调整 |
+| 控制面 IPC | Unix Domain Socket，请求/响应协议 | 适合原型，需补超时、鉴权、版本协商 |
+| 数据面 IPC | 示例 socket 传输帧头 + 帧数据 | 只能作为示例，不能作为 4K 高帧率生产路径 |
+| RK3576 构建 | 官方 GCC 10.3 toolchain 已接入 | 编译闭环完成，板端运行验证待补 |
 
 ---
 
-## 7. 评审结论摘要
+## 4. 系统架构评审
 
-当前架构已从“单进程框架原型”进入“可运行的双进程发布/订阅原型”阶段，主干方向正确。  
-下一阶段重点应从“功能可跑”转向“生产可控”：零拷贝、恢复、观测、参数化。
+### 4.1 优点
+
+1. **设备入口收敛正确**
+   核心发布端独占 V4L2 设备节点，订阅端不能直接打开 `/dev/videoX`。这是后续做稳定采集、资源仲裁、权限控制和故障恢复的前提。
+
+2. **控制面与数据面开始分离**
+   Subscribe/Unsubscribe/Ping 与帧数据传输分离，避免把控制语义塞进热路径。这个方向适合继续扩展能力协商、心跳、鉴权和多路 Camera 路由。
+
+3. **按订阅启停符合边缘设备资源约束**
+   没有订阅时不采集，能减少 RK3576 上的 ISP/V4L2/CPU 内存消耗。
+
+4. **Buffer 生命周期开始工程化**
+   `BufferGuard`、`BufferPool`、状态机与泄漏检测解决了早期“谁归还 Buffer”的模糊问题。
+
+5. **交叉编译入口已标准化**
+   `cmake/toolchains/rk3576.cmake` 与 `scripts/build-rk3576.sh` 让开发板适配从口头说明变成可执行路径。
+
+### 4.2 主要缺口
+
+1. **数据面架构尚未满足目标性能**
+   当前示例把帧数据通过 Unix Socket 复制给订阅端。该路径适合验证发布/订阅流程，但不适合 4K@30/60fps 的生产主链路。生产路径需要 DMA-BUF fd 传递、共享内存 ring、或平台媒体栈原生 buffer 句柄传递。
+
+2. **“零拷贝”仍是目标，不是当前事实**
+   当前 `CameraSource` 使用 V4L2 MMAP 后复制到 `BufferPool`，`FrameHandle::memory_type_` 也设置为 heap。文档中必须持续区分“目标零拷贝”和“当前拷贝模式”，避免误导上层 AI/编码模块。
+
+3. **恢复机制还没有形成状态机**
+   当前有启停引用计数，但没有设备断连、`VIDIOC_DQBUF` 持续失败、订阅端断链、核心发布端重启后的统一状态机。边缘设备场景下，这会是 P1 稳定性风险。
+
+4. **可观测性缺口较大**
+   分散统计已有雏形，但缺少统一 Metrics 接口、指标命名、采样周期、导出方式和故障快照。
+
+5. **多路 Camera 能力探测还停留在文档层**
+   平台能力模型和建议上限 API 有草案，但尚未接入启动流程，也没有基于 RK3576 的标定数据。
+
+---
+
+## 5. 代码架构评审
+
+### 5.1 模块边界
+
+当前目录分层基本合理：
+
+| 层级 | 现状 | 建议 |
+|------|------|------|
+| `core` | POD、Buffer、Config、类型定义 | 保持无平台依赖，后续新增 metrics 类型也应先放 core 或独立 observability |
+| `camera` | V4L2 CameraSource + SessionManager | 建议继续拆分 `v4l2_device` / `camera_source`，降低 CameraSource 体积 |
+| `broker` | 进程内分发 | 适合做策略化背压，但不要承担跨进程传输职责 |
+| `ipc` | 控制面/数据面协议 | 需要明确“示例协议”和“生产协议”的版本边界 |
+| `platform` | 线程、epoll、日志 | 可以继续沉淀 Linux/RK3576 平台差异 |
+| `examples` | 双进程示例 | 当前包含较多数据面服务逻辑，后续应抽成库或 app 层模块 |
+
+### 5.2 线程与锁
+
+1. **`CameraSessionManager` 持锁调用 start/stop callback**
+   `Subscribe()` 和 `Unsubscribe()` 在持有 `mutex_` 时调用外部回调。当前示例可运行，但后续 start/stop 可能打开 V4L2、初始化 buffer、触发日志或反向查询 session，容易造成长时间阻塞或死锁。建议将“状态决策”和“执行回调”拆开：锁内更新 session 状态，锁外执行 start/stop，再锁内提交结果或回滚。
+
+2. **`FrameBroker` 背压策略过于简单**
+   队列满时直接跳过新任务，尚无 `DropOldest`、按订阅者限流、按延迟阈值丢弃、慢消费者隔离。优先级队列是好的基础，但需要策略对象或配置结构承载规则。
+
+3. **`BufferPool` 析构等待不是生产级停机协议**
+   析构中最多等待 5 秒可以帮助测试暴露泄漏，但生产停机应由上层生命周期保证：先停采集、停分发、等待消费者 drain，再销毁 pool。建议把 drain/wait 明确为公开 API 或上层协议。
+
+4. **`CameraSource` 采集线程错误处理偏线性**
+   `select`、`DQBUF`、`QBUF` 出错后多处直接 break，缺少错误分类、重试策略、状态上报和恢复回调。
+
+### 5.3 IPC 与协议
+
+1. 控制面协议已有 magic/version，这是正确方向。
+2. 数据面 header 只有最小帧描述，没有 payload checksum、flags、plane layout、endpoint、producer timestamp、drop reason。
+3. 生产级数据面需要支持多平面和 fd 传递，否则 `FrameHandle` 中的 stride/plane 设计无法完整跨进程表达。
+4. 当前 socket 路径固定在 `/tmp`，适合开发调试；生产部署需要运行目录、权限、清理策略和服务发现规则。
+
+### 5.4 文档与代码一致性
+
+1. `camera_source.h` 已同步为 V4L2/MMAP 采集实现描述，避免继续沿用“模拟实现”的旧语义。
+2. 文档中“零拷贝”应始终标注为目标或后续路线，当前落地路径是 MMAP + heap copy。
+3. `structure.md` 更像历史架构长文，建议后续只作为背景材料，权威状态以 README、PROJECT_OVERVIEW、IMPLEMENTATION_STATUS 和本文档为准。
+
+---
+
+## 6. 从原始文档抽取的评审建议
+
+以下内容来自原 README、PROJECT_OVERVIEW、IMPLEMENTATION_STATUS、structure、API_REFERENCE 中分散的评审建议和待优化项，统一归档到本文档维护。
+
+### 6.1 已完成
+
+| 编号 | 建议 | 当前状态 |
+|------|------|----------|
+| ARCH-001 | 明确 Buffer 所有权 | 已通过 `BufferGuard` + RAII 落地 |
+| ARCH-002 | 增加 Buffer 状态机 | 已支持 Free / InUse / InFlight / Error |
+| ARCH-003 | 增加 Buffer 泄漏检测 | 已支持 `CheckLeaks` 与析构告警 |
+| ARCH-018 | 发布端/订阅端解耦 | 基础控制面 + 数据面示例已打通 |
+| ARCH-019 | 按订阅启停 Camera | `CameraSessionManager` 已实现引用计数启停 |
+| ARCH-020 | 控制/数据面协议头协定 | 已有 endpoint、role、magic、version 基础字段 |
+| ARCH-021 | RK3576 交叉编译入口 | 官方工具链与构建脚本已落地 |
+
+### 6.2 需要继续推进
+
+| 主题 | 原始建议归纳 | 建议归属 |
+|------|--------------|----------|
+| DMA-BUF 零拷贝 | 打通 V4L2 DMABUF -> FrameHandle -> Broker -> Consumer | P1 数据通路 |
+| 多平面格式 | 补齐 plane fd、stride、offset、size 的跨进程表达 | P1 数据通路 |
+| 背压参数化 | 支持延迟阈值、队列深度、订阅者优先级、DropPolicy | P1 Broker |
+| 设备恢复 | 设备断连检测、重连、会话恢复、降级策略 | P1 稳定性 |
+| 可观测性 | 输出 FPS、队列深度、丢帧率、延迟分布、错误原因 | P1 运维 |
+| 能力探测 | 平台能力 -> 建议路数/线程数/订阅者上限 | P2 平台适配 |
+| 生产级 IPC | 版本协商、能力位、鉴权、重传/拥塞控制 | P2 协议 |
+| 线程亲和性 | 采集/分发线程绑定大核/小核，降低调度抖动 | P2 性能 |
+| 板端验证 | RK3576 Debian 12 上最小运行验证与部署脚本 | P1 部署 |
+
+---
+
+## 7. 风险清单与优先级
+
+### P0：进入长期联调前必须处理
+
+| 风险 | 影响 | 建议 |
+|------|------|------|
+| 回调持锁执行 | start/stop 变复杂后可能阻塞订阅管理或造成死锁 | 重构 `CameraSessionManager`，锁外执行 start/stop callback |
+| 数据面被误用为生产链路 | 4K 高帧率下 CPU/内存带宽不可控 | 文档与接口明确示例属性，新增生产数据面设计 |
+| 当前零拷贝语义不清 | AI/编码模块可能基于错误假设接入 | 在 API 与 README 中标注当前是 MMAP + copy，零拷贝为路线 |
+
+### P1：下一里程碑必须落地
+
+| 风险 | 影响 | 建议 |
+|------|------|------|
+| 背压策略不足 | 慢消费者导致延迟抖动或队列堆积 | 引入 BackpressureConfig 和 DropPolicy |
+| 设备异常恢复不足 | 板端现场断连后需要人工干预 | 建立 CameraSession 状态机和重试策略 |
+| 指标体系不足 | 难以定位性能与稳定性问题 | 统一 Metrics 接口，至少覆盖 FPS、drop、latency、queue |
+| 板端运行未验证 | 交叉编译通过不等于系统可用 | 在 RK3576 Debian 12 跑 publisher/subscriber smoke test |
+
+### P2：生产化前完成
+
+| 风险 | 影响 | 建议 |
+|------|------|------|
+| IPC 缺少鉴权与能力协商 | 多进程/多租户场景不可控 | 增加 protocol capability、auth token、client heartbeat |
+| 多路能力靠人工配置 | 不同摄像头组合下表现不稳定 | 实现 CapabilityProbe + 标定配置 |
+| 示例逻辑沉在 examples | 复用性差，生产 app 需复制代码 | 抽取 data server/client 公共库 |
+
+---
+
+## 8. 架构项跟踪（ARCH-*）
+
+| 编号 | 主题 | 状态 | 下一步 |
+|------|------|------|--------|
+| ARCH-001 | Buffer 所有权不明确 | 已完成 | 保持回归测试 |
+| ARCH-002 | Buffer 状态机缺失 | 已完成 | 增加异常状态测试 |
+| ARCH-003 | Buffer 泄漏检测 | 已完成 | 接入统一 metrics |
+| ARCH-004 | 丢帧策略硬编码 | 进行中 | 定义 `BackpressureConfig` |
+| ARCH-005 | 背压阈值配置 | 计划中 | 支持队列深度与延迟阈值 |
+| ARCH-006 | 订阅者优先级静态 | 计划中 | 支持动态优先级和慢消费者隔离 |
+| ARCH-007 | 设备自动重连 | 计划中 | 增加会话状态机 |
+| ARCH-008 | 降级策略 | 计划中 | 支持降帧、降分辨率、暂停低优先级订阅 |
+| ARCH-009 | 统一 Metrics | 计划中 | 定义指标结构与导出接口 |
+| ARCH-010 | 数据面生产协议 | 计划中 | 设计 DMA-BUF fd 或共享内存 ring |
+| ARCH-011 | 多路能力探测 | 计划中 | 接入启动流程与 RK3576 标定 |
+| ARCH-012 | 线程亲和性 | 计划中 | 采集/分发线程绑定策略 |
+| ARCH-018 | 发布端/订阅端解耦 | 基础落地 | 补生产级协议与异常恢复 |
+| ARCH-019 | 按订阅启停 Camera | 基础落地 | 补防抖 grace period 与失败回滚 |
+| ARCH-020 | 协议头协定扩展 | 基础落地 | 补 endpoint、plane、capability、flags |
+| ARCH-021 | RK3576 交叉编译入口 | 已完成 | 做板端 smoke test |
+
+---
+
+## 9. 下一阶段验收标准
+
+下一阶段建议以“板端可控原型”为目标，而不是继续扩大功能面。
+
+1. `CameraSessionManager` start/stop 回调不再持锁执行，并补充并发订阅/退订测试。
+2. 文档和 API 明确当前数据面是示例复制链路，新增生产数据面设计草案。
+3. `FrameBroker` 支持可配置队列上限、DropPolicy、慢消费者统计。
+4. 统一输出最小 metrics：采集 FPS、发布 FPS、队列深度、丢帧数、发送失败数、端到端延迟。
+5. RK3576 Debian 12 板端完成 `camera_publisher_example` 与 `camera_subscriber_example` 最小运行验证。
+6. 设备断连或 `/dev/videoX` 不可用时，发布端能输出明确错误状态并保持进程可控退出或等待恢复。
+
+---
+
+## 10. 结论摘要
+
+当前系统架构方向是正确的：设备入口集中、进程隔离、控制面与数据面分离、Buffer 生命周期开始可控。代码架构也已经具备继续演进的骨架。
+
+真正的风险不在“能不能跑”，而在“能不能在 RK3576 上长期、可观测、可恢复地跑”。下一阶段应把工作重心从补功能转向补生产控制面：数据面零拷贝、背压参数化、设备恢复、metrics、板端验证。只有这些闭环完成后，CameraSubsystem 才适合承载 AI 推理、编码、录制等上层模块的稳定接入。

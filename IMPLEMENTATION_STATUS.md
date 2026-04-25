@@ -8,6 +8,7 @@
 > - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
+> - 评审建议、风险、ARCH-* 跟踪项只维护在 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)，其他文档只链接引用，避免重复漂移。
 
 ## 目录
 
@@ -19,7 +20,7 @@
 - [文档状态](#文档状态)
 - [下一步工作计划](#下一步工作计划)
 - [架构完善项（面向边缘设备）](#架构完善项面向边缘设备)
-- [发布端/订阅端解耦模型（典型用户故事同步）](#发布端订阅端解耦模型典型用户故事同步)
+- [发布端/订阅端解耦模型状态](#发布端订阅端解耦模型状态)
 - [架构设计细化（Buffer 生命周期与背压策略）](#架构设计细化buffer-生命周期与背压策略)
 - [边缘设备适配与交叉编译状态（RK3576 / Debian）](#边缘设备适配与交叉编译状态rk3576--debian)
 - [技术债务](#技术债务)
@@ -30,6 +31,8 @@
 ## 项目概述
 
 CameraSubsystem 项目已完成核心模块的实现，进入优化和完善阶段。项目旨在构建一个高性能、低延迟、可扩展的 Camera 数据流基座，作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源。
+
+本文档只维护实现进度、测试状态和技术债务执行状态。架构评审建议与 ARCH-* 跟踪项统一维护在 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)。
 
 ## 目录结构
 
@@ -291,122 +294,32 @@ flowchart TB
 
 ## 架构完善项（面向边缘设备）
 
-- 完成零拷贝主链路（V4L2 DMABUF -> FrameHandle -> Broker -> Consumer）
-- 引入背压与丢帧策略（按订阅者优先级/延迟阈值）✅ 基础版本已实现（池耗尽丢帧）
-- 统一 Buffer 生命周期与复用池（减少 malloc/free 抖动）✅ 基础版本已实现（拷贝模式）
-- 发布端/订阅端解耦模型（唯一核心发布端 + 多子发布端/订阅端）
-- 按订阅启停 Camera（无订阅不采集，避免资源空耗）
-- 协议头协定与默认设备宏（支持 MIPI/USB 可扩展）
-- 增加可观测性指标（FPS、队列深度、丢帧率、延迟分布）
-- 采集线程与分发线程亲和性配置（绑定大核/小核）
-- 降低日志对热路径的影响（采样或分级降噪）
+架构评审建议统一维护在 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)。实现状态文档只记录模块完成度与技术债务执行状态。
 
-架构评审详情见：`docs/ARCHITECTURE_REVIEW.md`
+当前实现状态摘要：
 
-## 发布端/订阅端解耦模型（典型用户故事同步）
+1. Buffer 生命周期与复用池基础治理已完成，当前仍是 V4L2 MMAP -> BufferPool 的拷贝模式。
+2. 发布端/订阅端解耦、按订阅启停、控制面/数据面协议已形成双进程可运行原型。
+3. 零拷贝主链路、背压参数化、设备恢复、统一 metrics、板端 smoke test 仍是下一阶段重点。
 
-为与 `README.md` 与 `docs/PROJECT_OVERVIEW.md` 保持一致，当前阶段定义如下：
+## 发布端/订阅端解耦模型状态
 
-1. 架构目标是“唯一核心发布端（V4L2 直连）+ 多子发布端/订阅端”，不将“1 发布端 + 1 订阅端”作为架构限制。
-2. 核心发布端是唯一底层设备入口；对同一路 Camera（同一 `/dev/videoX`）仅允许核心发布端持有采集句柄。
-3. 子发布端作为核心发布端的订阅者，可执行编解码/转封装并向下游再发布。
-4. 纯订阅端直接消费核心发布端或子发布端的数据，进行 AI/业务处理。
-5. `1 核心发布端 + 1 订阅端` 仅作为开发阶段联调示例；业务场景可多子发布端/多订阅端并发。
-6. 某路 Camera 仅在存在订阅时启动；订阅归零时停止并释放该路资源。
+| 能力 | 当前状态 | 权威说明 |
+|------|----------|----------|
+| 核心发布端独占 V4L2 设备 | 已落地 | [README.md](README.md#5-架构概览) |
+| 控制面订阅/退订/Ping | 已落地基础协议 | [API_REFERENCE.md](API_REFERENCE.md#17-控制面-ipc-接口新增) |
+| 数据面帧传输 | 已落地示例复制链路 | [API_REFERENCE.md](API_REFERENCE.md#18-数据面协议示例) |
+| 按订阅引用计数启停 Camera | 已落地基础会话管理 | [API_REFERENCE.md](API_REFERENCE.md#16-camerasessionmanager-接口新增) |
+| 多子发布端/多订阅端生产级模型 | 待完善 | [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md#8-架构项跟踪arch-) |
 
-协议协定（基础落地）：
-
-1. 公共头文件：`include/camera_subsystem/ipc/camera_channel_contract.h`
-2. 默认设备宏：`CAMERA_SUBSYSTEM_DEFAULT_CAMERA`（默认值 `/dev/video0`）
-3. 可扩展 Camera 类型：默认、MIPI、USB、平台私有类型
-
-示例程序（双进程）：
-
-1. 核心发布端：`bin/camera_publisher_example`
-2. 订阅端：`bin/camera_subscriber_example`
-
-启动步骤：
-
-1. 先启动发布端（终端 1）：
-
-```bash
-./bin/camera_publisher_example
-```
-
-2. 再启动订阅端（终端 2）：
-
-```bash
-./bin/camera_subscriber_example
-```
-
-3. 两端默认无限运行，按 `Ctrl+C` 退出（`SIGINT/SIGTERM` 优雅退出）。
-
-参数说明：
-
-1. 发布端：
-
-```bash
-./bin/camera_publisher_example [device_path] [control_socket] [data_socket]
-```
-
-- `device_path`：默认 `CAMERA_SUBSYSTEM_DEFAULT_CAMERA`（通常 `/dev/video0`）
-- `control_socket`：默认 `/tmp/camera_subsystem_control.sock`
-- `data_socket`：默认 `/tmp/camera_subsystem_data.sock`
-
-2. 订阅端：
-
-```bash
-./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket]
-```
-
-- `output_dir`：默认 `./subscriber_frames`
-- `control_socket`：默认 `/tmp/camera_subsystem_control.sock`
-- `data_socket`：默认 `/tmp/camera_subsystem_data.sock`
-
-运行期输出：
-
-1. 发布端每秒打印：`sec | frames | fps | clients | sent_bytes | send_fail`
-2. 订阅端每秒打印：`sec | frames | fps | received_bytes | save_fail | image`
-3. 订阅端每秒保存 1 张图片，槽位 `0~9` 循环覆盖。
-
-故障排查：
-
-1. `connect control socket failed` / `connect data socket failed`：
-   确认发布端已启动并运行，且控制面与数据面 socket 路径参数一致。
-2. Camera 打开失败（如 `/dev/video0`）：
-   检查设备节点 `ls /dev/video0` 与用户权限（`video` 组），必要时用 `sudo` 验证。
-3. socket bind 失败（Address already in use）：
-   清理残留 socket 文件后重试：
-
-```bash
-rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
-```
-
-4. 订阅端无图或 `save_fail` 增长：
-   检查输出目录写权限，并先用 `camera_source_stress_test` 验证采集链路。
+示例运行步骤统一维护在 [README.md](README.md#7-示例运行)，本文档不重复维护命令细节。
 
 ## 架构设计细化（Buffer 生命周期与背压策略）
 
-**Buffer 生命周期与复用池** ✅ 已完善
+详细设计建议与后续策略统一维护在 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)。当前实现侧只确认两点：
 
-1. `BufferPool` 统一管理预分配 Buffer，避免热路径频繁分配。
-2. `FrameHandle` 仅持有引用，使用 RAII 归还 Buffer。
-3. `FrameHandleEx` 扩展结构持有 `shared_ptr<BufferGuard>`，绑定 Buffer 生命周期。
-4. 生命周期状态：`Free -> InUse -> InFlight -> Free`（新增 `Error` 状态）。
-5. 状态机支持回退：`InFlight -> InUse`（取消分发时）。
-6. 析构安全：BufferPool 析构时等待所有 BufferGuard 归还（最多 5 秒）。
-7. 归还后由 CameraSource 重新 `QBUF`，保证采集连续性。
-8. 当前实现为 **拷贝模式**（V4L2 MMAP -> BufferPool -> Broker/Subscriber）。
-9. 后续升级为 **DMA-BUF 零拷贝**，避免拷贝成本。
-
-**背压与丢帧策略**
-
-1. 采集层：池耗尽时优先丢弃最新帧，避免阻塞采集线程。
-2. 分发层：队列超阈值或延迟过大触发丢帧策略。
-3. 订阅者层：低优先级订阅者可“仅保留最新帧”。
-4. 支持策略：`DropNewest`、`DropOldest`、`DropByPriority`。
-5. 当前落地：采集层池耗尽丢帧 + Broker 队列上限丢帧。
-6. 指标：丢帧数、队列深度、FPS、延迟分布。
+1. `BufferPool` / `BufferGuard` / `BufferState` 已落地基础生命周期治理。
+2. 背压当前只有池耗尽丢帧与 Broker 队列上限丢帧，尚未形成可配置策略。
 
 ## 边缘设备适配与交叉编译状态（RK3576 / Debian）
 
@@ -433,9 +346,7 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 - [ ] 完善多平面与 DMA-BUF 实现细节
 - [ ] 将 BufferPool 与 DMA-BUF 零拷贝打通
 - [ ] 背压策略参数化（延迟阈值/优先级规则）
-- [ ] ARCH-018：核心发布端（V4L2 直连）+ 多子发布端/订阅端生产级落地
-- [ ] ARCH-019：按订阅启停 Camera 会话管理（抖动防护/恢复策略）
-- [ ] ARCH-020：跨平台协议头协定与设备描述扩展（版本协商/能力位）
+- [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 
 ## 贡献指南
 
