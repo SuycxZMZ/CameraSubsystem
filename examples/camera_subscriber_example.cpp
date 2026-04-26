@@ -5,12 +5,13 @@
  * @date 2026-03-01
  *
  * 用法：
- *   ./camera_subscriber_example [output_dir] [control_socket] [data_socket]
+ *   ./camera_subscriber_example [output_dir] [control_socket] [data_socket] [device_path]
  *
  * 默认参数：
  * 1. output_dir    : ./subscriber_frames
  * 2. control_socket: /tmp/camera_subsystem_control.sock
  * 3. data_socket   : /tmp/camera_subsystem_data.sock
+ * 4. device_path   : CAMERA_SUBSYSTEM_DEFAULT_CAMERA（通常为 /dev/video0）
  *
  * 运行流程：
  * 1. 连接数据面 socket，接收核心发布端发送的帧头+帧数据。
@@ -225,6 +226,7 @@ int main(int argc, char* argv[])
     std::string output_dir = "./subscriber_frames";
     std::string control_socket_path = camera_subsystem::ipc::kDefaultCameraControlSocketPath;
     std::string data_socket_path = camera_subsystem::ipc::kDefaultCameraDataSocketPath;
+    std::string device_path = CAMERA_SUBSYSTEM_DEFAULT_CAMERA;
 
     if (argc > 1)
     {
@@ -237,6 +239,10 @@ int main(int argc, char* argv[])
     if (argc > 3)
     {
         data_socket_path = argv[3];
+    }
+    if (argc > 4)
+    {
+        device_path = argv[4];
     }
 
     if (!PlatformLogger::Initialize(std::string(), LogLevel::kInfo))
@@ -279,7 +285,11 @@ int main(int argc, char* argv[])
     }
 
     const std::string client_id = "camera_subscriber_" + std::to_string(getpid());
-    const CameraEndpoint endpoint = camera_subsystem::ipc::MakeDefaultCameraEndpoint(0);
+    const CameraEndpoint endpoint =
+        camera_subsystem::ipc::MakeCameraEndpoint(0,
+                                                  camera_subsystem::ipc::CameraBusType::kDefault,
+                                                  0,
+                                                  device_path.c_str());
 
     CameraControlResponse response;
     if (!control_client.Subscribe(client_id, CameraClientRole::kSubscriber, endpoint, &response))
@@ -294,8 +304,8 @@ int main(int argc, char* argv[])
     }
 
     PlatformLogger::Log(LogLevel::kInfo, "subscriber",
-                        "subscriber started, client_id=%s, output_dir=%s",
-                        client_id.c_str(), output_dir_path.c_str());
+                        "subscriber started, client_id=%s, output_dir=%s, device=%s",
+                        client_id.c_str(), output_dir_path.c_str(), endpoint.device_path);
     PlatformLogger::Log(LogLevel::kInfo, "subscriber",
                         "sec | frames | fps | received_bytes | save_fail | image");
 

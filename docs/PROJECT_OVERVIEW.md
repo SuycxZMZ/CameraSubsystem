@@ -160,12 +160,13 @@ flowchart LR
 2. 订阅端：
 
 ```bash
-./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket]
+./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket] [device_path]
 ```
 
 - `output_dir`：默认 `./subscriber_frames`
 - `control_socket`：默认 `/tmp/camera_subsystem_control.sock`
 - `data_socket`：默认 `/tmp/camera_subsystem_data.sock`
+- `device_path`：默认 `CAMERA_SUBSYSTEM_DEFAULT_CAMERA`（通常 `/dev/video0`）
 
 运行期输出：
 
@@ -484,7 +485,8 @@ ctest --output-on-failure
 
 ```bash
 ./bin/camera_publisher_example [device_path] [control_socket] [data_socket]
-./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket]
+./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket] [device_path]
+./bin/camera_subscriber_example subscriber_frames /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock /dev/videoX
 ```
 
 运行行为：

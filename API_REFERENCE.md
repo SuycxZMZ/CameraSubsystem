@@ -1193,6 +1193,13 @@ int main()
 ./bin/camera_subscriber_example
 ```
 
+可选参数：
+
+```bash
+./bin/camera_publisher_example [device_path] [control_socket] [data_socket]
+./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket] [device_path]
+```
+
 ---
 
 **文档结束**

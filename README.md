@@ -216,7 +216,7 @@ bin/rk3576/
 订阅端：
 
 ```bash
-./camera_subscriber_example [output_dir] [control_socket] [data_socket]
+./camera_subscriber_example [output_dir] [control_socket] [data_socket] [device_path]
 ```
 
 ---

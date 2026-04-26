@@ -373,6 +373,23 @@ bool CameraSource::ConfigureDevice()
         return false;
     }
 
+    const core::PixelFormat negotiated_format = FromV4L2PixelFormat(fmt.fmt.pix.pixelformat);
+    config_.width_ = fmt.fmt.pix.width;
+    config_.height_ = fmt.fmt.pix.height;
+    if (negotiated_format != core::PixelFormat::kUnknown)
+    {
+        config_.format_ = negotiated_format;
+    }
+
+    platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                  "negotiated format: width=%u height=%u fourcc=%c%c%c%c",
+                                  config_.width_,
+                                  config_.height_,
+                                  fmt.fmt.pix.pixelformat & 0xff,
+                                  (fmt.fmt.pix.pixelformat >> 8) & 0xff,
+                                  (fmt.fmt.pix.pixelformat >> 16) & 0xff,
+                                  (fmt.fmt.pix.pixelformat >> 24) & 0xff);
+
     struct v4l2_streamparm parm;
     memset(&parm, 0, sizeof(parm));
     parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -582,6 +599,30 @@ uint32_t CameraSource::ToV4L2PixelFormat(core::PixelFormat format) const
         case core::PixelFormat::kUnknown:
         default:
             return V4L2_PIX_FMT_NV12;
+    }
+}
+
+core::PixelFormat CameraSource::FromV4L2PixelFormat(uint32_t format) const
+{
+    switch (format)
+    {
+        case V4L2_PIX_FMT_NV12:
+            return core::PixelFormat::kNV12;
+        case V4L2_PIX_FMT_YUYV:
+            return core::PixelFormat::kYUYV;
+        case V4L2_PIX_FMT_RGB24:
+            return core::PixelFormat::kRGB888;
+        case V4L2_PIX_FMT_RGB32:
+            return core::PixelFormat::kRGBA8888;
+        case V4L2_PIX_FMT_MJPEG:
+        case V4L2_PIX_FMT_JPEG:
+            return core::PixelFormat::kMJPEG;
+        case V4L2_PIX_FMT_H264:
+            return core::PixelFormat::kH264;
+        case V4L2_PIX_FMT_HEVC:
+            return core::PixelFormat::kH265;
+        default:
+            return core::PixelFormat::kUnknown;
     }
 }
 

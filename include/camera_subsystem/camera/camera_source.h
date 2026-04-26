@@ -69,6 +69,7 @@ private:
     uint64_t GetTimestampNs() const;
 
     uint32_t ToV4L2PixelFormat(core::PixelFormat format) const;
+    core::PixelFormat FromV4L2PixelFormat(uint32_t format) const;
 
     core::CameraConfig config_;
     std::string device_path_;
