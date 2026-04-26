@@ -62,6 +62,13 @@ public:
     core::CameraConfig GetConfig() const;
     uint64_t GetFrameCount() const;
     uint64_t GetDroppedFrameCount() const;
+    bool IsDmaBufPathEnabled() const;
+    uint64_t GetDmaBufFrameCount() const;
+    uint64_t GetDmaBufExportFailureCount() const;
+    uint64_t GetDmaBufLeaseExhaustedCount() const;
+    size_t GetDmaBufActiveLeaseCount() const;
+    size_t GetDmaBufLeaseInFlightMax() const;
+    size_t GetDmaBufMinQueuedCaptureBuffers() const;
 
 private:
     void CaptureLoop();
@@ -112,6 +119,7 @@ private:
     bool dma_buf_path_enabled_ = false;
     size_t min_queued_capture_buffers_ = 1;
     size_t global_lease_in_flight_max_ = 1;
+    std::atomic<uint64_t> dma_buf_frame_count_{0};
     std::atomic<uint64_t> dma_buf_export_failures_{0};
     std::atomic<uint64_t> lease_exhausted_count_{0};
 
@@ -124,6 +132,7 @@ private:
     FrameCallback callback_;
     FrameCallbackWithBuffer callback_with_buffer_;
     FramePacketCallback frame_packet_callback_;
+    std::atomic<bool> has_frame_packet_callback_{false};
 
     core::BufferPool buffer_pool_;
     size_t pool_buffer_size_ = 0;

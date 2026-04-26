@@ -185,6 +185,7 @@ void CameraSource::SetFramePacketCallback(FramePacketCallback callback)
 {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     frame_packet_callback_ = std::move(callback);
+    has_frame_packet_callback_ = static_cast<bool>(frame_packet_callback_);
 }
 
 void CameraSource::SetDevicePath(const std::string& device_path)
@@ -214,6 +215,41 @@ uint64_t CameraSource::GetFrameCount() const
 uint64_t CameraSource::GetDroppedFrameCount() const
 {
     return dropped_frames_.load();
+}
+
+bool CameraSource::IsDmaBufPathEnabled() const
+{
+    return dma_buf_path_enabled_;
+}
+
+uint64_t CameraSource::GetDmaBufFrameCount() const
+{
+    return dma_buf_frame_count_.load();
+}
+
+uint64_t CameraSource::GetDmaBufExportFailureCount() const
+{
+    return dma_buf_export_failures_.load();
+}
+
+uint64_t CameraSource::GetDmaBufLeaseExhaustedCount() const
+{
+    return lease_exhausted_count_.load();
+}
+
+size_t CameraSource::GetDmaBufActiveLeaseCount() const
+{
+    return requeue_context_ ? requeue_context_->active_leases.load() : 0;
+}
+
+size_t CameraSource::GetDmaBufLeaseInFlightMax() const
+{
+    return global_lease_in_flight_max_;
+}
+
+size_t CameraSource::GetDmaBufMinQueuedCaptureBuffers() const
+{
+    return min_queued_capture_buffers_;
 }
 
 void CameraSource::CaptureLoop()
@@ -373,6 +409,7 @@ bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf)
     }
 
     const uint64_t frame_id = frame_count_.fetch_add(1);
+    dma_buf_frame_count_.fetch_add(1);
 
     core::FrameHandle frame;
     frame.Reset();
@@ -610,6 +647,9 @@ bool CameraSource::InitMMap()
     }
 
     dma_buf_path_enabled_ = false;
+    dma_buf_frame_count_ = 0;
+    dma_buf_export_failures_ = 0;
+    lease_exhausted_count_ = 0;
     if (config_.io_method_ == static_cast<uint32_t>(core::IoMethod::kDmaBuf))
     {
         dma_buf_path_enabled_ = InitDmaBufExport();
@@ -732,8 +772,7 @@ bool CameraSource::ShouldUseDmaBufPath() const
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(callback_mutex_);
-    return static_cast<bool>(frame_packet_callback_);
+    return has_frame_packet_callback_.load();
 }
 
 void CameraSource::RequeueBuffer(uint32_t buffer_index)

@@ -5,12 +5,13 @@
  * @date 2026-03-01
  *
  * 用法：
- *   ./camera_publisher_example [device_path] [control_socket] [data_socket]
+ *   ./camera_publisher_example [device_path] [control_socket] [data_socket] [--io-method mmap|dmabuf]
  *
  * 默认参数：
  * 1. device_path   : CAMERA_SUBSYSTEM_DEFAULT_CAMERA（通常为 /dev/video0）
  * 2. control_socket: /tmp/camera_subsystem_control.sock
  * 3. data_socket   : /tmp/camera_subsystem_data.sock
+ * 4. --io-method   : mmap（默认）；dmabuf 启用 DMA-BUF EXPBUF 零拷贝路径
  *
  * 运行流程：
  * 1. 启动控制面服务端（CameraControlServer）与数据面服务端（Unix Socket）。
@@ -56,6 +57,7 @@ using camera_subsystem::camera::CameraSessionManager;
 using camera_subsystem::camera::CameraSource;
 using camera_subsystem::core::CameraConfig;
 using camera_subsystem::core::FrameHandle;
+using camera_subsystem::core::IoMethod;
 using camera_subsystem::core::LogLevel;
 using camera_subsystem::ipc::CameraClientRole;
 using camera_subsystem::ipc::CameraControlServer;
@@ -262,6 +264,7 @@ private:
 struct PublisherStats
 {
     std::atomic<uint64_t> frame_count{0};
+    std::atomic<uint64_t> dmabuf_frame_count{0};
     std::atomic<uint64_t> sent_bytes{0};
     std::atomic<uint64_t> send_fail_count{0};
 };
@@ -276,18 +279,46 @@ int main(int argc, char* argv[])
     std::string device_path = CAMERA_SUBSYSTEM_DEFAULT_CAMERA;
     std::string control_socket_path = camera_subsystem::ipc::kDefaultCameraControlSocketPath;
     std::string data_socket_path = camera_subsystem::ipc::kDefaultCameraDataSocketPath;
+    IoMethod io_method = IoMethod::kMmap;
 
-    if (argc > 1)
+    for (int i = 1; i < argc; ++i)
     {
-        device_path = argv[1];
-    }
-    if (argc > 2)
-    {
-        control_socket_path = argv[2];
-    }
-    if (argc > 3)
-    {
-        data_socket_path = argv[3];
+        std::string arg = argv[i];
+        if (arg == "--io-method" && i + 1 < argc)
+        {
+            ++i;
+            std::string method = argv[i];
+            if (method == "dmabuf")
+            {
+                io_method = IoMethod::kDmaBuf;
+            }
+            else if (method == "mmap")
+            {
+                io_method = IoMethod::kMmap;
+            }
+            else
+            {
+                PlatformLogger::Log(LogLevel::kError, "publisher",
+                                    "unknown io-method: %s (use mmap or dmabuf)", method.c_str());
+                return 1;
+            }
+        }
+        else if (arg == "--help" || arg == "-h")
+        {
+            PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                                "usage: %s [device_path] [control_socket] [data_socket] [--io-method mmap|dmabuf]",
+                                argv[0]);
+            return 0;
+        }
+        else
+        {
+            // positional args
+            static int pos = 0;
+            ++pos;
+            if (pos == 1) device_path = arg;
+            else if (pos == 2) control_socket_path = arg;
+            else if (pos == 3) data_socket_path = arg;
+        }
     }
 
     if (!PlatformLogger::Initialize(std::string(), LogLevel::kInfo))
@@ -296,8 +327,9 @@ int main(int argc, char* argv[])
     }
 
     PlatformLogger::Log(LogLevel::kInfo, "publisher",
-                        "publisher start, device=%s, control_socket=%s, data_socket=%s",
-                        device_path.c_str(), control_socket_path.c_str(), data_socket_path.c_str());
+                        "publisher start, device=%s, control_socket=%s, data_socket=%s, io_method=%s",
+                        device_path.c_str(), control_socket_path.c_str(), data_socket_path.c_str(),
+                        io_method == IoMethod::kDmaBuf ? "dmabuf" : "mmap");
 
     DataSocketServer data_server;
     if (!data_server.Start(data_socket_path))
@@ -311,6 +343,7 @@ int main(int argc, char* argv[])
     CameraConfig config = CameraConfig::GetDefault();
     config.fps_ = 30;
     config.buffer_count_ = 4;
+    config.io_method_ = static_cast<uint32_t>(io_method);
 
     PublisherStats stats;
     std::mutex camera_mutex;
@@ -353,6 +386,26 @@ int main(int argc, char* argv[])
                 stats.sent_bytes.fetch_add(frame.buffer_size_);
             }
         });
+
+    // DMA-BUF 模式：注册 FramePacketCallback 接收零拷贝帧
+    if (io_method == IoMethod::kDmaBuf)
+    {
+        camera_source.SetFramePacketCallback(
+            [&](const camera_subsystem::core::FramePacket& packet)
+            {
+                stats.frame_count.fetch_add(1);
+                stats.dmabuf_frame_count.fetch_add(1);
+
+                // DMA-BUF 零拷贝路径：帧数据通过 DMA-BUF fd 访问，不复制到 heap
+                // 当前示例仅统计帧数；lease 析构时自动 release 并触发 QBUF
+                const auto& desc = packet.descriptor;
+                PlatformLogger::Log(LogLevel::kDebug, "publisher",
+                                    "dmabuf frame: id=%" PRIu64 " buf=%u fd=%d bytes=%" PRIu64,
+                                    desc.frame_id, desc.buffer_id,
+                                    desc.fd_count > 0 ? desc.fds[0] : -1,
+                                    desc.total_bytes_used);
+            });
+    }
 
     CameraSessionManager session_manager(
         [&](const CameraEndpoint& endpoint)
@@ -411,8 +464,18 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    PlatformLogger::Log(LogLevel::kInfo, "publisher",
-                        "sec | frames | fps | clients | sent_bytes | send_fail");
+    if (io_method == IoMethod::kDmaBuf)
+    {
+        PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                            "sec | frames | fps | clients | sent_bytes | send_fail | "
+                            "dmabuf_enabled | dmabuf_frames | export_fail | lease_exhausted | "
+                            "active_leases | lease_max | min_queued");
+    }
+    else
+    {
+        PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                            "sec | frames | fps | clients | sent_bytes | send_fail");
+    }
 
     uint64_t elapsed_sec = 0;
     uint64_t last_frames = 0;
@@ -425,11 +488,32 @@ int main(int argc, char* argv[])
         const uint64_t fps = frames - last_frames;
         last_frames = frames;
 
-        PlatformLogger::Log(LogLevel::kInfo, "publisher",
-                            "sec=%" PRIu64 " | frames=%" PRIu64 " | fps=%" PRIu64
-                            " | clients=%zu | sent_bytes=%" PRIu64 " | send_fail=%" PRIu64,
-                            elapsed_sec, frames, fps, data_server.GetClientCount(),
-                            stats.sent_bytes.load(), stats.send_fail_count.load());
+        if (io_method == IoMethod::kDmaBuf)
+        {
+            PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                                "sec=%" PRIu64 " | frames=%" PRIu64 " | fps=%" PRIu64
+                                " | clients=%zu | sent_bytes=%" PRIu64 " | send_fail=%" PRIu64
+                                " | dmabuf_enabled=%u | dmabuf_frames=%" PRIu64
+                                " | export_fail=%" PRIu64 " | lease_exhausted=%" PRIu64
+                                " | active_leases=%zu | lease_max=%zu | min_queued=%zu",
+                                elapsed_sec, frames, fps, data_server.GetClientCount(),
+                                stats.sent_bytes.load(), stats.send_fail_count.load(),
+                                camera_source.IsDmaBufPathEnabled() ? 1U : 0U,
+                                camera_source.GetDmaBufFrameCount(),
+                                camera_source.GetDmaBufExportFailureCount(),
+                                camera_source.GetDmaBufLeaseExhaustedCount(),
+                                camera_source.GetDmaBufActiveLeaseCount(),
+                                camera_source.GetDmaBufLeaseInFlightMax(),
+                                camera_source.GetDmaBufMinQueuedCaptureBuffers());
+        }
+        else
+        {
+            PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                                "sec=%" PRIu64 " | frames=%" PRIu64 " | fps=%" PRIu64
+                                " | clients=%zu | sent_bytes=%" PRIu64 " | send_fail=%" PRIu64,
+                                elapsed_sec, frames, fps, data_server.GetClientCount(),
+                                stats.sent_bytes.load(), stats.send_fail_count.load());
+        }
     }
 
     PlatformLogger::Log(LogLevel::kInfo, "publisher", "publisher stopping...");

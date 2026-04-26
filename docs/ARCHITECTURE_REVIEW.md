@@ -230,7 +230,7 @@
 | ARCH-007 | 设备自动重连 | 计划中 | 增加会话状态机 |
 | ARCH-008 | 降级策略 | 计划中 | 支持降帧、降分辨率、暂停低优先级订阅 |
 | ARCH-009 | 统一 Metrics | 计划中 | 定义指标结构与导出接口 |
-| ARCH-010 | 数据面生产协议 | 进行中 | DMA-BUF Phase 1 基础模型和 V4L2 export 尝试路径已接入；后续验证 RK3576 板端能力并实现 DataPlaneV2 / SCM_RIGHTS / ReleaseFrame |
+| ARCH-010 | 数据面生产协议 | 进行中 | DMA-BUF Phase 1 基础模型、V4L2 export、lease 和 RK3576 `/dev/video45` smoke 已完成；后续实现 DataPlaneV2 / SCM_RIGHTS / ReleaseFrame |
 | ARCH-011 | 多路能力探测 | 计划中 | 接入启动流程与平台标定 |
 | ARCH-012 | 线程亲和性 | 计划中 | 采集/分发线程绑定策略 |
 | ARCH-018 | 发布端/订阅端解耦 | 基础落地 | 补生产级协议与异常恢复 |
@@ -248,7 +248,7 @@
 2. 文档和 API 明确当前数据面是示例复制链路，新增生产数据面设计草案。
 3. `FrameBroker` 支持可配置队列上限、DropPolicy、慢消费者统计。
 4. 统一输出最小 metrics：采集 FPS、发布 FPS、队列深度、丢帧数、发送失败数、端到端延迟。
-5. RK3576 Debian 12 板端完成 `camera_publisher_example` 与 `camera_subscriber_example` 最小运行验证，并抽象出可复用的板端 smoke test 流程。
+5. RK3576 Debian 12 板端完成 `camera_publisher_example` / `camera_subscriber_example` 最小运行验证，并通过 `dmabuf_smoke_test` 验证 DMA-BUF Phase 1 export、lease、CPU mmap 和 sync 行为。
 6. 设备断连或 `/dev/videoX` 不可用时，发布端能输出明确错误状态并保持进程可控退出或等待恢复。
 
 ---

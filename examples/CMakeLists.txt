@@ -30,3 +30,18 @@ target_link_libraries(camera_subscriber_example
         camera_subsystem_platform
         camera_subsystem_core
 )
+
+add_executable(dmabuf_smoke_test
+    dmabuf_smoke_test.cpp
+)
+
+set_target_properties(dmabuf_smoke_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
+)
+
+target_link_libraries(dmabuf_smoke_test
+    PRIVATE
+        camera_subsystem_camera
+        camera_subsystem_platform
+        camera_subsystem_core
+)

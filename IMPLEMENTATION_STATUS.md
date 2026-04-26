@@ -316,7 +316,7 @@ flowchart TB
 
 1. Buffer 生命周期与复用池基础治理已完成，当前默认 V4L2 后端仍保留 MMAP -> BufferPool 的拷贝 fallback。
 2. 发布端/订阅端解耦、按订阅启停、控制面/数据面协议已形成双进程可运行原型。
-3. DMA-BUF Phase 1 基础代码已接入 `FrameDescriptor` / `FrameLease` / V4L2 `VIDIOC_EXPBUF` 尝试路径，仍待 RK3576 板端能力验证和跨进程数据面协议。
+3. DMA-BUF Phase 1 基础代码已接入 `FrameDescriptor` / `FrameLease` / V4L2 `VIDIOC_EXPBUF` 尝试路径，并已在 RK3576 `/dev/video45` 完成板端 smoke 验证；跨进程 DataPlaneV2 仍待实现。
 4. 背压参数化、设备恢复、统一 metrics、通用板端自检流程仍是下一阶段重点。
 
 ## DMA-BUF Phase 1 后续修改入口
@@ -325,11 +325,11 @@ flowchart TB
 
 | 优先级 | 任务 | 验收口径 |
 |--------|------|----------|
-| P0 | 在 RK3576 上显式启用 `IoMethod::kDmaBuf`，验证 `/dev/video45` 或目标节点是否支持 `VIDIOC_EXPBUF` | 日志能明确输出 export 成功或 fallback 原因 |
-| P0 | 增加最小 DMA-BUF probe / smoke test 入口 | 能输出实际 V4L2 buffer 数量、fd 导出结果、`lease_in_flight_max` 和格式信息 |
-| P0 | 验证 `DmaBufFrameLease` release 后 QBUF 时序 | 单消费者持有 lease 时对应 buffer 不被提前 QBUF，release 后采集继续 |
-| P1 | 增加 DMA-BUF 路径统计 | 至少包括 export_fail、lease_exhausted、dmabuf_frame_count、fallback_count |
-| P1 | 设计 CPU mmap 调试读路径和 sync helper | 只用于板端校验，不作为 Web Preview 或生产主路径默认行为 |
+| P0 | 在 RK3576 上显式启用 `IoMethod::kDmaBuf`，验证 `/dev/video45` 或目标节点是否支持 `VIDIOC_EXPBUF` | ✅ 2026-04-26 已验证：4 buffers export 成功 |
+| P0 | 增加最小 DMA-BUF probe / smoke test 入口 | ✅ 已新增 `dmabuf_smoke_test`，输出 buffer、lease、mmap、sync 统计 |
+| P0 | 验证 `DmaBufFrameLease` release 后 QBUF 时序 | ✅ 板端 5 秒 smoke：120 帧、active_leases 回到 0、lease_exhausted=0 |
+| P1 | 增加 DMA-BUF 路径统计 | ✅ publisher 与 smoke test 已输出 export_fail、lease_exhausted、dmabuf_frame_count |
+| P1 | 设计 CPU mmap 调试读路径和 sync helper | ✅ `dmabuf_smoke_test` 已验证 CPU mmap + `DMA_BUF_IOCTL_SYNC`，只用于板端校验 |
 | P1 | 明确多平面扩展落点 | 在不破坏当前 `FrameDescriptor` 的前提下接入 `V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE` |
 | P2 | 进入 `DataPlaneV2` / `SCM_RIGHTS` 设计实现 | 只有 Phase 1 板端闭环稳定后再推进 |
 
@@ -366,6 +366,7 @@ flowchart TB
 - ✅ 默认输出 RK3576 产物到 `bin/rk3576/`
 - ✅ 当前交叉编译已通过，生成 `camera_publisher_example` 与 `camera_subscriber_example` 的 ARM aarch64 ELF
 - ✅ 已完成 RK3576 Debian 12 初步 publisher/subscriber smoke test
+- ✅ 已完成 RK3576 `/dev/video45` DMA-BUF Phase 1 smoke test：120 帧、`export_fail=0`、`lease_exhausted=0`、CPU mmap/sync 成功
 - ⏳ 后续接入 RGA / RKNN / MPP 或其他平台媒体栈时补充设备侧 sysroot 依赖清单
 - ⏳ 后续新增平台时补充对应 toolchain、部署脚本和板端自检流程
 
@@ -380,11 +381,11 @@ flowchart TB
 - [ ] 完善日志系统
 - [ ] 添加代码覆盖率检查
 - [x] 增加 RK3576 跨架构编译入口 ✅ 2026-04-25
-- [ ] 增加通用板端运行时自检，并保留 RK3576 作为首个验证实例
+- [x] 增加 DMA-BUF 板端运行时自检，并保留 RK3576 作为首个验证实例 ✅ 2026-04-26
 - [x] 新增 FrameDescriptor / FrameLease / DmaBufFrameLease 基础模型 ✅ 2026-04-26
 - [x] 接入 V4L2 DMA-BUF export 尝试路径和 copy fallback ✅ 2026-04-26
-- [ ] 在 RK3576 板端验证 DMA-BUF export、lease 回收和 cache 行为
-- [ ] 完善多平面与 DMA-BUF sync helper 实现细节
+- [x] 在 RK3576 板端验证 DMA-BUF export、lease 回收和 cache 行为 ✅ 2026-04-26
+- [ ] 完善多平面与生产级 DMA-BUF sync helper 实现细节
 - [ ] 将跨进程 DataPlaneV2 与 DMA-BUF fd 传递打通
 - [ ] 背压策略参数化（延迟阈值/优先级规则）
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项

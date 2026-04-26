@@ -597,21 +597,21 @@ ReleaseFrame()
 - ~~TODO：确认当前 `FrameHandle` 是否长期保持 ABI 不变。~~ **已决策：Phase 1 新增 `FrameDescriptor`，并兼容填充 `FrameHandle`，不破坏旧 ABI**
 - ~~TODO：确认 `FramePacket` 是否作为长期公开命名。~~ **已决策：Phase 1 使用 `FramePacket`，后续 DataPlaneV2 前可重命名**
 - TODO：确认 Phase 2 独立 release channel 的 socket path、连接生命周期和 batch release 格式。
-- TODO：确认 DMA-BUF CPU mmap 后可用的 sync ioctl / helper，以及失败时的 fallback 行为。
+- ~~TODO：确认 DMA-BUF CPU mmap 后可用的 sync ioctl / helper，以及失败时的 fallback 行为。~~ **已确认：`dmabuf_smoke_test` 在 `/dev/video45` 上 CPU mmap 120 次成功，`DMA_BUF_IOCTL_SYNC` start/end 失败数均为 0**
 
 ### 12.2 下一步开发计划
 
-Phase 1 代码已落地（提交 2cb8017），当前状态为"待板端集成验证"。按优先级排序：
+Phase 1 代码已落地（提交 2cb8017），并已完成 RK3576 `/dev/video45` 板端集成 smoke。按优先级排序：
 
 | 优先级 | 任务 | 说明 |
 |--------|------|------|
-| P0 | 板端集成验证：用 `IoMethod::kDmaBuf` 配置启动 publisher，确认 EXPBUF 路径在完整进程中工作 | 当前只在独立 C 测试中验证了 EXPBUF，尚未在 `camera_publisher_example` 中启用 DMA-BUF 模式运行 |
-| P0 | 补 DMA-BUF probe/smoke test：在 `camera_publisher_example` 中增加 `--io-method dmabuf` 参数，启动时输出 EXPBUF 探测结果 | 当前 `CameraConfig::io_method_` 需要显式设置，示例程序尚未暴露该配置 |
-| P0 | 验证 lease release 后 QBUF 时序：在板端运行 DMA-BUF 模式，观察 lease 计数、QBUF 时机、帧率是否稳定 | 核心验收项，确认不会出现 buffer 过早复用或帧率抖动 |
-| P1 | 衡 `ShouldUseDmaBufPath()` 性能优化：缓存 `frame_packet_callback_` 布尔值，避免每帧加锁 | 当前每帧 DQBUF 后都加 `callback_mutex_`，高帧率下不必要 |
-| P1 | 衡 DMA-BUF 统计 metrics：暴露 `dma_buf_export_failures`、`lease_exhausted_count`、`lease_timeout_count` 到 publisher stats | 当前已有原子计数器，但未在 publisher 周期性日志中输出 |
-| P1 | 衡 `DmaBufSyncHelper`：封装 CPU mmap 读路径的 `DMA_BUF_IOCTL_SYNC` | 仅用于调试 CPU 读路径或 Web Preview fallback，不阻塞主链路 |
-| P1 | 验证 CPU mmap DMA-BUF cache 行为：消费者 mmap 后读帧数据，对比 MMAP copy 路径的帧内容 | 确认无脏数据，评估是否需要显式 sync |
+| P0 | 板端集成验证：用 `IoMethod::kDmaBuf` 配置启动 publisher，确认 EXPBUF 路径在完整进程中工作 | ✅ `camera_publisher_example --io-method dmabuf` 已在 RK3576 `/dev/video45` 验证，`dmabuf_enabled=1`、`export_fail=0`、`lease_exhausted=0` |
+| P0 | 补 DMA-BUF probe/smoke test：在 `camera_publisher_example` 中增加 `--io-method dmabuf` 参数，启动时输出 EXPBUF 探测结果 | ✅ 已支持 `--io-method mmap|dmabuf`，并补充 `dmabuf_smoke_test` |
+| P0 | 验证 lease release 后 QBUF 时序：在板端运行 DMA-BUF 模式，观察 lease 计数、QBUF 时机、帧率是否稳定 | ✅ `dmabuf_smoke_test /dev/video45 5`：120 帧、`active_leases=0`、`max_active_leases=1`、`lease_exhausted=0` |
+| P1 | 衡 `ShouldUseDmaBufPath()` 性能优化：缓存 `frame_packet_callback_` 布尔值，避免每帧加锁 | ✅ 已用原子布尔缓存 callback 状态 |
+| P1 | 衡 DMA-BUF 统计 metrics：暴露 `dma_buf_export_failures`、`lease_exhausted_count`、`lease_timeout_count` 到 publisher stats | ✅ 已暴露 export_fail、lease_exhausted、dmabuf_frame_count、active_leases、lease_max、min_queued |
+| P1 | 衡 `DmaBufSyncHelper`：封装 CPU mmap 读路径的 `DMA_BUF_IOCTL_SYNC` | 部分完成：`dmabuf_smoke_test` 内部已有 start/end sync 调试读路径；生产级 helper 后续抽象 |
+| P1 | 验证 CPU mmap DMA-BUF cache 行为：消费者 mmap 后读帧数据，对比 MMAP copy 路径的帧内容 | ✅ smoke test CPU mmap 120 次成功，sync start/end 失败数为 0 |
 | P2 | 接入 MIPI 摄像头后验证 RKISP 节点 EXPBUF 和多平面 | 依赖硬件接入，不阻塞当前 USB 验证 |
 | P2 | 验证 RGA/NPU/编码器 import DMA-BUF fd | 依赖硬件模块接入 |
 | P2 | DataPlaneV2 设计与实现 | Phase 1 稳定后启动 |
