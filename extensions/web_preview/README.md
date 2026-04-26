@@ -50,11 +50,14 @@ scp gateway/build-rk3576/web_preview_gateway luckfox@192.168.31.9:/home/luckfox/
 ssh luckfox@192.168.31.9
 
 # 启动 CameraSubsystem 核心发布端（如果尚未启动）
-./camera_publisher_example --device /dev/video45 &
+# 注意：camera_publisher_example 使用位置参数，不是 --device
+./camera_publisher_example /dev/video45 &
 
 # 启动 Gateway（绑定 0.0.0.0:8080，允许局域网访问）
 ./web_preview_gateway --device /dev/video45 --port 8080 --static-root /home/luckfox/web_dist
 ```
+
+> **重要**：必须先启动 camera_publisher_example，再启动 web_preview_gateway。Gateway 启动时会立即连接发布端的控制面和数据面 IPC，如果发布端未就绪，Gateway 会因连接失败而退出。
 
 > 注意：开发模式下 Gateway 不需要前端静态文件，Vite dev server 会代理前端请求。但 Gateway 仍需运行以提供 WebSocket 服务。
 
@@ -127,7 +130,7 @@ scp -r web/dist/* luckfox@192.168.31.9:/home/luckfox/web_dist/
 ssh luckfox@192.168.31.9
 
 # 启动核心发布端
-./camera_publisher_example --device /dev/video45 &
+./camera_publisher_example /dev/video45 &
 
 # 启动 Gateway，指定前端静态文件目录
 ./web_preview_gateway --device /dev/video45 --port 8080 --static-root /home/luckfox/web_dist
@@ -146,6 +149,9 @@ http://192.168.31.9:8080
 ```bash
 # 启动 Gateway（不指定 static-root 或指向空目录）
 ./web_preview_gateway --device /dev/video45 --port 8080
+```
+
+> **重要**：必须先启动 camera_publisher_example，再启动 web_preview_gateway。
 ```
 
 浏览器访问 `http://192.168.31.9:8080` 即可看到 Fallback 页面。
