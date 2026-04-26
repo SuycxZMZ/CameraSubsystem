@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import { calculateReconnectDelay } from '@/utils/reconnect';
 import type { ConnectionState } from '@/types/gateway-command';
 
@@ -8,15 +8,12 @@ export interface UseWebSocketOptions {
   maxReconnectInterval?: number;
   onBinaryMessage?: (data: ArrayBuffer) => void;
   onTextMessage?: (data: string) => void;
-  onConnectionChange?: (state: ConnectionState) => void;
 }
 
 export interface UseWebSocketReturn {
   connectionState: ConnectionState;
   sendText: (data: string) => void;
   sendBinary: (data: ArrayBuffer) => void;
-  connect: () => void;
-  disconnect: () => void;
 }
 
 export function useWebSocket({
@@ -25,26 +22,21 @@ export function useWebSocket({
   maxReconnectInterval = 30000,
   onBinaryMessage,
   onTextMessage,
-  onConnectionChange,
 }: UseWebSocketOptions): UseWebSocketReturn {
+  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
+
+  // Use refs for values that shouldn't trigger re-renders or re-connections
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
-  const connectionStateRef = useRef<ConnectionState>('disconnected');
   const intentionalCloseRef = useRef(false);
+  const mountedRef = useRef(false);
 
-  // Stable refs for callbacks to avoid re-creating the WebSocket on callback changes
+  // Stable refs for callbacks
   const onBinaryRef = useRef(onBinaryMessage);
   const onTextRef = useRef(onTextMessage);
-  const onConnectionChangeRef = useRef(onConnectionChange);
   onBinaryRef.current = onBinaryMessage;
   onTextRef.current = onTextMessage;
-  onConnectionChangeRef.current = onConnectionChange;
-
-  const setConnectionState = useCallback((state: ConnectionState) => {
-    connectionStateRef.current = state;
-    onConnectionChangeRef.current?.(state);
-  }, []);
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -75,11 +67,11 @@ export function useWebSocket({
       };
 
       ws.onclose = () => {
-        setConnectionState('disconnected');
         wsRef.current = null;
+        setConnectionState('disconnected');
 
-        if (!intentionalCloseRef.current) {
-          // Auto-reconnect with exponential backoff
+        // Only auto-reconnect if not intentionally closed and still mounted
+        if (!intentionalCloseRef.current && mountedRef.current) {
           const delay = calculateReconnectDelay(
             reconnectAttemptRef.current,
             reconnectInterval,
@@ -87,13 +79,15 @@ export function useWebSocket({
           );
           reconnectAttemptRef.current += 1;
           reconnectTimerRef.current = setTimeout(() => {
-            connect();
+            if (mountedRef.current) {
+              connect();
+            }
           }, delay);
         }
       };
 
       ws.onerror = () => {
-        // onclose will fire after onerror, so we don't need to handle state here
+        // onclose will fire after onerror, state is handled there
       };
 
       ws.onmessage = (event: MessageEvent) => {
@@ -106,50 +100,41 @@ export function useWebSocket({
     } catch {
       setConnectionState('disconnected');
     }
-  }, [url, reconnectInterval, maxReconnectInterval, setConnectionState, clearReconnectTimer]);
-
-  const disconnect = useCallback(() => {
-    intentionalCloseRef.current = true;
-    clearReconnectTimer();
-    reconnectAttemptRef.current = 0;
-
-    if (wsRef.current) {
-      setConnectionState('disconnecting');
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-  }, [setConnectionState, clearReconnectTimer]);
+  }, [url, reconnectInterval, maxReconnectInterval, clearReconnectTimer]);
 
   const sendText = useCallback((data: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(data);
-    } else {
-      console.warn('[useWebSocket] Cannot send text: not connected');
     }
   }, []);
 
   const sendBinary = useCallback((data: ArrayBuffer) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(data);
-    } else {
-      console.warn('[useWebSocket] Cannot send binary: not connected');
     }
   }, []);
 
-  // Auto-connect on mount, disconnect on unmount
+  // Connect on mount, disconnect on unmount
   useEffect(() => {
+    mountedRef.current = true;
     connect();
+
     return () => {
-      disconnect();
+      mountedRef.current = false;
+      intentionalCloseRef.current = true;
+      clearReconnectTimer();
+      reconnectAttemptRef.current = 0;
+
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [connect, clearReconnectTimer]);
 
   return {
-    connectionState: connectionStateRef.current,
+    connectionState,
     sendText,
     sendBinary,
-    connect,
-    disconnect,
   };
 }

@@ -1,15 +1,13 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect } from 'react';
 import { Header } from '@/components/Header';
 import { StreamGrid } from '@/components/StreamGrid';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useFrameReceiver } from '@/hooks/useFrameReceiver';
 import { useStreamStore } from '@/stores/useStreamStore';
-import type { ConnectionState } from '@/types/gateway-command';
 import type { CommandResult, GatewayStatus } from '@/types/gateway-command';
 
 function App() {
   const { onBinaryMessage } = useFrameReceiver();
-  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
 
   // Compute WebSocket URL from current location
   const wsUrl = `ws://${window.location.host}/ws`;
@@ -30,20 +28,17 @@ function App() {
     }
   }, []);
 
-  const handleConnectionChange = useCallback((state: ConnectionState) => {
-    setConnectionState(state);
-    useStreamStore.getState().setConnectionState(state);
-  }, []);
-
-  const { sendText } = useWebSocket({
+  const { connectionState, sendText } = useWebSocket({
     url: wsUrl,
     onBinaryMessage,
     onTextMessage: handleTextMessage,
-    onConnectionChange: handleConnectionChange,
   });
 
-  // Inject sendText into store for command sending
-  useStreamStore.getState().setSendTextFn(sendText);
+  // Sync connection state to store and inject sendText
+  useEffect(() => {
+    useStreamStore.getState().setConnectionState(connectionState);
+    useStreamStore.getState().setSendTextFn(sendText);
+  }, [connectionState, sendText]);
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-950 text-zinc-50">
