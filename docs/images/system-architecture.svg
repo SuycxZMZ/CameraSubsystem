@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700">
+  <style><![CDATA[
+svg { background: #020617; font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace; }
+.label { fill: #94a3b8; font-size: 9px; text-anchor: middle; }
+]]></style>
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="arrowhead-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" />
+          </marker>
+          <marker id="arrowhead-emerald" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#34d399" />
+          </marker>
+          <marker id="arrowhead-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- ===== ARROWS (drawn first, behind components) ===== -->
+
+        <!-- Camera HW → CameraSource -->
+        <line x1="160" y1="95" x2="218" y2="95" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead-emerald)"/>
+        <text x="189" y="89" fill="#94a3b8" font-size="8" text-anchor="middle">V4L2</text>
+
+        <!-- CameraSource → SessionManager -->
+        <line x1="370" y1="95" x2="428" y2="95" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead-emerald)"/>
+        <text x="399" y="89" fill="#94a3b8" font-size="8" text-anchor="middle">frames</text>
+
+        <!-- SessionManager → DataIPC -->
+        <line x1="580" y1="95" x2="638" y2="95" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead-emerald)"/>
+
+        <!-- DataIPC → Gateway (down) -->
+        <line x1="710" y1="125" x2="710" y2="268" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead-emerald)"/>
+        <text x="724" y="200" fill="#94a3b8" font-size="8">Unix Socket</text>
+
+        <!-- DataIPC → Other Subscribers (down) -->
+        <line x1="710" y1="125" x2="710" y2="148" stroke="#64748b" stroke-width="1.5"/>
+        <line x1="710" y1="148" x2="880" y2="148" stroke="#64748b" stroke-width="1.5"/>
+        <line x1="880" y1="148" x2="880" y2="268" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- Gateway Subscribe → ControlIPC -->
+        <line x1="640" y1="295" x2="580" y2="295" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrowhead-amber)"/>
+        <line x1="580" y1="295" x2="580" y2="125" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrowhead-amber)"/>
+        <text x="560" y="210" fill="#fbbf24" font-size="8" text-anchor="end">Subscribe</text>
+
+        <!-- Other Subscribers Subscribe → ControlIPC -->
+        <line x1="820" y1="295" x2="780" y2="295" stroke="#fbbf24" stroke-width="1" stroke-dasharray="5,5"/>
+        <line x1="780" y1="295" x2="780" y2="148" stroke="#fbbf24" stroke-width="1" stroke-dasharray="5,5"/>
+        <line x1="780" y1="148" x2="580" y2="148" stroke="#fbbf24" stroke-width="1" stroke-dasharray="5,5"/>
+        <line x1="580" y1="148" x2="580" y2="125" stroke="#fbbf24" stroke-width="1" stroke-dasharray="5,5"/>
+
+        <!-- Gateway → WebSocket → Browser -->
+        <line x1="710" y1="325" x2="710" y2="418" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead-cyan)"/>
+        <text x="724" y="375" fill="#94a3b8" font-size="8">WebSocket</text>
+
+        <line x1="710" y1="448" x2="710" y2="498" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead-cyan)"/>
+        <text x="724" y="478" fill="#94a3b8" font-size="8">Binary</text>
+
+        <!-- ===== PUBLISHER BOUNDARY ===== -->
+        <rect x="30" y="40" width="710" height="110" rx="12" fill="rgba(6, 78, 59, 0.08)" stroke="#34d399" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="42" y="58" fill="#34d399" font-size="10" font-weight="600">核心发布端进程 (Publisher)</text>
+
+        <!-- Camera Hardware -->
+        <rect x="40" y="70" width="120" height="50" rx="6" fill="#0f172a"/>
+        <rect x="40" y="70" width="120" height="50" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="100" y="90" fill="white" font-size="11" font-weight="600" text-anchor="middle">Camera HW</text>
+        <text x="100" y="106" fill="#94a3b8" font-size="9" text-anchor="middle">USB / MIPI</text>
+
+        <!-- CameraSource -->
+        <rect x="220" y="70" width="150" height="50" rx="6" fill="#0f172a"/>
+        <rect x="220" y="70" width="150" height="50" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="295" y="90" fill="white" font-size="11" font-weight="600" text-anchor="middle">CameraSource</text>
+        <text x="295" y="106" fill="#94a3b8" font-size="9" text-anchor="middle">V4L2/MMAP 采集</text>
+
+        <!-- SessionManager -->
+        <rect x="430" y="70" width="150" height="50" rx="6" fill="#0f172a"/>
+        <rect x="430" y="70" width="150" height="50" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="505" y="90" fill="white" font-size="11" font-weight="600" text-anchor="middle">SessionManager</text>
+        <text x="505" y="106" fill="#94a3b8" font-size="9" text-anchor="middle">引用计数启停</text>
+
+        <!-- Control IPC + Data IPC -->
+        <rect x="640" y="70" width="90" height="50" rx="6" fill="#0f172a"/>
+        <rect x="640" y="70" width="90" height="50" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="685" y="88" fill="white" font-size="10" font-weight="600" text-anchor="middle">Control</text>
+        <text x="685" y="102" fill="white" font-size="10" font-weight="600" text-anchor="middle">+ Data</text>
+        <text x="685" y="114" fill="#94a3b8" font-size="8" text-anchor="middle">IPC</text>
+
+        <!-- ===== EXTENSIONS BOUNDARY ===== -->
+        <rect x="560" y="250" width="360" height="210" rx="12" fill="rgba(8, 51, 68, 0.06)" stroke="#22d3ee" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="572" y="268" fill="#22d3ee" font-size="10" font-weight="600">extensions/web_preview</text>
+
+        <!-- Gateway -->
+        <rect x="580" y="280" width="260" height="50" rx="6" fill="#0f172a"/>
+        <rect x="580" y="280" width="260" height="50" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="710" y="300" fill="white" font-size="11" font-weight="600" text-anchor="middle">web_preview_gateway</text>
+        <text x="710" y="316" fill="#94a3b8" font-size="9" text-anchor="middle">CameraSubscriberClient + HTTP/WS Server</text>
+
+        <!-- WebSocket label -->
+        <rect x="620" y="420" width="180" height="30" rx="6" fill="#0f172a"/>
+        <rect x="620" y="420" width="180" height="30" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="710" y="440" fill="white" font-size="10" font-weight="600" text-anchor="middle">WebSocket :8080</text>
+
+        <!-- React Frontend -->
+        <rect x="580" y="500" width="260" height="60" rx="6" fill="#0f172a"/>
+        <rect x="580" y="500" width="260" height="60" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="710" y="520" fill="white" font-size="11" font-weight="600" text-anchor="middle">React 前端</text>
+        <text x="710" y="536" fill="#94a3b8" font-size="9" text-anchor="middle">Vite + TypeScript + Tailwind</text>
+        <text x="710" y="550" fill="#22d3ee" font-size="8" text-anchor="middle">Canvas 帧渲染 + 流管理</text>
+
+        <!-- ===== OTHER SUBSCRIBERS ===== -->
+        <rect x="800" y="280" width="160" height="50" rx="6" fill="#0f172a"/>
+        <rect x="800" y="280" width="160" height="50" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="880" y="300" fill="white" font-size="11" font-weight="600" text-anchor="middle">其他订阅端</text>
+        <text x="880" y="316" fill="#94a3b8" font-size="9" text-anchor="middle">AI / 编码 / 录制</text>
+
+        <!-- ===== LEGEND ===== -->
+        <text x="40" y="620" fill="white" font-size="10" font-weight="600">图例</text>
+
+        <rect x="40" y="635" width="16" height="10" rx="2" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="62" y="643" fill="#94a3b8" font-size="8">后端 / 发布端</text>
+
+        <rect x="160" y="635" width="16" height="10" rx="2" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="182" y="643" fill="#94a3b8" font-size="8">前端 / 扩展</text>
+
+        <rect x="280" y="635" width="16" height="10" rx="2" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="302" y="643" fill="#94a3b8" font-size="8">外部 / 通用</text>
+
+        <line x1="400" y1="640" x2="416" y2="640" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead-emerald)"/>
+        <text x="422" y="643" fill="#94a3b8" font-size="8">数据流</text>
+
+        <line x1="490" y1="640" x2="506" y2="640" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrowhead-amber)"/>
+        <text x="512" y="643" fill="#94a3b8" font-size="8">控制面</text>
+
+        <line x1="580" y1="640" x2="596" y2="640" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead-cyan)"/>
+        <text x="602" y="643" fill="#94a3b8" font-size="8">WebSocket</text>
+      </svg>

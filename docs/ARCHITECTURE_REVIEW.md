@@ -7,8 +7,8 @@
 
 > **文档硬规范**
 >
-> - 本项目的系统架构图、模块框图、部署拓扑图和数据路径框图必须使用 `architecture-diagram` skill 生成的独立 HTML / inline SVG 图表产物；Markdown 中优先直接引用导出的 `.svg`，并附完整 HTML 图表链接。
-> - 时序图、状态机图、目录结构图等仍使用 Mermaid fenced code block（语言标识为 `mermaid`）。
+> - 本项目的系统架构图、模块框图、部署拓扑图、数据路径框图和工程结构框图必须使用 `architecture-diagram` skill 生成独立 HTML / inline SVG 图表产物；每个 HTML 图必须同步导出同名 `.svg`，Markdown 中默认直接显示 SVG，并附完整 HTML 图表链接。
+> - 时序图、状态机图、纯目录结构图等仍使用 Mermaid fenced code block（语言标识为 `mermaid`）。
 > - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
@@ -56,9 +56,9 @@
 
 ## 3. 当前系统架构基线
 
-![CameraSubsystem 系统架构基线](diagrams/camera_subsystem_system_architecture.svg)
+![CameraSubsystem 系统架构基线](images/system-architecture.svg)
 
-[打开完整 HTML 图表](diagrams/camera_subsystem_architecture.html)
+[打开完整 HTML 图表](images/system-architecture.html)
 
 已落地模块：
 
