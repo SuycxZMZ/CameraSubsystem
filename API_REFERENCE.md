@@ -9,7 +9,8 @@
 
 > **文档硬规范**
 >
-> - 本项目所有流程图、框图、时序图、状态机图、目录结构图等图示必须使用 Mermaid fenced code block（语言标识为 `mermaid`）。
+> - 本项目的系统架构图、模块框图、部署拓扑图、数据路径框图和工程结构框图必须使用 `architecture-diagram` skill 生成独立 HTML / inline SVG 图表产物；每个 HTML 图必须同步导出同名 `.svg`，Markdown 中默认直接显示 SVG，并附完整 HTML 图表链接。
+> - 时序图、状态机图、纯目录结构图等仍使用 Mermaid fenced code block（语言标识为 `mermaid`）。
 > - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
@@ -137,7 +138,105 @@ enum class IoMethod : uint32_t
 };
 ```
 
-### 2.6 错误码枚举 (ErrorCode)
+### 2.6 DMA-BUF Phase 1 帧描述 (FrameDescriptor / FramePacket)
+
+`FrameDescriptor` 是 DMA-BUF Phase 1 新增的 C++ 侧帧元数据模型，用于表达 fd、plane、stride、offset、bytes_used 和底层 buffer id。第一阶段先支持单 fd 单平面，字段保留多 fd 多平面扩展能力。
+
+```cpp
+constexpr uint32_t kMaxFramePlanes = 3;
+constexpr uint32_t kMaxFrameFds = 3;
+constexpr uint32_t kInvalidFrameFdIndex = UINT32_MAX;
+
+struct FramePlaneDescriptor
+{
+    uint32_t fd_index;
+    uint32_t offset;
+    uint32_t stride;
+    uint32_t length;
+    uint32_t bytes_used;
+};
+
+struct FrameDescriptor
+{
+    uint64_t frame_id;
+    uint32_t camera_id;
+    uint64_t timestamp_ns;
+    uint32_t sequence;
+
+    uint32_t width;
+    uint32_t height;
+    PixelFormat pixel_format;
+    MemoryType memory_type;
+
+    uint32_t buffer_id;
+    uint32_t plane_count;
+    uint32_t fd_count;
+    std::array<int, kMaxFrameFds> fds;
+    std::array<FramePlaneDescriptor, kMaxFramePlanes> planes;
+    uint64_t total_bytes_used;
+    uint32_t flags;
+
+    bool IsValid() const;
+};
+
+struct FramePacket
+{
+    FrameDescriptor descriptor;
+    FrameHandle handle;
+    std::shared_ptr<FrameLease> lease;
+
+    bool IsValid() const;
+};
+```
+
+约束：
+
+1. `MemoryType::kDmaBuf` 场景下必须存在有效 fd，且每个有效 plane 必须通过 `fd_index` 指向 `fds`。
+2. `FrameDescriptor` 描述可访问句柄和布局，不表达底层 V4L2 buffer 的所有权。
+3. 底层 buffer 复用权由 `FrameLease` 控制，消费者释放 lease 后生产端才允许 QBUF。
+
+### 2.7 FrameLease 生命周期接口
+
+```cpp
+class FrameLease
+{
+public:
+    virtual ~FrameLease() = default;
+
+    virtual void Release() = 0;
+    virtual bool IsReleased() const = 0;
+    virtual uint32_t BufferId() const = 0;
+};
+
+class HeapFrameLease final : public FrameLease
+{
+public:
+    explicit HeapFrameLease(std::shared_ptr<BufferGuard> guard);
+    ~HeapFrameLease() override;
+
+    void Release() override;
+    bool IsReleased() const override;
+    uint32_t BufferId() const override;
+    std::shared_ptr<BufferGuard> Guard() const;
+};
+
+class DmaBufFrameLease final : public FrameLease
+{
+public:
+    using ReleaseCallback = std::function<void(uint32_t buffer_id)>;
+
+    DmaBufFrameLease(uint32_t buffer_id, ReleaseCallback release_callback);
+    ~DmaBufFrameLease() override;
+
+    void Release() override;
+    bool IsReleased() const override;
+    uint32_t BufferId() const override;
+};
+```
+
+`DmaBufFrameLease::Release()` 必须幂等。当前 V4L2 export 路径通过 release callback 触发对应 buffer 的 QBUF。
+
+### 2.8 错误码枚举 (ErrorCode)
 
 ```cpp
 enum class ErrorCode : int
@@ -199,7 +298,15 @@ enum class ErrorCode : int
 using FrameCallback = std::function<void(const FrameHandle& frame)>;
 ```
 
-### 3.2 订阅者接口 (IFrameSubscriber)
+### 3.2 DMA-BUF 帧包回调类型 (FramePacketCallback)
+
+```cpp
+using FramePacketCallback = std::function<void(const FramePacket& packet)>;
+```
+
+该回调用于 DMA-BUF Phase 1 的进程内闭环。`packet.lease` 必须在消费者完成访问后释放；如果消费者不持有 lease，回调返回后本地对象析构会立即释放 lease，并允许生产端重新 QBUF。
+
+### 3.3 订阅者接口 (IFrameSubscriber)
 
 ```cpp
 class IFrameSubscriber
@@ -302,6 +409,16 @@ bool IsStreaming() const;
  * @note 通常指向 Broker 的 Publish 接口
  */
 void SetFrameCallback(FrameCallback callback);
+```
+
+```cpp
+/**
+ * @brief 设置 DMA-BUF Phase 1 帧包回调
+ * @param callback 帧包回调函数，接收 FrameDescriptor + FrameHandle + FrameLease
+ * @note 仅在显式 IoMethod::kDmaBuf 且 V4L2 EXPBUF 成功时进入该路径；
+ *       否则 CameraSource 自动回退到 MMAP + copy 回调路径
+ */
+void SetFramePacketCallback(FramePacketCallback callback);
 ```
 
 ### 4.5 信息获取

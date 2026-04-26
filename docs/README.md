@@ -1,6 +1,6 @@
 # CameraSubsystem 文档索引
 
-**最后更新:** 2026-04-25
+**最后更新:** 2026-04-26
 
 > **文档硬规范**
 >
@@ -34,8 +34,9 @@
 
 1. [../README.md](../README.md)
 2. [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)
-3. [../structure.md](../structure.md)
-4. [../API_REFERENCE.md](../API_REFERENCE.md)
+3. [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)
+4. [../structure.md](../structure.md)
+5. [../API_REFERENCE.md](../API_REFERENCE.md)
 
 ### 做代码开发
 
@@ -61,6 +62,7 @@
 | [../README.md](../README.md) | 团队入口、工程结构、常用命令、当前事实摘要 | 长篇设计细节、评审建议全集、API 全量说明 |
 | [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) | 项目定位、技术栈、功能边界、快速开始 | 风险优先级、ARCH-* 详细跟踪 |
 | [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) | 系统/代码架构评审、风险、建议、ARCH-* 跟踪 | 基础使用教程、接口完整定义 |
+| [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md) | DMA-BUF 零拷贝主链路设计，包含 RK3576 验证路线、FrameLease、DataPlaneV2 和风险边界 | 当前完成度统计、接口全量参考 |
 | [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md) | 模块完成度、测试状态、下一步计划、技术债务执行状态 | 重复架构评审正文 |
 | [../API_REFERENCE.md](../API_REFERENCE.md) | 公开接口、数据结构、IPC 协议、示例调用 | 设计争议与风险讨论 |
 | [../NAMING_CONVENTION.md](../NAMING_CONVENTION.md) | 命名、目录、代码格式、跨平台约定 | 项目状态与路线图 |

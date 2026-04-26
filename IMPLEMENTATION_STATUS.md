@@ -4,7 +4,8 @@
 
 > **文档硬规范**
 >
-> - 本项目所有流程图、框图、时序图、状态机图、目录结构图等图示必须使用 Mermaid fenced code block（语言标识为 `mermaid`）。
+> - 本项目的系统架构图、模块框图、部署拓扑图、数据路径框图和工程结构框图必须使用 `architecture-diagram` skill 生成独立 HTML / inline SVG 图表产物；每个 HTML 图必须同步导出同名 `.svg`，Markdown 中默认直接显示 SVG，并附完整 HTML 图表链接。
+> - 时序图、状态机图、纯目录结构图等仍使用 Mermaid fenced code block（语言标识为 `mermaid`）。
 > - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
@@ -20,6 +21,7 @@
 - [文档状态](#文档状态)
 - [下一步工作计划](#下一步工作计划)
 - [架构完善项（面向边缘设备）](#架构完善项面向边缘设备)
+- [DMA-BUF Phase 1 后续修改入口](#dma-buf-phase-1-后续修改入口)
 - [发布端/订阅端解耦模型状态](#发布端订阅端解耦模型状态)
 - [架构设计细化（Buffer 生命周期与背压策略）](#架构设计细化buffer-生命周期与背压策略)
 - [边缘设备适配与交叉编译状态](#边缘设备适配与交叉编译状态)
@@ -107,6 +109,11 @@ flowchart TB
   - Stride 和 Offset 信息
   - 辅助方法（GetPlaneData, GetPlaneSize, IsValid, Reset）
 
+- ✅ `frame_descriptor.h/cpp` - DMA-BUF Phase 1 帧描述模型
+  - `FrameDescriptor` 显式描述 fd、plane、stride、offset、bytes_used 和 buffer_id
+  - `FramePacket` 承载 `FrameDescriptor + FrameHandle + FrameLease`
+  - 第一阶段先支持单 fd 单平面，字段预留多 fd 多平面扩展
+
 - ✅ `camera_config.h/cpp` - Camera配置结构
   - 配置参数定义
   - 验证方法（IsValid）
@@ -122,6 +129,7 @@ flowchart TB
 - ✅ BufferGuard 单元测试（新增）
 - ✅ BufferState 状态机测试（新增）
 - ✅ FrameHandleEx 单元测试（新增）
+- ✅ FrameDescriptor / FrameLease 单元测试（新增）
 
 **新增组件:**
 
@@ -129,6 +137,7 @@ flowchart TB
 - ✅ `buffer_guard.h/cpp` - BufferGuard RAII 所有权管理
 - ✅ `buffer_state.h` - Buffer 状态机定义
 - ✅ `frame_handle_ex.h/cpp` - FrameHandleEx 扩展结构（绑定 Buffer 生命周期）
+- ✅ `frame_lease.h/cpp` - HeapFrameLease / DmaBufFrameLease 生命周期抽象
 
 ### 2. 平台抽象层 (Platform) ✅
 
@@ -158,13 +167,19 @@ flowchart TB
 - ✅ `camera_source.h/cpp` - Camera数据源实现（当前 V4L2 + MMAP 后端）
 - ✅ 设备打开/格式配置/帧采集/回调分发
 - ✅ BufferPool 复用池接入（拷贝模式）
+- ✅ 显式 `IoMethod::kDmaBuf` 时尝试 V4L2 `VIDIOC_EXPBUF` 导出 DMA-BUF fd
+- ✅ `FramePacketCallback` 接入，用于交付 `FrameDescriptor + FrameLease`
+- ✅ DMA-BUF lease in-flight 上限与 release 后 QBUF 的基础闭环
+- ✅ DMA-BUF export 不可用时自动回退 MMAP + copy
 - ✅ 基础背压：池耗尽时丢帧
 - ✅ `camera_session_manager.h/cpp` - 会话管理（按订阅启停）
 
 **待实现:**
 
-- ⏳ 采集后端扩展、V4L2 多平面与 DMA-BUF 支持
-- ⏳ 高级 Buffer 管理机制
+- ⏳ RK3576 板端验证 `VIDIOC_EXPBUF`、lease 回收和 cache 行为
+- ⏳ V4L2 多平面、DMA-BUF sync helper 与 CPU mmap 调试读路径
+- ⏳ 跨进程 `DataPlaneV2` / `SCM_RIGHTS` / `ReleaseFrame`
+- ⏳ 高级 Buffer 管理机制与慢消费者隔离
 
 ### 5. 工具类 (Utils) 🚧
 
@@ -215,6 +230,7 @@ flowchart TB
 - ✅ CameraSource 压测程序（camera_source_stress_test）
 - ✅ CameraSessionManager 单元测试
 - ✅ 控制面 IPC 单元测试（含沙箱受限跳过策略）
+- ✅ FrameDescriptor / FrameLease 单元测试
 
 **待添加测试:**
 
@@ -298,9 +314,29 @@ flowchart TB
 
 当前实现状态摘要：
 
-1. Buffer 生命周期与复用池基础治理已完成，当前已落地的 V4L2 后端仍是 MMAP -> BufferPool 的拷贝模式。
+1. Buffer 生命周期与复用池基础治理已完成，当前默认 V4L2 后端仍保留 MMAP -> BufferPool 的拷贝 fallback。
 2. 发布端/订阅端解耦、按订阅启停、控制面/数据面协议已形成双进程可运行原型。
-3. 零拷贝主链路、背压参数化、设备恢复、统一 metrics、通用板端自检流程仍是下一阶段重点。
+3. DMA-BUF Phase 1 基础代码已接入 `FrameDescriptor` / `FrameLease` / V4L2 `VIDIOC_EXPBUF` 尝试路径，仍待 RK3576 板端能力验证和跨进程数据面协议。
+4. 背压参数化、设备恢复、统一 metrics、通用板端自检流程仍是下一阶段重点。
+
+## DMA-BUF Phase 1 后续修改入口
+
+下一次修改建议优先围绕“板端可验证的最小闭环”推进，不要直接进入跨进程 fd 传递。
+
+| 优先级 | 任务 | 验收口径 |
+|--------|------|----------|
+| P0 | 在 RK3576 上显式启用 `IoMethod::kDmaBuf`，验证 `/dev/video45` 或目标节点是否支持 `VIDIOC_EXPBUF` | 日志能明确输出 export 成功或 fallback 原因 |
+| P0 | 增加最小 DMA-BUF probe / smoke test 入口 | 能输出实际 V4L2 buffer 数量、fd 导出结果、`lease_in_flight_max` 和格式信息 |
+| P0 | 验证 `DmaBufFrameLease` release 后 QBUF 时序 | 单消费者持有 lease 时对应 buffer 不被提前 QBUF，release 后采集继续 |
+| P1 | 增加 DMA-BUF 路径统计 | 至少包括 export_fail、lease_exhausted、dmabuf_frame_count、fallback_count |
+| P1 | 设计 CPU mmap 调试读路径和 sync helper | 只用于板端校验，不作为 Web Preview 或生产主路径默认行为 |
+| P1 | 明确多平面扩展落点 | 在不破坏当前 `FrameDescriptor` 的前提下接入 `V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE` |
+| P2 | 进入 `DataPlaneV2` / `SCM_RIGHTS` 设计实现 | 只有 Phase 1 板端闭环稳定后再推进 |
+
+本阶段保持两个边界：
+
+1. 默认运行路径仍保留 MMAP + copy fallback，保证现有 publisher/subscriber 和 Web Preview 不被 DMA-BUF 试验影响。
+2. DMA-BUF fd 是数据访问句柄，V4L2 buffer 复用权仍由生产端和 `FrameLease` 控制；不要让消费者自行决定 QBUF。
 
 ## 发布端/订阅端解耦模型状态
 
@@ -345,8 +381,11 @@ flowchart TB
 - [ ] 添加代码覆盖率检查
 - [x] 增加 RK3576 跨架构编译入口 ✅ 2026-04-25
 - [ ] 增加通用板端运行时自检，并保留 RK3576 作为首个验证实例
-- [ ] 完善多平面与 DMA-BUF 实现细节
-- [ ] 将 BufferPool 与 DMA-BUF 零拷贝打通
+- [x] 新增 FrameDescriptor / FrameLease / DmaBufFrameLease 基础模型 ✅ 2026-04-26
+- [x] 接入 V4L2 DMA-BUF export 尝试路径和 copy fallback ✅ 2026-04-26
+- [ ] 在 RK3576 板端验证 DMA-BUF export、lease 回收和 cache 行为
+- [ ] 完善多平面与 DMA-BUF sync helper 实现细节
+- [ ] 将跨进程 DataPlaneV2 与 DMA-BUF fd 传递打通
 - [ ] 背压策略参数化（延迟阈值/优先级规则）
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 

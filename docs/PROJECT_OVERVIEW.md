@@ -29,18 +29,19 @@
 
 ## 项目简介
 
-CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基座。它作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源，当前已形成采集后端适配、BufferPool 生命周期治理、发布端/订阅端双进程示例和交叉编译链路；DMA-BUF 或共享内存等低拷贝数据面仍是下一阶段生产化目标。
+CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基座。它作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源，当前已形成采集后端适配、BufferPool 生命周期治理、发布端/订阅端双进程示例和交叉编译链路；DMA-BUF Phase 1 已接入基础帧描述、lease 和 V4L2 export 尝试路径，生产级跨进程零拷贝数据面仍是下一阶段目标。
 
 项目不把架构绑定到单一 SoC 或单一采集 API。当前实现以 Linux V4L2/MMAP 后端和 RK3576 / Debian 板端验证为基线，后续可继续扩展 Android Camera HAL、厂商媒体栈、USB/UVC、MIPI/CSI 多平面链路或其他平台私有后端。
 
-本文档只描述项目定位、能力边界、技术栈和快速开始。架构评审建议统一维护在 [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)，接口细节统一维护在 [../API_REFERENCE.md](../API_REFERENCE.md)。
+本文档只描述项目定位、能力边界、技术栈和快速开始。架构评审建议统一维护在 [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)，DMA-BUF 零拷贝主链路设计维护在 [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)，接口细节统一维护在 [../API_REFERENCE.md](../API_REFERENCE.md)。
 
 ## 核心特性
 
 ### 性能特性
 
-- **当前链路**: 已落地 Linux V4L2/MMAP 后端，采集后拷贝到 BufferPool，适合本机与板端初期联调。
-- **生产目标**: 后续打通 DMA-BUF 或共享内存数据面，降低 CPU 拷贝成本。
+- **当前链路**: 已落地 Linux V4L2/MMAP 后端，默认采集后拷贝到 BufferPool，适合本机与板端初期联调。
+- **DMA-BUF Phase 1**: 已新增 `FrameDescriptor` / `FrameLease` / V4L2 `VIDIOC_EXPBUF` 尝试路径；驱动不支持时自动保留 copy fallback。
+- **生产目标**: 后续打通跨进程 DMA-BUF fd 传递或共享内存数据面，降低 CPU 拷贝成本。
 - **调度基础**: 已具备线程池分发、Buffer 复用和基础丢帧保护。
 - **指标口径**: 4K 高帧率、端到端延迟、内存占用等指标需要按具体平台和采集后端实测。
 
@@ -173,7 +174,7 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 #### 1. CameraSource
 
 - **职责**: 负责 Camera 设备的初始化、参数配置、流控及原始帧数据的捕获
-- **特性**: 已落地 V4L2/MMAP 采集后端、Buffer 预分配与复用、RK3576 交叉编译适配；多平面、DMA-BUF、其他采集后端、设备热插拔恢复待完善
+- **特性**: 已落地 V4L2/MMAP 采集后端、Buffer 预分配与复用、RK3576 交叉编译适配；DMA-BUF 单 fd export 基础路径已接入，板端能力验证、多平面、其他采集后端、设备热插拔恢复待完善
 
 #### 2. FrameBroker
 
@@ -302,6 +303,7 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 - ✅ CameraSessionManager（按订阅引用计数启停）
 - ✅ 控制面 IPC（CameraControlServer/Client）
 - ✅ 数据面 IPC（示例协议与双进程收发链路）
+- ✅ DMA-BUF Phase 1 基础模型（FrameDescriptor / FrameLease / DmaBufFrameLease）
 - ✅ 构建系统配置
 - ✅ RK3576 官方工具链交叉编译入口（`cmake/toolchains/rk3576.cmake` / `scripts/build-rk3576.sh`）
 - ✅ 单元测试框架
@@ -310,7 +312,7 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 
 ### 进行中模块
 
-- 🚧 CameraSource 高级能力（多平面 / DMA-BUF）
+- 🚧 CameraSource 高级能力（RK3576 DMA-BUF 板端验证 / 多平面 / cache sync）
 - 🚧 背压策略完善（延迟阈值 / DropPolicy 参数化）
 - 🚧 设备恢复机制（自动重连 / 降级策略）
 

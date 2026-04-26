@@ -1,5 +1,6 @@
 #include "camera_subsystem/camera/camera_source.h"
 
+#include "camera_subsystem/core/frame_lease.h"
 #include "camera_subsystem/platform/platform_logger.h"
 
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <ctime>
 #include <fcntl.h>
 #include <linux/videodev2.h>
+#include <memory>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/select.h>
@@ -40,6 +42,7 @@ CameraSource::CameraSource()
     , device_path_("/dev/video0")
     , device_fd_(-1)
     , streaming_(false)
+    , requeue_context_(std::make_shared<RequeueContext>())
     , is_running_(false)
     , frame_count_(0)
     , dropped_frames_(0)
@@ -49,6 +52,7 @@ CameraSource::CameraSource()
 CameraSource::~CameraSource()
 {
     Stop();
+    CleanupDmaBufExports();
     CleanupBuffers();
     CloseDevice();
 }
@@ -56,6 +60,7 @@ CameraSource::~CameraSource()
 bool CameraSource::Initialize(const core::CameraConfig& config)
 {
     Stop();
+    CleanupDmaBufExports();
     CleanupBuffers();
     CloseDevice();
 
@@ -79,6 +84,7 @@ bool CameraSource::Initialize(const core::CameraConfig& config)
 
     if (!InitMMap())
     {
+        CleanupDmaBufExports();
         CleanupBuffers();
         CloseDevice();
         return false;
@@ -96,6 +102,7 @@ bool CameraSource::Initialize(const core::CameraConfig& config)
 
     if (!buffer_pool_.Initialize(config_.buffer_count_, pool_buffer_size_))
     {
+        CleanupDmaBufExports();
         CleanupBuffers();
         CloseDevice();
         return false;
@@ -123,6 +130,12 @@ bool CameraSource::Start()
         return false;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(requeue_context_->mutex);
+        requeue_context_->device_fd = device_fd_;
+        requeue_context_->active = true;
+    }
+
     is_running_ = true;
     frame_count_ = 0;
     dropped_frames_ = 0;
@@ -143,6 +156,11 @@ void CameraSource::Stop()
         capture_thread_.join();
     }
 
+    {
+        std::lock_guard<std::mutex> lock(requeue_context_->mutex);
+        requeue_context_->active = false;
+    }
+
     StopStream();
 }
 
@@ -161,6 +179,12 @@ void CameraSource::SetFrameCallbackWithBuffer(FrameCallbackWithBuffer callback)
 {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     callback_with_buffer_ = std::move(callback);
+}
+
+void CameraSource::SetFramePacketCallback(FramePacketCallback callback)
+{
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    frame_packet_callback_ = std::move(callback);
 }
 
 void CameraSource::SetDevicePath(const std::string& device_path)
@@ -236,70 +260,199 @@ void CameraSource::CaptureLoop()
             break;
         }
 
-        // ARCH-001: 使用 BufferGuard 明确 Buffer 所有权
-        auto buffer_ref = buffer_pool_.Acquire();
-        if (!buffer_ref)
-        {
-            dropped_frames_.fetch_add(1);
-            if (Xioctl(device_fd_, VIDIOC_QBUF, &buf) < 0)
-            {
-                platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
-                                              "VIDIOC_QBUF failed: %s", strerror(errno));
-            }
-            continue;
-        }
-
-        core::FrameHandle frame;
-        frame.Reset();
-
-        const uint64_t frame_id = frame_count_.fetch_add(1);
-        frame.frame_id_ = static_cast<uint32_t>(frame_id);
-        frame.camera_id_ = 0;
-        frame.timestamp_ns_ = GetTimestampNs();
-        frame.width_ = config_.width_;
-        frame.height_ = config_.height_;
-        frame.format_ = config_.format_;
-        frame.sequence_ = static_cast<uint32_t>(buf.sequence);
-        frame.memory_type_ = core::MemoryType::kHeap;
-
-        size_t used_size = static_cast<size_t>(buf.bytesused);
-        if (used_size == 0)
-        {
-            used_size = buffers_[buf.index].length;
-        }
-
-        const size_t copy_size = std::min(used_size, buffer_ref->Size());
-        std::memcpy(buffer_ref->Data(), buffers_[buf.index].start, copy_size);
-
-        frame.virtual_address_ = buffer_ref->Data();
-        frame.buffer_size_ = copy_size;
-
-        FillFrameLayout(frame, copy_size);
-
-        FrameCallback callback;
-        FrameCallbackWithBuffer callback_with_buffer;
-        {
-            std::lock_guard<std::mutex> lock(callback_mutex_);
-            callback = callback_;
-            callback_with_buffer = callback_with_buffer_;
-        }
-
-        if (callback_with_buffer)
-        {
-            callback_with_buffer(frame, buffer_ref);
-        }
-        else if (callback)
-        {
-            callback(frame);
-        }
-
-        if (Xioctl(device_fd_, VIDIOC_QBUF, &buf) < 0)
-        {
-            platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
-                                          "VIDIOC_QBUF failed: %s", strerror(errno));
-            break;
-        }
+        HandleDequeuedBuffer(buf);
     }
+}
+
+void CameraSource::HandleDequeuedBuffer(struct v4l2_buffer& buf)
+{
+    if (buf.index >= buffers_.size())
+    {
+        dropped_frames_.fetch_add(1);
+        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                      "Dequeued invalid buffer index: %u", buf.index);
+        return;
+    }
+
+    if (ShouldUseDmaBufPath() && HandleDequeuedBufferDmaBuf(buf))
+    {
+        return;
+    }
+
+    HandleDequeuedBufferCopy(buf);
+}
+
+void CameraSource::HandleDequeuedBufferCopy(struct v4l2_buffer& buf)
+{
+    auto buffer_ref = buffer_pool_.Acquire();
+    if (!buffer_ref)
+    {
+        dropped_frames_.fetch_add(1);
+        RequeueBuffer(buf.index);
+        return;
+    }
+
+    core::FrameHandle frame;
+    frame.Reset();
+
+    const uint64_t frame_id = frame_count_.fetch_add(1);
+    frame.frame_id_ = static_cast<uint32_t>(frame_id);
+    frame.camera_id_ = 0;
+    frame.timestamp_ns_ = GetTimestampNs();
+    frame.width_ = config_.width_;
+    frame.height_ = config_.height_;
+    frame.format_ = config_.format_;
+    frame.sequence_ = static_cast<uint32_t>(buf.sequence);
+    frame.memory_type_ = core::MemoryType::kHeap;
+
+    size_t used_size = static_cast<size_t>(buf.bytesused);
+    if (used_size == 0)
+    {
+        used_size = buffers_[buf.index].length;
+    }
+
+    const size_t copy_size = std::min(used_size, buffer_ref->Size());
+    std::memcpy(buffer_ref->Data(), buffers_[buf.index].start, copy_size);
+
+    frame.virtual_address_ = buffer_ref->Data();
+    frame.buffer_size_ = copy_size;
+
+    FillFrameLayout(frame, copy_size);
+
+    FrameCallback callback;
+    FrameCallbackWithBuffer callback_with_buffer;
+    {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
+        callback = callback_;
+        callback_with_buffer = callback_with_buffer_;
+    }
+
+    if (callback_with_buffer)
+    {
+        callback_with_buffer(frame, buffer_ref);
+    }
+    else if (callback)
+    {
+        callback(frame);
+    }
+
+    RequeueBuffer(buf.index);
+}
+
+bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf)
+{
+    Buffer& buffer = buffers_[buf.index];
+    if (!buffer.dma_buf_exported || buffer.dma_buf_fd < 0)
+    {
+        return false;
+    }
+
+    const size_t active_leases = requeue_context_->active_leases.load();
+    if (active_leases >= global_lease_in_flight_max_)
+    {
+        lease_exhausted_count_.fetch_add(1);
+        dropped_frames_.fetch_add(1);
+        RequeueBuffer(buf.index);
+        return true;
+    }
+
+    FramePacketCallback frame_packet_callback;
+    {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
+        frame_packet_callback = frame_packet_callback_;
+    }
+    if (!frame_packet_callback)
+    {
+        return false;
+    }
+
+    size_t used_size = static_cast<size_t>(buf.bytesused);
+    if (used_size == 0)
+    {
+        used_size = buffer.length;
+    }
+
+    const uint64_t frame_id = frame_count_.fetch_add(1);
+
+    core::FrameHandle frame;
+    frame.Reset();
+    frame.frame_id_ = static_cast<uint32_t>(frame_id);
+    frame.camera_id_ = 0;
+    frame.timestamp_ns_ = GetTimestampNs();
+    frame.width_ = config_.width_;
+    frame.height_ = config_.height_;
+    frame.format_ = config_.format_;
+    frame.sequence_ = static_cast<uint32_t>(buf.sequence);
+    frame.memory_type_ = core::MemoryType::kDmaBuf;
+    frame.buffer_fd_ = buffer.dma_buf_fd;
+    frame.virtual_address_ = nullptr;
+    frame.buffer_size_ = used_size;
+    FillFrameLayout(frame, used_size);
+
+    core::FrameDescriptor descriptor;
+    descriptor.frame_id = frame_id;
+    descriptor.camera_id = frame.camera_id_;
+    descriptor.timestamp_ns = frame.timestamp_ns_;
+    descriptor.sequence = frame.sequence_;
+    descriptor.width = frame.width_;
+    descriptor.height = frame.height_;
+    descriptor.pixel_format = frame.format_;
+    descriptor.memory_type = core::MemoryType::kDmaBuf;
+    descriptor.buffer_id = buf.index;
+    descriptor.plane_count = frame.plane_count_;
+    descriptor.fd_count = 1;
+    descriptor.fds[0] = buffer.dma_buf_fd;
+    descriptor.total_bytes_used = used_size;
+    descriptor.flags = frame.flags_;
+    for (uint32_t i = 0; i < frame.plane_count_ && i < core::kMaxFramePlanes; ++i)
+    {
+        descriptor.planes[i].fd_index = 0;
+        descriptor.planes[i].offset = frame.plane_offset_[i];
+        descriptor.planes[i].stride = frame.line_stride_[i];
+        descriptor.planes[i].length = frame.plane_size_[i];
+        descriptor.planes[i].bytes_used = frame.plane_size_[i];
+    }
+
+    std::weak_ptr<RequeueContext> weak_context = requeue_context_;
+    requeue_context_->active_leases.fetch_add(1);
+    auto lease = std::make_shared<core::DmaBufFrameLease>(
+        buf.index,
+        [weak_context](uint32_t buffer_index)
+        {
+            if (auto context = weak_context.lock())
+            {
+                size_t current = context->active_leases.load();
+                while (current > 0 &&
+                       !context->active_leases.compare_exchange_weak(current, current - 1))
+                {
+                }
+
+                std::lock_guard<std::mutex> lock(context->mutex);
+                if (!context->active || context->device_fd < 0)
+                {
+                    return;
+                }
+
+                struct v4l2_buffer qbuf;
+                std::memset(&qbuf, 0, sizeof(qbuf));
+                qbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+                qbuf.memory = V4L2_MEMORY_MMAP;
+                qbuf.index = buffer_index;
+                if (Xioctl(context->device_fd, VIDIOC_QBUF, &qbuf) < 0)
+                {
+                    platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                                  "VIDIOC_QBUF failed: %s", strerror(errno));
+                }
+            }
+        });
+
+    core::FramePacket packet;
+    packet.descriptor = descriptor;
+    packet.handle = frame;
+    packet.lease = lease;
+
+    frame_packet_callback(packet);
+    return true;
 }
 
 bool CameraSource::OpenDevice()
@@ -456,6 +609,17 @@ bool CameraSource::InitMMap()
         }
     }
 
+    dma_buf_path_enabled_ = false;
+    if (config_.io_method_ == static_cast<uint32_t>(core::IoMethod::kDmaBuf))
+    {
+        dma_buf_path_enabled_ = InitDmaBufExport();
+        if (!dma_buf_path_enabled_)
+        {
+            platform::PlatformLogger::Log(core::LogLevel::kWarning, "camera_source",
+                                          "DMA-BUF export unavailable, falling back to MMAP copy");
+        }
+    }
+
     for (uint32_t i = 0; i < buffers_.size(); ++i)
     {
         struct v4l2_buffer buf;
@@ -473,6 +637,118 @@ bool CameraSource::InitMMap()
     }
 
     return true;
+}
+
+bool CameraSource::InitDmaBufExport()
+{
+    if (buffers_.empty())
+    {
+        return false;
+    }
+
+    bool all_exported = true;
+    for (uint32_t i = 0; i < buffers_.size(); ++i)
+    {
+        struct v4l2_exportbuffer expbuf;
+        std::memset(&expbuf, 0, sizeof(expbuf));
+        expbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        expbuf.index = i;
+        expbuf.plane = 0;
+        expbuf.flags = O_CLOEXEC;
+
+        if (Xioctl(device_fd_, VIDIOC_EXPBUF, &expbuf) < 0)
+        {
+            dma_buf_export_failures_.fetch_add(1);
+            all_exported = false;
+            platform::PlatformLogger::Log(core::LogLevel::kWarning, "camera_source",
+                                          "VIDIOC_EXPBUF failed for buffer %u: %s",
+                                          i, strerror(errno));
+            break;
+        }
+
+        buffers_[i].dma_buf_fd = expbuf.fd;
+        buffers_[i].dma_buf_exported = true;
+    }
+
+    if (!all_exported)
+    {
+        CleanupDmaBufExports();
+        return false;
+    }
+
+    min_queued_capture_buffers_ = buffers_.size() >= 4 ? 2 : 1;
+    if (buffers_.size() <= min_queued_capture_buffers_)
+    {
+        global_lease_in_flight_max_ = 1;
+    }
+    else
+    {
+        global_lease_in_flight_max_ = buffers_.size() - min_queued_capture_buffers_;
+    }
+
+    platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                  "DMA-BUF export enabled: actual_buffer_count=%zu "
+                                  "min_queued_capture_buffers=%zu lease_in_flight_max=%zu",
+                                  buffers_.size(),
+                                  min_queued_capture_buffers_,
+                                  global_lease_in_flight_max_);
+    return true;
+}
+
+void CameraSource::CleanupDmaBufExports()
+{
+    if (requeue_context_ && requeue_context_->active_leases.load() > 0)
+    {
+        for (int i = 0; i < 20 && requeue_context_->active_leases.load() > 0; ++i)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        const size_t remaining_leases = requeue_context_->active_leases.load();
+        if (remaining_leases > 0)
+        {
+            platform::PlatformLogger::Log(core::LogLevel::kWarning, "camera_source",
+                                          "cleanup with %zu active DMA-BUF leases",
+                                          remaining_leases);
+        }
+    }
+
+    for (auto& buffer : buffers_)
+    {
+        if (buffer.dma_buf_fd >= 0)
+        {
+            close(buffer.dma_buf_fd);
+        }
+        buffer.dma_buf_fd = -1;
+        buffer.dma_buf_exported = false;
+    }
+    dma_buf_path_enabled_ = false;
+}
+
+bool CameraSource::ShouldUseDmaBufPath() const
+{
+    if (!dma_buf_path_enabled_)
+    {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    return static_cast<bool>(frame_packet_callback_);
+}
+
+void CameraSource::RequeueBuffer(uint32_t buffer_index)
+{
+    struct v4l2_buffer qbuf;
+    std::memset(&qbuf, 0, sizeof(qbuf));
+    qbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    qbuf.memory = V4L2_MEMORY_MMAP;
+    qbuf.index = buffer_index;
+
+    if (Xioctl(device_fd_, VIDIOC_QBUF, &qbuf) < 0)
+    {
+        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                      "VIDIOC_QBUF failed: %s", strerror(errno));
+    }
 }
 
 bool CameraSource::StartStream()

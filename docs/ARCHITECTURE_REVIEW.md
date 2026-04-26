@@ -3,7 +3,7 @@
 **文档版本:** v0.4<br>
 **评审范围:** 当前主干代码与项目文档（截至 2026-04-26）<br>
 **评审角色:** 高级系统架构师<br>
-**关联文档:** [README.md](../README.md)、[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)、[API_REFERENCE.md](../API_REFERENCE.md)
+**关联文档:** [README.md](../README.md)、[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)、[DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)、[API_REFERENCE.md](../API_REFERENCE.md)
 
 > **文档硬规范**
 >
@@ -64,7 +64,7 @@
 
 | 模块 | 当前状态 | 评审判断 |
 |------|----------|----------|
-| `CameraSource` | 当前已落地 V4L2 + MMAP 采集后端，拷贝到 BufferPool | 可用于 Ubuntu/RK3576 初期调试，尚非零拷贝主链路，也不是最终唯一后端 |
+| `CameraSource` | 当前已落地 V4L2 + MMAP 采集后端，并接入显式 DMA-BUF export 尝试路径 | 默认 copy fallback 可用于 Ubuntu/RK3576 初期调试；DMA-BUF Phase 1 已有代码基础，尚待板端验证和跨进程数据面 |
 | `FrameBroker` | 订阅者管理、优先级队列、多 worker 分发 | 基础结构合理，策略与观测不足 |
 | `BufferPool` / `BufferGuard` | 预分配、RAII 归还、状态机、泄漏检测 | 方向正确，需进一步约束销毁时序与多消费者生命周期 |
 | `CameraSessionManager` | 核心发布端单实例、按订阅引用启停 | 职责清晰，但回调持锁执行需要调整 |
@@ -98,8 +98,8 @@
 1. **数据面架构尚未满足目标性能**
    当前示例把帧数据通过 Unix Socket 复制给订阅端。该路径适合验证发布/订阅流程，但不适合 4K@30/60fps 的生产主链路。生产路径需要 DMA-BUF fd 传递、共享内存 ring、或平台媒体栈原生 buffer 句柄传递。
 
-2. **“零拷贝”仍是目标，不是当前事实**
-   当前已落地的 V4L2 后端使用 MMAP 后复制到 `BufferPool`，`FrameHandle::memory_type_` 也设置为 heap。文档中必须持续区分“目标零拷贝”和“当前拷贝模式”，避免误导上层 AI/编码模块。
+2. **“零拷贝”仍需区分阶段事实**
+   当前默认链路仍保留 MMAP 后复制到 `BufferPool` 的 fallback；同时代码已新增 `FrameDescriptor` / `FrameLease` / `DmaBufFrameLease`，并在显式 `IoMethod::kDmaBuf` 时尝试 V4L2 `VIDIOC_EXPBUF`。文档中必须持续区分“Phase 1 基础代码已接入”和“生产级跨进程零拷贝尚未完成”，避免误导上层 AI/编码模块。
 
 3. **恢复机制还没有形成状态机**
    当前有启停引用计数，但没有设备断连、`VIDIOC_DQBUF` 持续失败、订阅端断链、核心发布端重启后的统一状态机。边缘设备场景下，这会是 P1 稳定性风险。
@@ -151,7 +151,7 @@
 ### 5.4 文档与代码一致性
 
 1. `camera_source.h` 已同步为 V4L2/MMAP 采集实现描述，避免继续沿用“模拟实现”的旧语义。
-2. 文档中“零拷贝”应始终标注为目标或后续路线，当前落地路径是 MMAP + heap copy。
+2. 文档中“零拷贝”应始终标注阶段边界：当前默认路径是 MMAP + heap copy fallback，Phase 1 代码已接入 DMA-BUF export 与 lease 基础，跨进程 DataPlaneV2 尚未完成。
 3. `structure.md` 更像历史架构长文，建议后续只作为背景材料，权威状态以 README、PROJECT_OVERVIEW、IMPLEMENTATION_STATUS 和本文档为准。
 
 ---
@@ -230,7 +230,7 @@
 | ARCH-007 | 设备自动重连 | 计划中 | 增加会话状态机 |
 | ARCH-008 | 降级策略 | 计划中 | 支持降帧、降分辨率、暂停低优先级订阅 |
 | ARCH-009 | 统一 Metrics | 计划中 | 定义指标结构与导出接口 |
-| ARCH-010 | 数据面生产协议 | 计划中 | 设计 DMA-BUF fd 或共享内存 ring |
+| ARCH-010 | 数据面生产协议 | 进行中 | DMA-BUF Phase 1 基础模型和 V4L2 export 尝试路径已接入；后续验证 RK3576 板端能力并实现 DataPlaneV2 / SCM_RIGHTS / ReleaseFrame |
 | ARCH-011 | 多路能力探测 | 计划中 | 接入启动流程与平台标定 |
 | ARCH-012 | 线程亲和性 | 计划中 | 采集/分发线程绑定策略 |
 | ARCH-018 | 发布端/订阅端解耦 | 基础落地 | 补生产级协议与异常恢复 |

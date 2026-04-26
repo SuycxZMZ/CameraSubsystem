@@ -88,6 +88,19 @@ target_link_libraries(test_frame_handle
 
 add_test(NAME test_frame_handle COMMAND test_frame_handle)
 
+add_executable(test_frame_descriptor
+    unit/test_frame_descriptor.cpp
+)
+
+target_link_libraries(test_frame_descriptor
+    PRIVATE
+        camera_subsystem_core
+        ${GTEST_TARGET}
+        ${GTEST_MAIN_TARGET}
+)
+
+add_test(NAME test_frame_descriptor COMMAND test_frame_descriptor)
+
 add_executable(test_camera_config
     unit/test_camera_config.cpp
 )

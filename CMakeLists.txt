@@ -44,6 +44,8 @@ set(CAMERA_SUBSYSTEM_WARNING_FLAGS
 set(CORE_SOURCES
     src/core/types.cpp
     src/core/frame_handle.cpp
+    src/core/frame_descriptor.cpp
+    src/core/frame_lease.cpp
     src/core/camera_config.cpp
     src/core/buffer_pool.cpp
     src/core/buffer_guard.cpp

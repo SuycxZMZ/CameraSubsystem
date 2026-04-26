@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DMA-BUF Zero-Copy Architecture</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'JetBrains Mono', monospace; background: #020617; min-height: 100vh; padding: 2rem; color: white; }
+    .container { max-width: 1240px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot { width: 12px; height: 12px; background: #22d3ee; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-left: 1.75rem; }
+    .diagram-container { background: rgba(15, 23, 42, 0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1.5rem; overflow-x: auto; }
+    svg { width: 100%; min-width: 980px; display: block; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 2rem; }
+    .card { background: rgba(15, 23, 42, 0.5); border-radius: 0.75rem; border: 1px solid #1e293b; padding: 1.25rem; }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .cyan { background: #22d3ee; } .emerald { background: #34d399; } .amber { background: #fbbf24; }
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.75rem; }
+    .card li { margin-bottom: 0.375rem; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>DMA-BUF Zero-Copy Main Path</h1>
+      </div>
+      <p class="subtitle">V4L2 buffer export, frame lease lifecycle, metadata-only data plane, and explicit release.</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1160 700" role="img" aria-label="DMA-BUF zero-copy architecture">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="releaseArrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <line x1="145" y1="210" x2="215" y2="210" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="365" y1="210" x2="435" y2="210" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="585" y1="210" x2="655" y2="210" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="805" y1="210" x2="875" y2="210" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="1025" y1="210" x2="1095" y2="210" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="400" y="196" fill="#94a3b8" font-size="9" text-anchor="middle">VIDIOC_EXPBUF</text>
+        <text x="840" y="196" fill="#94a3b8" font-size="9" text-anchor="middle">SCM_RIGHTS</text>
+
+        <rect x="35" y="165" width="110" height="90" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="90" y="198" fill="white" font-size="12" font-weight="600" text-anchor="middle">Camera HW</text>
+        <text x="90" y="218" fill="#94a3b8" font-size="9" text-anchor="middle">USB / MIPI</text>
+
+        <rect x="215" y="155" width="150" height="110" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="290" y="188" fill="white" font-size="12" font-weight="600" text-anchor="middle">V4L2 Backend</text>
+        <text x="290" y="208" fill="#94a3b8" font-size="9" text-anchor="middle">REQBUFS / DQBUF</text>
+        <text x="290" y="224" fill="#94a3b8" font-size="9" text-anchor="middle">single / mplane</text>
+        <text x="290" y="244" fill="#34d399" font-size="8" text-anchor="middle">QBUF after release</text>
+
+        <rect x="435" y="155" width="150" height="110" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="510" y="188" fill="white" font-size="12" font-weight="600" text-anchor="middle">DmaBufRegistry</text>
+        <text x="510" y="208" fill="#94a3b8" font-size="9" text-anchor="middle">buffer index → fd</text>
+        <text x="510" y="224" fill="#94a3b8" font-size="9" text-anchor="middle">plane metadata</text>
+        <text x="510" y="244" fill="#34d399" font-size="8" text-anchor="middle">no heap memcpy</text>
+
+        <rect x="655" y="155" width="150" height="110" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="730" y="188" fill="white" font-size="12" font-weight="600" text-anchor="middle">FrameDescriptor</text>
+        <text x="730" y="208" fill="#94a3b8" font-size="9" text-anchor="middle">fd / plane / stride</text>
+        <text x="730" y="224" fill="#94a3b8" font-size="9" text-anchor="middle">timestamp / sequence</text>
+        <text x="730" y="244" fill="#22d3ee" font-size="8" text-anchor="middle">MemoryType::kDmaBuf</text>
+
+        <rect x="875" y="155" width="150" height="110" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="950" y="188" fill="white" font-size="12" font-weight="600" text-anchor="middle">DataPlaneV2</text>
+        <text x="950" y="208" fill="#94a3b8" font-size="9" text-anchor="middle">metadata only</text>
+        <text x="950" y="224" fill="#94a3b8" font-size="9" text-anchor="middle">fd passing</text>
+        <text x="950" y="244" fill="#22d3ee" font-size="8" text-anchor="middle">Unix Socket</text>
+
+        <rect x="1095" y="165" width="45" height="90" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="1117" y="198" fill="white" font-size="10" font-weight="600" text-anchor="middle">AI</text>
+        <text x="1117" y="216" fill="#94a3b8" font-size="8" text-anchor="middle">RGA</text>
+        <text x="1117" y="232" fill="#94a3b8" font-size="8" text-anchor="middle">ENC</text>
+
+        <rect x="430" y="395" width="300" height="95" rx="8" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="580" y="424" fill="white" font-size="12" font-weight="600" text-anchor="middle">DmaBufFrameLease / FrameLeaseManager</text>
+        <text x="580" y="446" fill="#94a3b8" font-size="9" text-anchor="middle">consumer ref-count / timeout / disconnect recovery</text>
+        <text x="580" y="466" fill="#fb923c" font-size="8" text-anchor="middle">owns the QBUF decision</text>
+
+        <rect x="790" y="390" width="190" height="105" rx="8" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="885" y="420" fill="white" font-size="12" font-weight="600" text-anchor="middle">ReleaseChannel</text>
+        <text x="885" y="442" fill="#94a3b8" font-size="9" text-anchor="middle">ReleaseFrame async</text>
+        <text x="885" y="460" fill="#94a3b8" font-size="9" text-anchor="middle">frame / buffer / consumer</text>
+        <text x="885" y="480" fill="#fb7185" font-size="8" text-anchor="middle">close(fd) is not enough</text>
+
+        <rect x="70" y="390" width="230" height="105" rx="8" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="185" y="420" fill="white" font-size="12" font-weight="600" text-anchor="middle">CopyFallbackPath</text>
+        <text x="185" y="442" fill="#94a3b8" font-size="9" text-anchor="middle">MMAP + heap copy</text>
+        <text x="185" y="460" fill="#94a3b8" font-size="9" text-anchor="middle">unsupported driver fallback</text>
+        <text x="185" y="480" fill="#94a3b8" font-size="8" text-anchor="middle">keeps current examples working</text>
+
+        <line x1="730" y1="265" x2="730" y2="393" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="885" y1="390" x2="885" y2="265" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#releaseArrow)"/>
+        <line x1="430" y1="442" x2="300" y2="442" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="430" y1="466" x2="365" y2="255" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="390" y="360" fill="#94a3b8" font-size="9" text-anchor="middle">QBUF only after release</text>
+
+        <rect x="70" y="575" width="250" height="55" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="195" y="598" fill="white" font-size="10" font-weight="600" text-anchor="middle">Phase 0</text>
+        <text x="195" y="616" fill="#94a3b8" font-size="8" text-anchor="middle">RK3576 capability probe</text>
+        <rect x="340" y="575" width="250" height="55" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="465" y="598" fill="white" font-size="10" font-weight="600" text-anchor="middle">Phase 1</text>
+        <text x="465" y="616" fill="#94a3b8" font-size="8" text-anchor="middle">V4L2 export + in-process lease</text>
+        <rect x="610" y="575" width="250" height="55" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="735" y="598" fill="white" font-size="10" font-weight="600" text-anchor="middle">Phase 2</text>
+        <text x="735" y="616" fill="#94a3b8" font-size="8" text-anchor="middle">SCM_RIGHTS + release protocol</text>
+        <rect x="880" y="575" width="210" height="55" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="985" y="598" fill="white" font-size="10" font-weight="600" text-anchor="middle">Phase 3+</text>
+        <text x="985" y="616" fill="#94a3b8" font-size="8" text-anchor="middle">mplane / dma-heap / HW import</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="card-header"><div class="card-dot emerald"></div><h3>First Target</h3></div>
+        <ul>
+          <li>• Use V4L2 EXPBUF before external allocation</li>
+          <li>• Remove capture-thread heap memcpy first</li>
+          <li>• Keep MMAP copy fallback intact</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot amber"></div><h3>Lifecycle Rule</h3></div>
+        <ul>
+          <li>• A DMA-BUF fd is a handle, not ownership</li>
+          <li>• Producer requeues only after lease release</li>
+          <li>• Slow consumers must be bounded</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot cyan"></div><h3>Data Plane V2</h3></div>
+        <ul>
+          <li>• Send metadata plus SCM_RIGHTS fd list</li>
+          <li>• Add explicit ReleaseFrame protocol</li>
+          <li>• Support multi-plane descriptors later</li>
+        </ul>
+      </div>
+    </div>
+    <p class="footer">CameraSubsystem • DMA-BUF zero-copy architecture • 2026-04-26</p>
+  </div>
+</body>
+</html>
