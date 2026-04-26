@@ -27,9 +27,11 @@
 
 #include "camera_subsystem/camera/camera_session_manager.h"
 #include "camera_subsystem/camera/camera_source.h"
+#include "camera_subsystem/core/frame_lease.h"
 #include "camera_subsystem/ipc/camera_channel_contract.h"
 #include "camera_subsystem/ipc/camera_control_server.h"
 #include "camera_subsystem/ipc/camera_data_ipc.h"
+#include "camera_subsystem/ipc/camera_data_plane_v2.h"
 #include "camera_subsystem/platform/platform_logger.h"
 
 #include <algorithm>
@@ -47,6 +49,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <thread>
+#include <unordered_map>
 #include <unistd.h>
 #include <vector>
 
@@ -57,17 +60,28 @@ using camera_subsystem::camera::CameraSessionManager;
 using camera_subsystem::camera::CameraSource;
 using camera_subsystem::core::CameraConfig;
 using camera_subsystem::core::FrameHandle;
+using camera_subsystem::core::FrameLease;
 using camera_subsystem::core::IoMethod;
 using camera_subsystem::core::LogLevel;
 using camera_subsystem::ipc::CameraClientRole;
 using camera_subsystem::ipc::CameraControlServer;
 using camera_subsystem::ipc::CameraDataFrameHeader;
 using camera_subsystem::ipc::CameraEndpoint;
+using camera_subsystem::ipc::CameraReleaseServer;
+using camera_subsystem::ipc::MakeCameraDataFrameDescriptorV2;
+using camera_subsystem::ipc::SendCameraDataFrameDescriptorV2;
 using camera_subsystem::ipc::kCameraDataMagic;
 using camera_subsystem::ipc::kCameraDataVersion;
+using camera_subsystem::ipc::kDefaultCameraReleaseV2SocketPath;
 using camera_subsystem::platform::PlatformLogger;
 
 std::atomic<bool> g_running(true);
+
+enum class DataPlaneMode
+{
+    kV1Copy,
+    kV2DmaBuf
+};
 
 void SignalHandler(int signo)
 {
@@ -261,10 +275,173 @@ private:
     std::vector<int> clients_;
 };
 
+class DataPlaneV2SocketServer
+{
+public:
+    struct Client
+    {
+        uint32_t consumer_id = 0;
+        int fd = -1;
+    };
+
+    bool Start(const std::string& socket_path)
+    {
+        if (is_running_.load())
+        {
+            return true;
+        }
+
+        int fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+        if (fd < 0)
+        {
+            PlatformLogger::Log(LogLevel::kError, "publisher",
+                                "data v2 socket create failed: %s", strerror(errno));
+            return false;
+        }
+
+        sockaddr_un addr;
+        std::memset(&addr, 0, sizeof(addr));
+        addr.sun_family = AF_UNIX;
+        std::strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
+
+        unlink(socket_path.c_str());
+        if (bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
+        {
+            PlatformLogger::Log(LogLevel::kError, "publisher",
+                                "data v2 socket bind failed: path=%s err=%s",
+                                socket_path.c_str(), strerror(errno));
+            close(fd);
+            return false;
+        }
+
+        if (listen(fd, 16) < 0)
+        {
+            PlatformLogger::Log(LogLevel::kError, "publisher",
+                                "data v2 socket listen failed: %s", strerror(errno));
+            close(fd);
+            unlink(socket_path.c_str());
+            return false;
+        }
+
+        server_fd_ = fd;
+        socket_path_ = socket_path;
+        is_running_.store(true);
+        accept_thread_ = std::thread(&DataPlaneV2SocketServer::AcceptLoop, this);
+        return true;
+    }
+
+    void Stop()
+    {
+        if (!is_running_.load())
+        {
+            return;
+        }
+
+        is_running_.store(false);
+        if (server_fd_ >= 0)
+        {
+            shutdown(server_fd_, SHUT_RDWR);
+            close(server_fd_);
+            server_fd_ = -1;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(clients_mutex_);
+            for (const auto& client : clients_)
+            {
+                shutdown(client.fd, SHUT_RDWR);
+                close(client.fd);
+            }
+            clients_.clear();
+        }
+
+        if (accept_thread_.joinable())
+        {
+            accept_thread_.join();
+        }
+
+        if (!socket_path_.empty())
+        {
+            unlink(socket_path_.c_str());
+            socket_path_.clear();
+        }
+    }
+
+    std::vector<Client> GetClientsSnapshot() const
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex_);
+        return clients_;
+    }
+
+    void RemoveClient(uint32_t consumer_id)
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex_);
+        auto it = std::find_if(clients_.begin(), clients_.end(),
+                               [consumer_id](const Client& client)
+                               {
+                                   return client.consumer_id == consumer_id;
+                               });
+        if (it != clients_.end())
+        {
+            shutdown(it->fd, SHUT_RDWR);
+            close(it->fd);
+            clients_.erase(it);
+        }
+    }
+
+    size_t GetClientCount() const
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex_);
+        return clients_.size();
+    }
+
+private:
+    void AcceptLoop()
+    {
+        while (is_running_.load())
+        {
+            const int client_fd = accept(server_fd_, nullptr, nullptr);
+            if (client_fd < 0)
+            {
+                if (!is_running_.load())
+                {
+                    break;
+                }
+                if (errno == EINTR)
+                {
+                    continue;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                continue;
+            }
+
+            const uint32_t consumer_id = next_consumer_id_.fetch_add(1);
+            {
+                std::lock_guard<std::mutex> lock(clients_mutex_);
+                clients_.push_back(Client{consumer_id, client_fd});
+            }
+            PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                                "data v2 client connected, consumer_id=%u total=%zu",
+                                consumer_id, GetClientCount());
+        }
+    }
+
+    int server_fd_ = -1;
+    std::string socket_path_;
+    std::atomic<bool> is_running_{false};
+    std::atomic<uint32_t> next_consumer_id_{1};
+    std::thread accept_thread_;
+
+    mutable std::mutex clients_mutex_;
+    std::vector<Client> clients_;
+};
+
 struct PublisherStats
 {
     std::atomic<uint64_t> frame_count{0};
     std::atomic<uint64_t> dmabuf_frame_count{0};
+    std::atomic<uint64_t> v2_sent_frames{0};
+    std::atomic<uint64_t> v2_send_fail_count{0};
     std::atomic<uint64_t> sent_bytes{0};
     std::atomic<uint64_t> send_fail_count{0};
 };
@@ -279,7 +456,9 @@ int main(int argc, char* argv[])
     std::string device_path = CAMERA_SUBSYSTEM_DEFAULT_CAMERA;
     std::string control_socket_path = camera_subsystem::ipc::kDefaultCameraControlSocketPath;
     std::string data_socket_path = camera_subsystem::ipc::kDefaultCameraDataSocketPath;
+    std::string release_socket_path = kDefaultCameraReleaseV2SocketPath;
     IoMethod io_method = IoMethod::kMmap;
+    DataPlaneMode data_plane_mode = DataPlaneMode::kV1Copy;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -303,10 +482,36 @@ int main(int argc, char* argv[])
                 return 1;
             }
         }
+        else if (arg == "--release-socket" && i + 1 < argc)
+        {
+            ++i;
+            release_socket_path = argv[i];
+        }
+        else if (arg == "--data-plane" && i + 1 < argc)
+        {
+            ++i;
+            const std::string mode = argv[i];
+            if (mode == "v2")
+            {
+                data_plane_mode = DataPlaneMode::kV2DmaBuf;
+            }
+            else if (mode == "v1")
+            {
+                data_plane_mode = DataPlaneMode::kV1Copy;
+            }
+            else
+            {
+                PlatformLogger::Log(LogLevel::kError, "publisher",
+                                    "unknown data-plane: %s (use v1 or v2)", mode.c_str());
+                return 1;
+            }
+        }
         else if (arg == "--help" || arg == "-h")
         {
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
-                                "usage: %s [device_path] [control_socket] [data_socket] [--io-method mmap|dmabuf]",
+                                "usage: %s [device_path] [control_socket] [data_socket] "
+                                "[--io-method mmap|dmabuf] [--data-plane v1|v2] "
+                                "[--release-socket path]",
                                 argv[0]);
             return 0;
         }
@@ -327,14 +532,27 @@ int main(int argc, char* argv[])
     }
 
     PlatformLogger::Log(LogLevel::kInfo, "publisher",
-                        "publisher start, device=%s, control_socket=%s, data_socket=%s, io_method=%s",
+                        "publisher start, device=%s, control_socket=%s, data_socket=%s, "
+                        "release_socket=%s, io_method=%s, data_plane=%s",
                         device_path.c_str(), control_socket_path.c_str(), data_socket_path.c_str(),
-                        io_method == IoMethod::kDmaBuf ? "dmabuf" : "mmap");
+                        release_socket_path.c_str(),
+                        io_method == IoMethod::kDmaBuf ? "dmabuf" : "mmap",
+                        data_plane_mode == DataPlaneMode::kV2DmaBuf ? "v2" : "v1");
 
     DataSocketServer data_server;
-    if (!data_server.Start(data_socket_path))
+    DataPlaneV2SocketServer data_v2_server;
+    const bool use_data_plane_v2 =
+        io_method == IoMethod::kDmaBuf && data_plane_mode == DataPlaneMode::kV2DmaBuf;
+
+    if (!use_data_plane_v2 && !data_server.Start(data_socket_path))
     {
         PlatformLogger::Log(LogLevel::kError, "publisher", "failed to start data server");
+        PlatformLogger::Shutdown();
+        return 1;
+    }
+    if (use_data_plane_v2 && !data_v2_server.Start(data_socket_path))
+    {
+        PlatformLogger::Log(LogLevel::kError, "publisher", "failed to start data v2 server");
         PlatformLogger::Shutdown();
         return 1;
     }
@@ -347,6 +565,48 @@ int main(int argc, char* argv[])
 
     PublisherStats stats;
     std::mutex camera_mutex;
+    CameraReleaseServer release_server(std::chrono::milliseconds(1000));
+    std::mutex lease_mutex;
+    std::unordered_map<uint64_t, std::shared_ptr<FrameLease>> pending_leases;
+    if (io_method == IoMethod::kDmaBuf)
+    {
+        if (!release_server.Start(
+                release_socket_path,
+                [&](const camera_subsystem::ipc::CameraReleaseReclaim& reclaim)
+                {
+                    std::shared_ptr<FrameLease> lease;
+                    {
+                        std::lock_guard<std::mutex> lock(lease_mutex);
+                        auto it = pending_leases.find(reclaim.frame_id);
+                        if (it != pending_leases.end())
+                        {
+                            lease = std::move(it->second);
+                            pending_leases.erase(it);
+                        }
+                    }
+                    if (lease)
+                    {
+                        lease->Release();
+                    }
+                    PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                                        "release reclaim: stream=%u frame=%" PRIu64
+                                        " buffer=%u status=%u observed=%u expected=%u",
+                                        reclaim.stream_id,
+                                        reclaim.frame_id,
+                                        reclaim.buffer_id,
+                                        static_cast<uint32_t>(reclaim.status),
+                                        reclaim.observed_release_count,
+                                        reclaim.expected_release_count);
+                }))
+        {
+            PlatformLogger::Log(LogLevel::kError, "publisher",
+                                "failed to start release server: path=%s",
+                                release_socket_path.c_str());
+            data_server.Stop();
+            PlatformLogger::Shutdown();
+            return 1;
+        }
+    }
 
     camera_source.SetFrameCallbackWithBuffer(
         [&](const FrameHandle& frame,
@@ -396,11 +656,67 @@ int main(int argc, char* argv[])
                 stats.frame_count.fetch_add(1);
                 stats.dmabuf_frame_count.fetch_add(1);
 
-                // DMA-BUF 零拷贝路径：帧数据通过 DMA-BUF fd 访问，不复制到 heap
-                // 当前示例仅统计帧数；lease 析构时自动 release 并触发 QBUF
                 const auto& desc = packet.descriptor;
+                if (!use_data_plane_v2)
+                {
+                    PlatformLogger::Log(LogLevel::kDebug, "publisher",
+                                        "dmabuf frame: id=%" PRIu64 " buf=%u fd=%d bytes=%" PRIu64,
+                                        desc.frame_id, desc.buffer_id,
+                                        desc.fd_count > 0 ? desc.fds[0] : -1,
+                                        desc.total_bytes_used);
+                    return;
+                }
+
+                const std::vector<DataPlaneV2SocketServer::Client> clients =
+                    data_v2_server.GetClientsSnapshot();
+                if (clients.empty())
+                {
+                    return;
+                }
+
+                std::vector<uint32_t> consumer_ids;
+                consumer_ids.reserve(clients.size());
+                for (const auto& client : clients)
+                {
+                    consumer_ids.push_back(client.consumer_id);
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(lease_mutex);
+                    pending_leases[desc.frame_id] = packet.lease;
+                }
+
+                if (!release_server.RegisterFrame(
+                        desc.camera_id,
+                        desc.frame_id,
+                        desc.buffer_id,
+                        consumer_ids))
+                {
+                    std::lock_guard<std::mutex> lock(lease_mutex);
+                    pending_leases.erase(desc.frame_id);
+                    return;
+                }
+
+                auto descriptor_v2 = MakeCameraDataFrameDescriptorV2(desc);
+                for (const auto& client : clients)
+                {
+                    descriptor_v2.consumer_id = client.consumer_id;
+                    if (!SendCameraDataFrameDescriptorV2(
+                            client.fd,
+                            descriptor_v2,
+                            desc.fds.data(),
+                            desc.fd_count))
+                    {
+                        data_v2_server.RemoveClient(client.consumer_id);
+                        release_server.ReclaimConsumerDisconnected(client.consumer_id);
+                        stats.v2_send_fail_count.fetch_add(1);
+                        continue;
+                    }
+                    stats.v2_sent_frames.fetch_add(1);
+                }
+
                 PlatformLogger::Log(LogLevel::kDebug, "publisher",
-                                    "dmabuf frame: id=%" PRIu64 " buf=%u fd=%d bytes=%" PRIu64,
+                                    "dmabuf v2 frame: id=%" PRIu64 " buf=%u fd=%d bytes=%" PRIu64,
                                     desc.frame_id, desc.buffer_id,
                                     desc.fd_count > 0 ? desc.fds[0] : -1,
                                     desc.total_bytes_used);
@@ -469,7 +785,8 @@ int main(int argc, char* argv[])
         PlatformLogger::Log(LogLevel::kInfo, "publisher",
                             "sec | frames | fps | clients | sent_bytes | send_fail | "
                             "dmabuf_enabled | dmabuf_frames | export_fail | lease_exhausted | "
-                            "active_leases | lease_max | min_queued");
+                            "active_leases | lease_max | min_queued | v2_sent | v2_send_fail | "
+                            "release_pending | release_received | release_reclaimed | release_timeout");
     }
     else
     {
@@ -495,8 +812,13 @@ int main(int argc, char* argv[])
                                 " | clients=%zu | sent_bytes=%" PRIu64 " | send_fail=%" PRIu64
                                 " | dmabuf_enabled=%u | dmabuf_frames=%" PRIu64
                                 " | export_fail=%" PRIu64 " | lease_exhausted=%" PRIu64
-                                " | active_leases=%zu | lease_max=%zu | min_queued=%zu",
-                                elapsed_sec, frames, fps, data_server.GetClientCount(),
+                                " | active_leases=%zu | lease_max=%zu | min_queued=%zu"
+                                " | v2_sent=%" PRIu64 " | v2_send_fail=%" PRIu64
+                                " | release_pending=%zu | release_received=%" PRIu64
+                                " | release_reclaimed=%" PRIu64 " | release_timeout=%" PRIu64,
+                                elapsed_sec, frames, fps,
+                                use_data_plane_v2 ? data_v2_server.GetClientCount()
+                                                  : data_server.GetClientCount(),
                                 stats.sent_bytes.load(), stats.send_fail_count.load(),
                                 camera_source.IsDmaBufPathEnabled() ? 1U : 0U,
                                 camera_source.GetDmaBufFrameCount(),
@@ -504,7 +826,13 @@ int main(int argc, char* argv[])
                                 camera_source.GetDmaBufLeaseExhaustedCount(),
                                 camera_source.GetDmaBufActiveLeaseCount(),
                                 camera_source.GetDmaBufLeaseInFlightMax(),
-                                camera_source.GetDmaBufMinQueuedCaptureBuffers());
+                                camera_source.GetDmaBufMinQueuedCaptureBuffers(),
+                                stats.v2_sent_frames.load(),
+                                stats.v2_send_fail_count.load(),
+                                release_server.PendingFrameCount(),
+                                release_server.GetServerStats().received_releases,
+                                release_server.GetServerStats().reclaimed_frames,
+                                release_server.GetServerStats().expired_reclaims);
         }
         else
         {
@@ -518,7 +846,9 @@ int main(int argc, char* argv[])
 
     PlatformLogger::Log(LogLevel::kInfo, "publisher", "publisher stopping...");
     control_server.Stop();
+    release_server.Stop();
     data_server.Stop();
+    data_v2_server.Stop();
 
     {
         std::lock_guard<std::mutex> lock(camera_mutex);

@@ -26,9 +26,11 @@
  */
 
 #include "camera_subsystem/core/types.h"
+#include "camera_subsystem/core/dma_buf_sync.h"
 #include "camera_subsystem/ipc/camera_channel_contract.h"
 #include "camera_subsystem/ipc/camera_control_client.h"
 #include "camera_subsystem/ipc/camera_data_ipc.h"
+#include "camera_subsystem/ipc/camera_data_plane_v2.h"
 #include "camera_subsystem/platform/platform_logger.h"
 
 #include <algorithm>
@@ -46,6 +48,7 @@
 #include <poll.h>
 #include <string>
 #include <sys/socket.h>
+#include <sys/mman.h>
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
@@ -56,15 +59,29 @@ namespace
 
 using camera_subsystem::core::LogLevel;
 using camera_subsystem::core::PixelFormat;
+using camera_subsystem::core::DmaBufSyncDirection;
+using camera_subsystem::core::DmaBufSyncHelper;
 using camera_subsystem::ipc::CameraClientRole;
 using camera_subsystem::ipc::CameraControlClient;
 using camera_subsystem::ipc::CameraControlResponse;
 using camera_subsystem::ipc::CameraDataFrameHeader;
+using camera_subsystem::ipc::CameraDataFrameDescriptorV2;
 using camera_subsystem::ipc::CameraEndpoint;
 using camera_subsystem::ipc::CameraControlStatus;
+using camera_subsystem::ipc::CameraReleaseFrameV2;
+using camera_subsystem::ipc::CameraReleaseStatus;
+using camera_subsystem::ipc::MakeCameraReleaseFrameV2;
+using camera_subsystem::ipc::ReceiveCameraDataFrameDescriptorV2;
+using camera_subsystem::ipc::SendCameraReleaseFrameV2;
 using camera_subsystem::platform::PlatformLogger;
 
 std::atomic<bool> g_running(true);
+
+enum class DataPlaneMode
+{
+    kV1Copy,
+    kV2DmaBuf
+};
 
 void SignalHandler(int signo)
 {
@@ -98,9 +115,9 @@ bool ReadFull(int fd, void* buffer, size_t length)
     return true;
 }
 
-int ConnectDataSocket(const std::string& socket_path)
+int ConnectUnixSocket(const std::string& socket_path, int socket_type)
 {
-    const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    const int fd = socket(AF_UNIX, socket_type, 0);
     if (fd < 0)
     {
         return -1;
@@ -118,6 +135,11 @@ int ConnectDataSocket(const std::string& socket_path)
     }
 
     return fd;
+}
+
+int ConnectDataSocket(const std::string& socket_path)
+{
+    return ConnectUnixSocket(socket_path, SOCK_STREAM);
 }
 
 struct FrameSnapshot
@@ -226,23 +248,54 @@ int main(int argc, char* argv[])
     std::string output_dir = "./subscriber_frames";
     std::string control_socket_path = camera_subsystem::ipc::kDefaultCameraControlSocketPath;
     std::string data_socket_path = camera_subsystem::ipc::kDefaultCameraDataSocketPath;
+    std::string release_socket_path = camera_subsystem::ipc::kDefaultCameraReleaseV2SocketPath;
     std::string device_path = CAMERA_SUBSYSTEM_DEFAULT_CAMERA;
+    DataPlaneMode data_plane_mode = DataPlaneMode::kV1Copy;
 
-    if (argc > 1)
+    int pos = 0;
+    for (int i = 1; i < argc; ++i)
     {
-        output_dir = argv[1];
-    }
-    if (argc > 2)
-    {
-        control_socket_path = argv[2];
-    }
-    if (argc > 3)
-    {
-        data_socket_path = argv[3];
-    }
-    if (argc > 4)
-    {
-        device_path = argv[4];
+        const std::string arg = argv[i];
+        if (arg == "--data-plane" && i + 1 < argc)
+        {
+            ++i;
+            const std::string mode = argv[i];
+            if (mode == "v2")
+            {
+                data_plane_mode = DataPlaneMode::kV2DmaBuf;
+            }
+            else if (mode == "v1")
+            {
+                data_plane_mode = DataPlaneMode::kV1Copy;
+            }
+            else
+            {
+                PlatformLogger::Log(LogLevel::kError, "subscriber",
+                                    "unknown data-plane: %s (use v1 or v2)", mode.c_str());
+                return 1;
+            }
+        }
+        else if (arg == "--release-socket" && i + 1 < argc)
+        {
+            ++i;
+            release_socket_path = argv[i];
+        }
+        else if (arg == "--help" || arg == "-h")
+        {
+            PlatformLogger::Log(LogLevel::kInfo, "subscriber",
+                                "usage: %s [output_dir] [control_socket] [data_socket] "
+                                "[device_path] [--data-plane v1|v2] [--release-socket path]",
+                                argv[0]);
+            return 0;
+        }
+        else
+        {
+            ++pos;
+            if (pos == 1) output_dir = arg;
+            else if (pos == 2) control_socket_path = arg;
+            else if (pos == 3) data_socket_path = arg;
+            else if (pos == 4) device_path = arg;
+        }
     }
 
     if (!PlatformLogger::Initialize(std::string(), LogLevel::kInfo))
@@ -257,12 +310,38 @@ int main(int argc, char* argv[])
     int data_fd = -1;
     for (int retry = 0; retry < 50 && g_running.load(); ++retry)
     {
-        data_fd = ConnectDataSocket(data_socket_path);
+        data_fd = data_plane_mode == DataPlaneMode::kV2DmaBuf
+                      ? ConnectUnixSocket(data_socket_path, SOCK_SEQPACKET)
+                      : ConnectDataSocket(data_socket_path);
         if (data_fd >= 0)
         {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    int release_fd = -1;
+    if (data_plane_mode == DataPlaneMode::kV2DmaBuf)
+    {
+        for (int retry = 0; retry < 50 && g_running.load(); ++retry)
+        {
+            release_fd = ConnectUnixSocket(release_socket_path, SOCK_STREAM);
+            if (release_fd >= 0)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        if (release_fd < 0)
+        {
+            PlatformLogger::Log(LogLevel::kError, "subscriber",
+                                "connect release socket failed: %s",
+                                release_socket_path.c_str());
+            close(data_fd);
+            PlatformLogger::Shutdown();
+            return 1;
+        }
     }
 
     if (data_fd < 0)
@@ -280,6 +359,10 @@ int main(int argc, char* argv[])
                             "connect control socket failed: %s",
                             control_socket_path.c_str());
         close(data_fd);
+        if (release_fd >= 0)
+        {
+            close(release_fd);
+        }
         PlatformLogger::Shutdown();
         return 1;
     }
@@ -299,6 +382,10 @@ int main(int argc, char* argv[])
                             static_cast<uint32_t>(response.status), response.message);
         control_client.Disconnect();
         close(data_fd);
+        if (release_fd >= 0)
+        {
+            close(release_fd);
+        }
         PlatformLogger::Shutdown();
         return 1;
     }
@@ -315,6 +402,7 @@ int main(int argc, char* argv[])
     uint64_t total_frames = 0;
     uint64_t total_bytes = 0;
     uint64_t save_fail_count = 0;
+    uint64_t release_fail_count = 0;
     uint64_t elapsed_sec = 0;
     uint64_t last_frames = 0;
 
@@ -330,48 +418,141 @@ int main(int argc, char* argv[])
         const int poll_ret = poll(&pfd, 1, 200);
         if (poll_ret > 0 && (pfd.revents & POLLIN))
         {
-            CameraDataFrameHeader header;
-            if (!ReadFull(data_fd, &header, sizeof(header)))
+            if (data_plane_mode == DataPlaneMode::kV2DmaBuf)
             {
-                PlatformLogger::Log(LogLevel::kWarning, "subscriber",
-                                    "data channel closed while reading header");
-                break;
-            }
+                CameraDataFrameDescriptorV2 descriptor;
+                int fds[camera_subsystem::ipc::kCameraDataV2MaxFds] = {-1, -1, -1};
+                uint32_t received_fd_count = 0;
+                if (!ReceiveCameraDataFrameDescriptorV2(
+                        data_fd,
+                        &descriptor,
+                        fds,
+                        camera_subsystem::ipc::kCameraDataV2MaxFds,
+                        &received_fd_count))
+                {
+                    PlatformLogger::Log(LogLevel::kWarning, "subscriber",
+                                        "data v2 channel closed while reading descriptor");
+                    break;
+                }
 
-            if (!camera_subsystem::ipc::IsCameraDataFrameHeaderValid(header))
+                CameraReleaseStatus release_status = CameraReleaseStatus::kOk;
+                std::vector<uint8_t> frame_buffer;
+                const uint32_t fd_index = descriptor.planes[0].fd_index;
+                const int frame_fd = fd_index < received_fd_count ? fds[fd_index] : -1;
+                const size_t bytes_used = static_cast<size_t>(descriptor.planes[0].bytes_used);
+
+                if (frame_fd >= 0 && bytes_used > 0 && bytes_used <= 64U * 1024U * 1024U)
+                {
+                    if (!DmaBufSyncHelper::StartCpuAccess(frame_fd, DmaBufSyncDirection::kRead))
+                    {
+                        release_status = CameraReleaseStatus::kError;
+                    }
+
+                    void* mapped = mmap(nullptr, bytes_used, PROT_READ, MAP_SHARED, frame_fd, 0);
+                    if (mapped == MAP_FAILED)
+                    {
+                        release_status = CameraReleaseStatus::kError;
+                    }
+                    else
+                    {
+                        const auto* begin = static_cast<const uint8_t*>(mapped);
+                        frame_buffer.assign(begin, begin + bytes_used);
+                        munmap(mapped, bytes_used);
+                    }
+
+                    if (!DmaBufSyncHelper::EndCpuAccess(frame_fd, DmaBufSyncDirection::kRead))
+                    {
+                        release_status = CameraReleaseStatus::kError;
+                    }
+                }
+                else
+                {
+                    release_status = CameraReleaseStatus::kError;
+                }
+
+                for (uint32_t i = 0; i < received_fd_count; ++i)
+                {
+                    if (fds[i] >= 0)
+                    {
+                        close(fds[i]);
+                    }
+                }
+
+                const CameraReleaseFrameV2 release = MakeCameraReleaseFrameV2(
+                    descriptor.stream_id,
+                    descriptor.frame_id,
+                    descriptor.buffer_id,
+                    descriptor.consumer_id,
+                    release_status,
+                    static_cast<uint64_t>(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count()));
+                if (release_fd < 0 || !SendCameraReleaseFrameV2(release_fd, release))
+                {
+                    ++release_fail_count;
+                }
+
+                if (frame_buffer.empty())
+                {
+                    continue;
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(snapshot_mutex);
+                    latest_snapshot.data = std::move(frame_buffer);
+                    latest_snapshot.width = descriptor.width;
+                    latest_snapshot.height = descriptor.height;
+                    latest_snapshot.format = static_cast<PixelFormat>(descriptor.pixel_format);
+                }
+
+                ++total_frames;
+                total_bytes += bytes_used;
+            }
+            else
             {
-                PlatformLogger::Log(LogLevel::kWarning, "subscriber",
-                                    "invalid frame header: magic=0x%x version=%u frame_size=%u",
-                                    header.magic, header.version, header.frame_size);
-                break;
+                CameraDataFrameHeader header;
+                if (!ReadFull(data_fd, &header, sizeof(header)))
+                {
+                    PlatformLogger::Log(LogLevel::kWarning, "subscriber",
+                                        "data channel closed while reading header");
+                    break;
+                }
+
+                if (!camera_subsystem::ipc::IsCameraDataFrameHeaderValid(header))
+                {
+                    PlatformLogger::Log(LogLevel::kWarning, "subscriber",
+                                        "invalid frame header: magic=0x%x version=%u frame_size=%u",
+                                        header.magic, header.version, header.frame_size);
+                    break;
+                }
+
+                if (header.frame_size > 64U * 1024U * 1024U)
+                {
+                    PlatformLogger::Log(LogLevel::kWarning, "subscriber",
+                                        "frame too large: %u", header.frame_size);
+                    break;
+                }
+
+                std::vector<uint8_t> frame_buffer(header.frame_size);
+                if (!ReadFull(data_fd, frame_buffer.data(), frame_buffer.size()))
+                {
+                    PlatformLogger::Log(LogLevel::kWarning, "subscriber",
+                                        "data channel closed while reading frame body");
+                    break;
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(snapshot_mutex);
+                    latest_snapshot.data = std::move(frame_buffer);
+                    latest_snapshot.width = header.width;
+                    latest_snapshot.height = header.height;
+                    latest_snapshot.format = static_cast<PixelFormat>(header.pixel_format);
+                }
+
+                ++total_frames;
+                total_bytes += header.frame_size;
             }
-
-            if (header.frame_size > 64U * 1024U * 1024U)
-            {
-                PlatformLogger::Log(LogLevel::kWarning, "subscriber",
-                                    "frame too large: %u", header.frame_size);
-                break;
-            }
-
-            std::vector<uint8_t> frame_buffer(header.frame_size);
-            if (!ReadFull(data_fd, frame_buffer.data(), frame_buffer.size()))
-            {
-                PlatformLogger::Log(LogLevel::kWarning, "subscriber",
-                                    "data channel closed while reading frame body");
-                break;
-            }
-
-            {
-                std::lock_guard<std::mutex> lock(snapshot_mutex);
-                latest_snapshot.data = std::move(frame_buffer);
-                latest_snapshot.width = header.width;
-                latest_snapshot.height = header.height;
-                latest_snapshot.format = static_cast<PixelFormat>(header.pixel_format);
-            }
-
-            ++total_frames;
-            total_bytes += header.frame_size;
-
             // 模拟上层处理
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
@@ -423,9 +604,10 @@ int main(int argc, char* argv[])
 
             PlatformLogger::Log(LogLevel::kInfo, "subscriber",
                                 "sec=%" PRIu64 " | frames=%" PRIu64 " | fps=%" PRIu64
-                                " | received_bytes=%" PRIu64 " | save_fail=%" PRIu64 " | %s",
+                                " | received_bytes=%" PRIu64 " | save_fail=%" PRIu64
+                                " | release_fail=%" PRIu64 " | %s",
                                 elapsed_sec, total_frames, fps, total_bytes, save_fail_count,
-                                image_info.c_str());
+                                release_fail_count, image_info.c_str());
 
             next_report_time += std::chrono::seconds(1);
         }
@@ -434,11 +616,15 @@ int main(int argc, char* argv[])
     (void)control_client.Unsubscribe(client_id, CameraClientRole::kSubscriber, endpoint, &response);
     control_client.Disconnect();
     close(data_fd);
+    if (release_fd >= 0)
+    {
+        close(release_fd);
+    }
 
     PlatformLogger::Log(LogLevel::kInfo, "subscriber",
                         "summary: frames=%" PRIu64 " received_bytes=%" PRIu64
-                        " save_fail=%" PRIu64,
-                        total_frames, total_bytes, save_fail_count);
+                        " save_fail=%" PRIu64 " release_fail=%" PRIu64,
+                        total_frames, total_bytes, save_fail_count, release_fail_count);
     PlatformLogger::Shutdown();
     return 0;
 }

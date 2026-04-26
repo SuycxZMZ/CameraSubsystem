@@ -159,6 +159,22 @@ target_link_libraries(test_camera_control_ipc
 add_test(NAME test_camera_control_ipc COMMAND test_camera_control_ipc)
 set_tests_properties(test_camera_control_ipc PROPERTIES TIMEOUT 20)
 
+add_executable(test_camera_data_plane_v2
+    unit/test_camera_data_plane_v2.cpp
+)
+
+target_link_libraries(test_camera_data_plane_v2
+    PRIVATE
+        camera_subsystem_ipc
+        camera_subsystem_camera
+        camera_subsystem_platform
+        camera_subsystem_core
+        ${GTEST_TARGET}
+        ${GTEST_MAIN_TARGET}
+)
+
+add_test(NAME test_camera_data_plane_v2 COMMAND test_camera_data_plane_v2)
+
 # Buffer 生命周期管理单元测试（不依赖 GTest）
 add_executable(test_buffer_lifecycle
     unit/test_buffer_lifecycle.cpp

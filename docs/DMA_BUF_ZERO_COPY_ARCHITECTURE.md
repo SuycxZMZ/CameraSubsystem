@@ -1,7 +1,7 @@
 # DMA-BUF 零拷贝主链路架构设计
 
 **最后更新:** 2026-04-26<br>
-**Phase 1 代码状态:** 已落地（提交 2cb8017），待板端集成验证
+**Phase 2 代码状态:** DataPlaneV2 + `SCM_RIGHTS` + 独立 ReleaseFrame 通道已落地，并通过 RK3576 `/dev/video45` 冒烟验证
 
 > **文档硬规范**
 >
@@ -60,7 +60,7 @@
 
 ## 2. 当前链路基线
 
-**Phase 1 代码已落地（提交 2cb8017），当前状态：待板端集成验证。**
+**Phase 2 最小跨进程链路已落地并通过 RK3576 `/dev/video45` 冒烟验证。**
 
 当前代码事实：
 
@@ -70,8 +70,8 @@
 | `BufferPool` / `BufferGuard` | 管理 heap buffer 生命周期和池耗尽丢帧 | 生命周期治理可复用，但 buffer 来源需要扩展 |
 | `FrameHandle` | 已包含 `memory_type_`、`buffer_fd_`、plane、stride、offset、size | 可承载单 fd DMA-BUF，但多 fd 多平面表达不足 |
 | `FrameHandleEx` | 用 `shared_ptr<BufferGuard>` 绑定生命周期 | 可演进为 C++ 侧 lease 载体 |
-| `FrameDescriptor` / `FramePacket` | **已实现**（Phase 1），承载 fd、plane、bytes_used、buffer_id 与 `FrameLease` | 当前先服务进程内 DMA-BUF export 闭环，后续可映射到 DataPlaneV2 |
-| `FrameLease` / `DmaBufFrameLease` | **已实现**（Phase 1），基础生命周期抽象，release 后触发 V4L2 buffer QBUF | 当前为 Phase 1 基础闭环，跨进程 release 尚未实现 |
+| `FrameDescriptor` / `FramePacket` | **已实现**（Phase 1），承载 fd、plane、bytes_used、buffer_id 与 `FrameLease` | 已映射到 DataPlaneV2 descriptor |
+| `FrameLease` / `DmaBufFrameLease` | **已实现**（Phase 1），基础生命周期抽象，release 后触发 V4L2 buffer QBUF | 已由 publisher release reclaim callback 接入跨进程 release |
 | `CameraDataFrameHeader` | 只包含 width、height、format、frame_size、frame_id、timestamp、sequence | 不足以表达 fd、plane、stride、offset、buffer index |
 | 示例数据面 IPC | Unix Socket 写入 header + frame bytes | 是复制链路，不是零拷贝数据面 |
 | Web Preview | 对 USB MJPEG/JPEG 做 payload 透传 | 对 JPEG 调试链路足够，但不代表主链路零拷贝 |
@@ -88,7 +88,13 @@ V4L2 MMAP buffer -> memcpy -> BufferPool heap buffer -> FrameHandle -> socket pa
 V4L2 MMAP buffer -> VIDIOC_EXPBUF -> DMA-BUF fd -> FramePacket(FrameDescriptor + FrameLease) -> in-process consumer -> Release -> QBUF
 ```
 
-该路径仍需在 RK3576 板端验证 `VIDIOC_EXPBUF` 支持、lease 回收时序、CPU mmap 读路径 cache 行为和不同摄像头节点兼容性。
+该路径已在 RK3576 `/dev/video45` 验证 `VIDIOC_EXPBUF`、lease 回收、CPU mmap 读路径与 `DMA_BUF_IOCTL_SYNC` 基础行为。
+
+当前已接入的 Phase 2 最小跨进程路径可以概括为：
+
+```text
+V4L2 MMAP buffer -> VIDIOC_EXPBUF -> DMA-BUF fd -> DataPlaneV2 descriptor + SCM_RIGHTS -> subscriber mmap/read -> ReleaseFrame -> FrameLease::Release -> QBUF
+```
 
 DMA-BUF 目标路径应变为：
 
@@ -252,9 +258,9 @@ RKISP/MIPI 场景通常比 USB MJPEG 更需要零拷贝。
 | `HeapFrameLease` | 包装现有 `BufferGuard` / `BufferPool` 生命周期 | 兼容当前 MMAP + copy fallback |
 | `DmaBufFrameLease` | 绑定 frame metadata、buffer index、release callback | 确保 release 前不 QBUF |
 | `FrameLeaseManager` | 管理每帧引用计数、订阅端 in-flight、超时回收 | 第一版至少支持单 publisher 多订阅 |
-| `DataPlaneV2` | 通过 metadata + SCM_RIGHTS 传递 fd | Phase 2 开始实现 |
-| `ReleaseChannel` | 接收消费者 `ReleaseFrame`，驱动 `FrameLeaseManager` 回收 | Phase 2 推荐独立于 control socket |
-| `ConsumerRuntime` | 订阅端 import fd，并显式 release | Phase 2 开始实现 |
+| `DataPlaneV2` | 通过 metadata + SCM_RIGHTS 传递 fd | 已实现协议结构、descriptor 映射、SCM_RIGHTS helper，并接入 publisher/subscriber 示例 |
+| `ReleaseChannel` | 接收消费者 `ReleaseFrame`，驱动 `FrameLeaseManager` 回收 | 已完成 ReleaseFrame helper、release tracker、独立 UDS server、publisher QBUF 回收绑定 |
+| `ConsumerRuntime` | 订阅端 import fd，并显式 release | 已在 subscriber 示例接入 CPU mmap 读路径和 release 发送 |
 | `CopyFallbackPath` | 不支持 DMA-BUF 时回退到当前复制链路 | 必须保留 |
 
 `DmaBufFrameLease` 与现有 `BufferGuard` / `FrameHandleEx` 的关系：
@@ -437,6 +443,7 @@ global_lease_in_flight_max = max(1, actual_v4l2_buffer_count - min_queued_captur
 | `pixel_format` | 内部格式枚举或 fourcc 映射 |
 | `memory_type` | `DMA_BUF` / `MMAP_COPY` / `SHM` |
 | `plane_count` | plane 数量 |
+| `consumer_id` | publisher 侧分配的消费者 ID，subscriber 必须原样带回 `ReleaseFrame` |
 | `plane[i].fd_index` | 对应 SCM_RIGHTS fd 数组索引。Phase 1 先固定为 0；多平面阶段可一 plane 一 fd 或多 plane 共用同一 fd |
 | `plane[i].offset` | plane 起始偏移 |
 | `plane[i].stride` | 每行跨度 |
@@ -575,10 +582,10 @@ ReleaseFrame()
 | `DmaBufFrameLease` | 是 | release 后才 QBUF |
 | 进程内订阅零拷贝 | 是 | 已提供 `FramePacketCallback` 接入点，先绕开跨进程 fd 传递复杂度 |
 | lease in-flight 上限 | 是 | 默认按 `min_queued_capture_buffers` 计算，4 个及以上 buffer 优先保留 2 个 queued buffer |
-| CPU mmap sync helper | 待实现 | 仅用于调试 CPU 读路径或 fallback 验证，不阻塞当前基础闭环 |
+| CPU mmap sync helper | 是 | `DmaBufSyncHelper` 已接入 smoke test 与 DataPlaneV2 subscriber CPU 读路径 |
 | MMAP + copy fallback | 是 | 确保原有示例不被破坏 |
-| DataPlaneV2 + `SCM_RIGHTS` | 第二阶段 | 不阻塞第一阶段 |
-| 独立 release channel | 第二阶段 | Phase 2 推荐，不复用 control socket |
+| DataPlaneV2 + `SCM_RIGHTS` | 第二阶段 | 已接入 publisher/subscriber，并在 RK3576 smoke 通过 |
+| 独立 release channel | 第二阶段 | ReleaseFrame 消息、tracker、UDS server 与 publisher 回收闭环已落地；不复用 control socket |
 | 多平面 MIPI/RKISP | 第二阶段 | Phase 1 先定义字段，后实现 |
 | dma-heap 外部分配 | 后续 | 不作为第一版目标 |
 | RGA/NPU/编码器完整接入 | 后续 | 先验证 import 能力 |
@@ -596,7 +603,7 @@ ReleaseFrame()
 - TODO：确认 RGA、NPU、编码器是否可 import V4L2 export 出来的 DMA-BUF fd。
 - ~~TODO：确认当前 `FrameHandle` 是否长期保持 ABI 不变。~~ **已决策：Phase 1 新增 `FrameDescriptor`，并兼容填充 `FrameHandle`，不破坏旧 ABI**
 - ~~TODO：确认 `FramePacket` 是否作为长期公开命名。~~ **已决策：Phase 1 使用 `FramePacket`，后续 DataPlaneV2 前可重命名**
-- TODO：确认 Phase 2 独立 release channel 的 socket path、连接生命周期和 batch release 格式。
+- ~~TODO：确认 Phase 2 独立 release channel 的 socket path、连接生命周期和 batch release 格式。~~ **已决策：默认 `/tmp/camera_subsystem_release_v2.sock`，当前先使用逐帧 release，batch release 留作生产化优化**
 - ~~TODO：确认 DMA-BUF CPU mmap 后可用的 sync ioctl / helper，以及失败时的 fallback 行为。~~ **已确认：`dmabuf_smoke_test` 在 `/dev/video45` 上 CPU mmap 120 次成功，`DMA_BUF_IOCTL_SYNC` start/end 失败数均为 0**
 
 ### 12.2 下一步开发计划
@@ -610,11 +617,19 @@ Phase 1 代码已落地（提交 2cb8017），并已完成 RK3576 `/dev/video45`
 | P0 | 验证 lease release 后 QBUF 时序：在板端运行 DMA-BUF 模式，观察 lease 计数、QBUF 时机、帧率是否稳定 | ✅ `dmabuf_smoke_test /dev/video45 5`：120 帧、`active_leases=0`、`max_active_leases=1`、`lease_exhausted=0` |
 | P1 | 衡 `ShouldUseDmaBufPath()` 性能优化：缓存 `frame_packet_callback_` 布尔值，避免每帧加锁 | ✅ 已用原子布尔缓存 callback 状态 |
 | P1 | 衡 DMA-BUF 统计 metrics：暴露 `dma_buf_export_failures`、`lease_exhausted_count`、`lease_timeout_count` 到 publisher stats | ✅ 已暴露 export_fail、lease_exhausted、dmabuf_frame_count、active_leases、lease_max、min_queued |
-| P1 | 衡 `DmaBufSyncHelper`：封装 CPU mmap 读路径的 `DMA_BUF_IOCTL_SYNC` | 部分完成：`dmabuf_smoke_test` 内部已有 start/end sync 调试读路径；生产级 helper 后续抽象 |
+| P1 | 衡 `DmaBufSyncHelper`：封装 CPU mmap 读路径的 `DMA_BUF_IOCTL_SYNC` | ✅ 已抽象 `core::DmaBufSyncHelper`，并由 `dmabuf_smoke_test` 在 RK3576 `/dev/video45` 复测通过 |
 | P1 | 验证 CPU mmap DMA-BUF cache 行为：消费者 mmap 后读帧数据，对比 MMAP copy 路径的帧内容 | ✅ smoke test CPU mmap 120 次成功，sync start/end 失败数为 0 |
-| P2 | 接入 MIPI 摄像头后验证 RKISP 节点 EXPBUF 和多平面 | 依赖硬件接入，不阻塞当前 USB 验证 |
+| P2 | 接入 MIPI 摄像头后验证 RKISP 节点 EXPBUF 和多平面 | `FrameDescriptor` 已有 per-plane `fd_index` 落点，MPLANE 采集实现依赖硬件接入 |
 | P2 | 验证 RGA/NPU/编码器 import DMA-BUF fd | 依赖硬件模块接入 |
-| P2 | DataPlaneV2 设计与实现 | Phase 1 稳定后启动 |
+| P2 | DataPlaneV2 设计与实现 | ✅ 已完成协议结构、SCM_RIGHTS helper、ReleaseFrame helper、release tracker、publisher release server、publisher/subscriber 示例接入与 RK3576 smoke |
+| P2 | DataPlaneV2 长稳与异常验证 | 下一步：覆盖慢消费者、多订阅者、subscriber 崩溃/断连、release 超时、fd 泄漏和 publisher 退出清理 |
+
+后续开发顺序固定如下：
+
+1. **DataPlaneV2 异常验证**：优先验证 subscriber 崩溃、release socket 断开、release 超时、fd 泄漏检查和 publisher 退出清理，确保显式 release 通道不会造成 V4L2 buffer 泄漏或过早 QBUF。
+2. **慢消费者与多订阅者验证**：在 1 个慢消费者、1 个正常消费者和多消费者组合下观察 `lease_in_flight_max`、pending release、QBUF 时序、帧率和丢帧策略。
+3. **板端 smoke 脚本固化**：把当前手工 RK3576 验证流程整理成脚本，自动完成上传、启动、停止、日志采集和 counters 校验。
+4. **MIPI/RKISP 多平面验证**：接入 MPLANE capture 节点，验证 per-plane fd / offset / stride 和后续 RGA/NPU/编码器 import 可行性。
 
 ### 12.3 主要风险
 

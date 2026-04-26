@@ -64,7 +64,7 @@
 
 | 模块 | 当前状态 | 评审判断 |
 |------|----------|----------|
-| `CameraSource` | 当前已落地 V4L2 + MMAP 采集后端，并接入显式 DMA-BUF export 尝试路径 | 默认 copy fallback 可用于 Ubuntu/RK3576 初期调试；DMA-BUF Phase 1 已有代码基础，尚待板端验证和跨进程数据面 |
+| `CameraSource` | 当前已落地 V4L2 + MMAP 采集后端，并接入显式 DMA-BUF export 尝试路径 | 默认 copy fallback 可用于 Ubuntu/RK3576 初期调试；显式 DataPlaneV2 链路已完成 RK3576 smoke，生产化仍需长稳与异常场景验证 |
 | `FrameBroker` | 订阅者管理、优先级队列、多 worker 分发 | 基础结构合理，策略与观测不足 |
 | `BufferPool` / `BufferGuard` | 预分配、RAII 归还、状态机、泄漏检测 | 方向正确，需进一步约束销毁时序与多消费者生命周期 |
 | `CameraSessionManager` | 核心发布端单实例、按订阅引用启停 | 职责清晰，但回调持锁执行需要调整 |
@@ -151,7 +151,7 @@
 ### 5.4 文档与代码一致性
 
 1. `camera_source.h` 已同步为 V4L2/MMAP 采集实现描述，避免继续沿用“模拟实现”的旧语义。
-2. 文档中“零拷贝”应始终标注阶段边界：当前默认路径是 MMAP + heap copy fallback，Phase 1 代码已接入 DMA-BUF export 与 lease 基础，跨进程 DataPlaneV2 尚未完成。
+2. 文档中“零拷贝”应始终标注阶段边界：当前默认路径是 MMAP + heap copy fallback；显式 `--io-method dmabuf --data-plane v2` 时已接入 DMA-BUF export、DataPlaneV2、`SCM_RIGHTS` 和独立 ReleaseFrame 回收通道。
 3. `structure.md` 更像历史架构长文，建议后续只作为背景材料，权威状态以 README、PROJECT_OVERVIEW、IMPLEMENTATION_STATUS 和本文档为准。
 
 ---
@@ -230,7 +230,9 @@
 | ARCH-007 | 设备自动重连 | 计划中 | 增加会话状态机 |
 | ARCH-008 | 降级策略 | 计划中 | 支持降帧、降分辨率、暂停低优先级订阅 |
 | ARCH-009 | 统一 Metrics | 计划中 | 定义指标结构与导出接口 |
-| ARCH-010 | 数据面生产协议 | 进行中 | DMA-BUF Phase 1 基础模型、V4L2 export、lease 和 RK3576 `/dev/video45` smoke 已完成；后续实现 DataPlaneV2 / SCM_RIGHTS / ReleaseFrame |
+| ARCH-010 | 数据面生产协议 | 进行中 | DMA-BUF Phase 2 最小跨进程链路已完成；后续补长稳、慢消费者、多订阅者、异常恢复和生产级背压 |
+| ARCH-010A | DMA-BUF CPU sync helper | 已完成 | 已抽象 `core::DmaBufSyncHelper`，板端 CPU mmap/sync smoke 通过 |
+| ARCH-010B | DataPlaneV2 协议层 | 进行中 | 已新增 DataPlaneV2 descriptor、ReleaseFrame 消息结构、SCM_RIGHTS fd 传递 helper、release tracker、publisher release UDS server，并接入 publisher/subscriber 示例；RK3576 smoke 已通过 |
 | ARCH-011 | 多路能力探测 | 计划中 | 接入启动流程与平台标定 |
 | ARCH-012 | 线程亲和性 | 计划中 | 采集/分发线程绑定策略 |
 | ARCH-018 | 发布端/订阅端解耦 | 基础落地 | 补生产级协议与异常恢复 |
@@ -248,7 +250,7 @@
 2. 文档和 API 明确当前数据面是示例复制链路，新增生产数据面设计草案。
 3. `FrameBroker` 支持可配置队列上限、DropPolicy、慢消费者统计。
 4. 统一输出最小 metrics：采集 FPS、发布 FPS、队列深度、丢帧数、发送失败数、端到端延迟。
-5. RK3576 Debian 12 板端完成 `camera_publisher_example` / `camera_subscriber_example` 最小运行验证，并通过 `dmabuf_smoke_test` 验证 DMA-BUF Phase 1 export、lease、CPU mmap 和 sync 行为。
+5. RK3576 Debian 12 板端完成 `camera_publisher_example` / `camera_subscriber_example` copy 与 DataPlaneV2 最小运行验证，并通过 `dmabuf_smoke_test` 验证 DMA-BUF export、lease、CPU mmap 和 sync 行为。
 6. 设备断连或 `/dev/videoX` 不可用时，发布端能输出明确错误状态并保持进程可控退出或等待恢复。
 
 ---

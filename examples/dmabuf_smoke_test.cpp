@@ -8,6 +8,7 @@
 
 #include "camera_subsystem/camera/camera_source.h"
 #include "camera_subsystem/core/camera_config.h"
+#include "camera_subsystem/core/dma_buf_sync.h"
 #include "camera_subsystem/core/frame_descriptor.h"
 #include "camera_subsystem/core/frame_lease.h"
 #include "camera_subsystem/platform/platform_logger.h"
@@ -20,9 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <linux/dma-buf.h>
 #include <string>
-#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <thread>
 
@@ -31,6 +30,8 @@ namespace
 
 using camera_subsystem::camera::CameraSource;
 using camera_subsystem::core::CameraConfig;
+using camera_subsystem::core::DmaBufSyncDirection;
+using camera_subsystem::core::DmaBufSyncHelper;
 using camera_subsystem::core::FramePacket;
 using camera_subsystem::core::IoMethod;
 using camera_subsystem::core::PixelFormat;
@@ -46,14 +47,6 @@ struct SmokeStats
     std::atomic<uint64_t> checksum{0};
     std::atomic<size_t> max_active_leases{0};
 };
-
-bool SyncDmaBuf(int fd, uint64_t flags)
-{
-    struct dma_buf_sync sync;
-    std::memset(&sync, 0, sizeof(sync));
-    sync.flags = flags;
-    return ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == 0;
-}
 
 uint64_t SampleChecksum(const uint8_t* data, size_t size)
 {
@@ -118,7 +111,7 @@ int main(int argc, char* argv[])
             const int fd = descriptor.fds[0];
             const size_t length = static_cast<size_t>(descriptor.total_bytes_used);
 
-            if (!SyncDmaBuf(fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ))
+            if (!DmaBufSyncHelper::StartCpuAccess(fd, DmaBufSyncDirection::kRead))
             {
                 stats.sync_start_fail.fetch_add(1);
             }
@@ -135,7 +128,7 @@ int main(int argc, char* argv[])
                 munmap(mapped, length);
             }
 
-            if (!SyncDmaBuf(fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ))
+            if (!DmaBufSyncHelper::EndCpuAccess(fd, DmaBufSyncDirection::kRead))
             {
                 stats.sync_end_fail.fetch_add(1);
             }

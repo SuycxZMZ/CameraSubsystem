@@ -171,14 +171,14 @@ flowchart TB
 - ✅ `FramePacketCallback` 接入，用于交付 `FrameDescriptor + FrameLease`
 - ✅ DMA-BUF lease in-flight 上限与 release 后 QBUF 的基础闭环
 - ✅ DMA-BUF export 不可用时自动回退 MMAP + copy
+- ✅ 跨进程 `DataPlaneV2` / `SCM_RIGHTS` fd 传递与独立 `ReleaseFrame` 回收通道
 - ✅ 基础背压：池耗尽时丢帧
 - ✅ `camera_session_manager.h/cpp` - 会话管理（按订阅启停）
 
 **待实现:**
 
-- ⏳ RK3576 板端验证 `VIDIOC_EXPBUF`、lease 回收和 cache 行为
-- ⏳ V4L2 多平面、DMA-BUF sync helper 与 CPU mmap 调试读路径
-- ⏳ 跨进程 `DataPlaneV2` / `SCM_RIGHTS` / `ReleaseFrame`
+- ⏳ V4L2 多平面、RKISP/MIPI 节点 EXPBUF 与多 fd import 验证
+- ⏳ DataPlaneV2 长稳、慢消费者、多订阅者与异常断连压测
 - ⏳ 高级 Buffer 管理机制与慢消费者隔离
 
 ### 5. 工具类 (Utils) 🚧
@@ -316,8 +316,8 @@ flowchart TB
 
 1. Buffer 生命周期与复用池基础治理已完成，当前默认 V4L2 后端仍保留 MMAP -> BufferPool 的拷贝 fallback。
 2. 发布端/订阅端解耦、按订阅启停、控制面/数据面协议已形成双进程可运行原型。
-3. DMA-BUF Phase 1 基础代码已接入 `FrameDescriptor` / `FrameLease` / V4L2 `VIDIOC_EXPBUF` 尝试路径，并已在 RK3576 `/dev/video45` 完成板端 smoke 验证；跨进程 DataPlaneV2 仍待实现。
-4. 背压参数化、设备恢复、统一 metrics、通用板端自检流程仍是下一阶段重点。
+3. DMA-BUF Phase 2 已完成最小跨进程闭环：`FrameDescriptor` / `FrameLease` / V4L2 `VIDIOC_EXPBUF`、DataPlaneV2 descriptor、`SCM_RIGHTS` fd 传递、独立 release channel、publisher/subscriber 示例接入，并已在 RK3576 `/dev/video45` 冒烟通过。
+4. 长稳压测、慢消费者隔离、多订阅者、设备恢复、统一 metrics、通用板端自检流程仍是下一阶段重点。
 
 ## DMA-BUF Phase 1 后续修改入口
 
@@ -329,9 +329,9 @@ flowchart TB
 | P0 | 增加最小 DMA-BUF probe / smoke test 入口 | ✅ 已新增 `dmabuf_smoke_test`，输出 buffer、lease、mmap、sync 统计 |
 | P0 | 验证 `DmaBufFrameLease` release 后 QBUF 时序 | ✅ 板端 5 秒 smoke：120 帧、active_leases 回到 0、lease_exhausted=0 |
 | P1 | 增加 DMA-BUF 路径统计 | ✅ publisher 与 smoke test 已输出 export_fail、lease_exhausted、dmabuf_frame_count |
-| P1 | 设计 CPU mmap 调试读路径和 sync helper | ✅ `dmabuf_smoke_test` 已验证 CPU mmap + `DMA_BUF_IOCTL_SYNC`，只用于板端校验 |
-| P1 | 明确多平面扩展落点 | 在不破坏当前 `FrameDescriptor` 的前提下接入 `V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE` |
-| P2 | 进入 `DataPlaneV2` / `SCM_RIGHTS` 设计实现 | 只有 Phase 1 板端闭环稳定后再推进 |
+| P1 | 设计 CPU mmap 调试读路径和 sync helper | ✅ 已抽象 `DmaBufSyncHelper`，`dmabuf_smoke_test` 已验证 CPU mmap + `DMA_BUF_IOCTL_SYNC` |
+| P1 | 明确多平面扩展落点 | ✅ `FrameDescriptor` 已以 per-plane `fd_index` 表达多 fd / 多平面，并补单元测试；MPLANE 采集接入待有硬件后推进 |
+| P2 | 进入 `DataPlaneV2` / `SCM_RIGHTS` 设计实现 | ✅ 已完成协议结构、`FrameDescriptor` 映射、SCM_RIGHTS helper、独立 release channel、publisher/subscriber 示例接入与 RK3576 smoke |
 
 本阶段保持两个边界：
 
@@ -385,8 +385,15 @@ flowchart TB
 - [x] 新增 FrameDescriptor / FrameLease / DmaBufFrameLease 基础模型 ✅ 2026-04-26
 - [x] 接入 V4L2 DMA-BUF export 尝试路径和 copy fallback ✅ 2026-04-26
 - [x] 在 RK3576 板端验证 DMA-BUF export、lease 回收和 cache 行为 ✅ 2026-04-26
-- [ ] 完善多平面与生产级 DMA-BUF sync helper 实现细节
-- [ ] 将跨进程 DataPlaneV2 与 DMA-BUF fd 传递打通
+- [x] 抽象生产可复用 DMA-BUF sync helper，并完成板端验证 ✅ 2026-04-26
+- [x] 定义 DataPlaneV2 协议结构与 SCM_RIGHTS fd 传递 helper ✅ 2026-04-26
+- [x] 实现 ReleaseFrame 消息 helper、release tracker、超时回收和断连回收策略基础设施 ✅ 2026-04-26
+- [x] 实现独立 ReleaseFrame UDS server 并接入 publisher 运行时 ✅ 2026-04-26
+- [x] 将跨进程 DataPlaneV2 接入 publisher/subscriber 示例，并在 RK3576 `/dev/video45` 完成 smoke ✅ 2026-04-26
+- [ ] 按顺序补 DataPlaneV2 异常验证：subscriber 崩溃、release socket 断开、release 超时、fd 泄漏检查和 publisher 退出清理
+- [ ] 补慢消费者与多订阅者验证：观察 `lease_in_flight_max`、pending release、QBUF 时序、帧率和丢帧策略
+- [ ] 固化 RK3576 板端 smoke 脚本：上传、运行、停止、日志采集和 counters 校验
+- [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
 - [ ] 背压策略参数化（延迟阈值/优先级规则）
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 

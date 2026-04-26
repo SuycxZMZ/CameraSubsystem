@@ -43,6 +43,7 @@ set(CAMERA_SUBSYSTEM_WARNING_FLAGS
 # 源文件
 set(CORE_SOURCES
     src/core/types.cpp
+    src/core/dma_buf_sync.cpp
     src/core/frame_handle.cpp
     src/core/frame_descriptor.cpp
     src/core/frame_lease.cpp
@@ -62,6 +63,7 @@ set(UTILS_SOURCES
 )
 
 set(IPC_SOURCES
+    src/ipc/camera_data_plane_v2.cpp
     src/ipc/camera_control_server.cpp
     src/ipc/camera_control_client.cpp
 )

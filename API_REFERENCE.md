@@ -38,7 +38,8 @@
 - [16. CameraSessionManager 接口（新增）](#16-camerasessionmanager-接口新增)
 - [17. 控制面 IPC 接口（新增）](#17-控制面-ipc-接口新增)
 - [18. 数据面协议（示例）](#18-数据面协议示例)
-- [19. 示例程序](#19-示例程序)
+- [19. DataPlaneV2 协议接口](#19-dataplanev2-协议接口)
+- [20. 示例程序](#20-示例程序)
 
 ---
 
@@ -236,7 +237,33 @@ public:
 
 `DmaBufFrameLease::Release()` 必须幂等。当前 V4L2 export 路径通过 release callback 触发对应 buffer 的 QBUF。
 
-### 2.8 错误码枚举 (ErrorCode)
+### 2.8 DMA-BUF CPU 同步辅助接口 (DmaBufSyncHelper)
+
+`DmaBufSyncHelper` 封装 Linux `DMA_BUF_IOCTL_SYNC`，用于 CPU mmap 调试读写路径。它不改变 DMA-BUF 所有权，也不替代 `FrameLease`；消费者仍必须在访问完成后释放 lease。
+
+```cpp
+enum class DmaBufSyncDirection
+{
+    kRead,
+    kWrite,
+    kReadWrite
+};
+
+class DmaBufSyncHelper
+{
+public:
+    static bool StartCpuAccess(int fd, DmaBufSyncDirection direction);
+    static bool EndCpuAccess(int fd, DmaBufSyncDirection direction);
+};
+```
+
+约束：
+
+1. `fd < 0` 时返回 `false`。
+2. CPU mmap 读取 DMA-BUF 前调用 `StartCpuAccess()`，读取完成并 `munmap` 前后按调用方策略调用 `EndCpuAccess()`。
+3. 该接口当前用于板端 smoke、调试校验和后续 CPU fallback，不作为 Web Preview 或生产主链路的默认访问方式。
+
+### 2.9 错误码枚举 (ErrorCode)
 
 ```cpp
 enum class ErrorCode : int
@@ -1298,7 +1325,158 @@ int main()
 
 ---
 
-## 19. 示例程序
+## 19. DataPlaneV2 协议接口
+
+DataPlaneV2 是跨进程 DMA-BUF fd 传递的数据面协议。当前已完成协议结构、`FrameDescriptor` 映射、`SCM_RIGHTS` fd 传递 helper、ReleaseFrame helper、publisher 侧 release server，以及 publisher/subscriber 示例数据链路接入。默认示例仍走 v1 copy 链路，DMA-BUF v2 链路需要显式启用。
+
+```cpp
+constexpr uint32_t kCameraDataV2Magic = 0x43445632; // "CDV2"
+constexpr uint32_t kCameraDataV2Version = 2;
+constexpr uint32_t kCameraReleaseV2Magic = 0x43525632; // "CRV2"
+constexpr uint32_t kCameraReleaseV2Version = 1;
+
+struct CameraDataPlaneDescriptorV2
+{
+    uint32_t fd_index;
+    uint32_t offset;
+    uint32_t stride;
+    uint32_t length;
+    uint32_t bytes_used;
+};
+
+struct CameraDataFrameDescriptorV2
+{
+    uint32_t magic;
+    uint32_t version;
+    uint32_t header_size;
+    uint32_t stream_id;
+    uint64_t frame_id;
+    uint32_t buffer_id;
+    uint32_t consumer_id;
+    uint64_t timestamp_ns;
+    uint32_t sequence;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pixel_format;
+    uint32_t memory_type;
+    uint32_t plane_count;
+    uint32_t fd_count;
+    uint64_t total_bytes_used;
+    uint32_t flags;
+    uint32_t reserved1;
+    CameraDataPlaneDescriptorV2 planes[kCameraDataV2MaxPlanes];
+};
+
+struct CameraReleaseFrameV2
+{
+    uint32_t magic;
+    uint32_t version;
+    uint32_t header_size;
+    uint32_t stream_id;
+    uint64_t frame_id;
+    uint32_t buffer_id;
+    uint32_t consumer_id;
+    uint32_t status;
+    uint64_t timestamp_ns;
+};
+```
+
+发送与接收：
+
+```cpp
+CameraDataFrameDescriptorV2 MakeCameraDataFrameDescriptorV2(
+    const core::FrameDescriptor& descriptor);
+bool IsCameraDataFrameDescriptorV2Valid(const CameraDataFrameDescriptorV2& descriptor);
+
+bool SendCameraDataFrameDescriptorV2(int socket_fd,
+                                     const CameraDataFrameDescriptorV2& descriptor,
+                                     const int* fds,
+                                     uint32_t fd_count);
+bool ReceiveCameraDataFrameDescriptorV2(int socket_fd,
+                                        CameraDataFrameDescriptorV2* descriptor,
+                                        int* fds,
+                                        uint32_t max_fd_count,
+                                        uint32_t* received_fd_count);
+
+bool SendCameraReleaseFrameV2(int socket_fd, const CameraReleaseFrameV2& release);
+bool ReceiveCameraReleaseFrameV2(int socket_fd, CameraReleaseFrameV2* release);
+```
+
+Release 回收跟踪：
+
+```cpp
+struct CameraReleaseReclaim
+{
+    uint32_t stream_id;
+    uint64_t frame_id;
+    uint32_t buffer_id;
+    CameraReleaseStatus status;
+    uint32_t expected_release_count;
+    uint32_t observed_release_count;
+};
+
+class CameraReleaseTracker
+{
+public:
+    explicit CameraReleaseTracker(std::chrono::milliseconds release_timeout);
+
+    bool RegisterFrame(uint32_t stream_id,
+                       uint64_t frame_id,
+                       uint32_t buffer_id,
+                       const std::vector<uint32_t>& expected_consumers);
+    std::vector<CameraReleaseReclaim> MarkReleased(const CameraReleaseFrameV2& release);
+    std::vector<CameraReleaseReclaim> ReclaimExpired();
+    std::vector<CameraReleaseReclaim> ReclaimConsumerDisconnected(uint32_t consumer_id);
+};
+
+class CameraReleaseServer
+{
+public:
+    using ReclaimCallback = std::function<void(const CameraReleaseReclaim&)>;
+
+    explicit CameraReleaseServer(std::chrono::milliseconds release_timeout);
+    ~CameraReleaseServer();
+
+    bool Start(const std::string& socket_path,
+               ReclaimCallback reclaim_callback);
+    void Stop();
+    bool IsRunning() const;
+
+    bool RegisterFrame(uint32_t stream_id,
+                       uint64_t frame_id,
+                       uint32_t buffer_id,
+                       const std::vector<uint32_t>& expected_consumers);
+    CameraReleaseServerStats GetServerStats() const;
+    CameraReleaseTrackerStats GetTrackerStats() const;
+    size_t PendingFrameCount() const;
+};
+```
+
+约束：
+
+1. DataPlaneV2 只传 metadata 和 fd，不传完整 payload。
+2. fd 通过 `SCM_RIGHTS` 到达消费者后是消费者进程内的新 fd，消费者必须关闭自己的 fd。
+3. 关闭 fd 不等于释放生产端 V4L2 buffer；释放必须通过独立 release channel 的 `CameraReleaseFrameV2` 完成。
+4. 旧版 `CameraDataFrameHeader + payload` copy 链路继续保留，不受 DataPlaneV2 影响。
+5. `consumer_id` 由 publisher 侧 DataPlaneV2 server 分配，并随每帧 descriptor 下发；subscriber 必须用该 ID 发送 `CameraReleaseFrameV2`。
+6. `CameraReleaseTracker` 只负责 release 计数、超时和断连回收决策；publisher 示例通过 reclaim callback 调用 `FrameLease::Release()`，再由 V4L2 后端 QBUF。
+7. `CameraReleaseServer` 已可作为独立 UDS server 运行，默认路径为 `/tmp/camera_subsystem_release_v2.sock`。
+
+示例运行：
+
+```bash
+./bin/camera_publisher_example /dev/video45 \
+  /tmp/camera_subsystem_control.sock \
+  /tmp/camera_subsystem_data.sock \
+  --io-method dmabuf --data-plane v2
+
+./bin/camera_subscriber_example ./subscriber_frames \
+  /tmp/camera_subsystem_control.sock \
+  /tmp/camera_subsystem_data.sock \
+  /dev/video45 --data-plane v2
+```
+
+## 20. 示例程序
 
 - 核心发布端：`bin/camera_publisher_example`
 - 订阅端：`bin/camera_subscriber_example`

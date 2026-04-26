@@ -1,4 +1,5 @@
 #include "camera_subsystem/core/frame_descriptor.h"
+#include "camera_subsystem/core/dma_buf_sync.h"
 #include "camera_subsystem/core/frame_lease.h"
 
 #include <gtest/gtest.h>
@@ -49,6 +50,44 @@ TEST(FrameDescriptorTest, DmaBufFrameLeaseReleaseIsIdempotent)
 
     EXPECT_TRUE(lease.IsReleased());
     EXPECT_EQ(release_count, 1u);
+}
+
+TEST(FrameDescriptorTest, MultiPlaneDmaBufDescriptorValidity)
+{
+    FrameDescriptor descriptor;
+    descriptor.frame_id = 43;
+    descriptor.width = 1920;
+    descriptor.height = 1080;
+    descriptor.pixel_format = PixelFormat::kNV12;
+    descriptor.memory_type = MemoryType::kDmaBuf;
+    descriptor.buffer_id = 2;
+    descriptor.plane_count = 2;
+    descriptor.fd_count = 2;
+    descriptor.fds[0] = 10;
+    descriptor.fds[1] = 11;
+    descriptor.planes[0].fd_index = 0;
+    descriptor.planes[0].offset = 0;
+    descriptor.planes[0].stride = 1920;
+    descriptor.planes[0].length = 1920 * 1080;
+    descriptor.planes[0].bytes_used = 1920 * 1080;
+    descriptor.planes[1].fd_index = 1;
+    descriptor.planes[1].offset = 0;
+    descriptor.planes[1].stride = 1920;
+    descriptor.planes[1].length = 1920 * 540;
+    descriptor.planes[1].bytes_used = 1920 * 540;
+    descriptor.total_bytes_used = descriptor.planes[0].bytes_used +
+                                  descriptor.planes[1].bytes_used;
+
+    EXPECT_TRUE(descriptor.IsValid());
+
+    descriptor.planes[1].fd_index = 2;
+    EXPECT_FALSE(descriptor.IsValid());
+}
+
+TEST(DmaBufSyncHelperTest, InvalidFdFails)
+{
+    EXPECT_FALSE(DmaBufSyncHelper::StartCpuAccess(-1, DmaBufSyncDirection::kRead));
+    EXPECT_FALSE(DmaBufSyncHelper::EndCpuAccess(-1, DmaBufSyncDirection::kRead));
 }
 
 TEST(FrameDescriptorTest, FramePacketRequiresLease)
