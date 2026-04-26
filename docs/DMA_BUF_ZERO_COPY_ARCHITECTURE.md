@@ -1,6 +1,7 @@
 # DMA-BUF 零拷贝主链路架构设计
 
-**最后更新:** 2026-04-26
+**最后更新:** 2026-04-26<br>
+**Phase 1 代码状态:** 已落地（提交 2cb8017），待板端集成验证
 
 > **文档硬规范**
 >
@@ -25,6 +26,10 @@
 - [10. RK3576 验证计划](#10-rk3576-验证计划)
 - [11. MVP 范围](#11-mvp-范围)
 - [12. TODO 与风险](#12-todo-与风险)
+  - [12.1 待确认项](#121-待确认项)
+  - [12.2 下一步开发计划](#122-下一步开发计划)
+  - [12.3 主要风险](#123-主要风险)
+  - [12.4 不应在第一版做的事](#124-不应在第一版做的事)
 
 ---
 
@@ -55,6 +60,8 @@
 
 ## 2. 当前链路基线
 
+**Phase 1 代码已落地（提交 2cb8017），当前状态：待板端集成验证。**
+
 当前代码事实：
 
 | 模块 | 当前状态 | 对 DMA-BUF 的影响 |
@@ -63,8 +70,8 @@
 | `BufferPool` / `BufferGuard` | 管理 heap buffer 生命周期和池耗尽丢帧 | 生命周期治理可复用，但 buffer 来源需要扩展 |
 | `FrameHandle` | 已包含 `memory_type_`、`buffer_fd_`、plane、stride、offset、size | 可承载单 fd DMA-BUF，但多 fd 多平面表达不足 |
 | `FrameHandleEx` | 用 `shared_ptr<BufferGuard>` 绑定生命周期 | 可演进为 C++ 侧 lease 载体 |
-| `FrameDescriptor` / `FramePacket` | 已新增 Phase 1 数据模型，承载 fd、plane、bytes_used、buffer_id 与 `FrameLease` | 当前先服务进程内 DMA-BUF export 闭环，后续可映射到 DataPlaneV2 |
-| `FrameLease` / `DmaBufFrameLease` | 已新增基础生命周期抽象，release 后触发 V4L2 buffer QBUF | 当前为 Phase 1 基础闭环，跨进程 release 尚未实现 |
+| `FrameDescriptor` / `FramePacket` | **已实现**（Phase 1），承载 fd、plane、bytes_used、buffer_id 与 `FrameLease` | 当前先服务进程内 DMA-BUF export 闭环，后续可映射到 DataPlaneV2 |
+| `FrameLease` / `DmaBufFrameLease` | **已实现**（Phase 1），基础生命周期抽象，release 后触发 V4L2 buffer QBUF | 当前为 Phase 1 基础闭环，跨进程 release 尚未实现 |
 | `CameraDataFrameHeader` | 只包含 width、height、format、frame_size、frame_id、timestamp、sequence | 不足以表达 fd、plane、stride、offset、buffer index |
 | 示例数据面 IPC | Unix Socket 写入 header + frame bytes | 是复制链路，不是零拷贝数据面 |
 | Web Preview | 对 USB MJPEG/JPEG 做 payload 透传 | 对 JPEG 调试链路足够，但不代表主链路零拷贝 |
@@ -118,29 +125,24 @@ V4L2 kernel buffer -> DMA-BUF fd -> FrameHandle/FrameLease -> broker -> fd metad
 
 本阶段不改主链路，只确认板端能力。
 
-需要确认：
+**已完成验证结果（2026-04-26）：**
 
-1. 当前 USB 摄像头节点 `/dev/video45` 是否支持 `VIDIOC_EXPBUF`。
-2. RKISP/MIPI 相关 `/dev/video*` 节点是否为 `V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE`。
-3. 目标格式是 MJPEG、YUYV、NV12、NV16 还是多平面 NV12。
-4. 板端是否存在 `/dev/dma_heap/*`，以及后续是否需要走外部分配。
-5. RGA / NPU / 编码器是否能直接 import 采集侧导出的 DMA-BUF fd。
-6. V4L2 buffer 是否允许同一个 buffer 同时 `mmap()` 和 `VIDIOC_EXPBUF`。规范上该组合可成立，但具体驱动可能限制；如果不成立，Phase 1 需要降级为 copy fallback，或提前评估外部分配 + `V4L2_MEMORY_DMABUF`。
-7. `VIDIOC_REQBUFS` 实际返回的 buffer 数量。该数量直接决定 lease in-flight 上限，不能只依赖配置里的 `buffer_count_`。
+| 探测项 | 结果 | 说明 |
+|--------|------|------|
+| `/dev/video45` (uvcvideo) `VIDIOC_EXPBUF` | **支持** | 4 buffer 全部导出成功，fd 有效，mmap 可读 |
+| `/dev/video45` MMAP + EXPBUF 组合 | **可用** | 先 REQBUFS(MMAP) 再 EXPBUF，驱动允许同一 buffer 同时 MMAP 映射和 EXPBUF 导出 |
+| `/dev/video45` `VIDIOC_REQBUFS` 实际返回 | **4** | 请求 4 个 buffer，驱动返回 4 个 |
+| RKISP/MIPI 节点 (`/dev/video0-4`) | **不可用** | `v4l2-ctl` 返回 "No such device"，MIPI 摄像头未接入 |
+| `/dev/dma_heap/*` | 待确认 | 尚未探测 |
+| RGA/NPU/编码器 import | 待确认 | 尚未探测 |
 
-建议先写独立探测工具或脚本，输出：
+**剩余待确认项：**
 
-```text
-device=/dev/videoX
-buf_type=single-plane|multi-plane
-io_modes=mmap,dmabuf-export,dmabuf-import
-formats=...
-planes=...
-expbuf_supported=true|false
-mmap_and_expbuf_supported=true|false
-actual_buffer_count=N
-min_queued_capture_buffers=N
-```
+1. RKISP/MIPI 相关 `/dev/video*` 节点是否为 `V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE`（需接入 MIPI 摄像头后验证）。
+2. 目标格式是 MJPEG、YUYV、NV12、NV16 还是多平面 NV12。
+3. 板端是否存在 `/dev/dma_heap/*`，以及后续是否需要走外部分配。
+4. RGA / NPU / 编码器是否能直接 import 采集侧导出的 DMA-BUF fd。
+5. CPU mmap DMA-BUF 后是否需要显式 `DMA_BUF_IOCTL_SYNC`（V4L2 DQBUF 通常已做 cache invalidation，但跨 fd 传递后消费者 mmap 可能需要显式 sync）。
 
 ### 4.2 Phase 1：V4L2 export 零拷贝，进程内闭环
 
@@ -585,19 +587,36 @@ ReleaseFrame()
 
 ### 12.1 待确认项
 
-- TODO：确认 `/dev/video45` 是否支持 `VIDIOC_EXPBUF`。
-- TODO：确认 `/dev/video45` 是否支持同一个 buffer 同时 MMAP 和 EXPBUF。
-- TODO：确认 `/dev/video45` 的 `VIDIOC_REQBUFS` 实际返回 buffer 数量。
-- TODO：确认 RKISP/MIPI capture 节点、buffer type、主要格式和 plane 布局。
+- ~~TODO：确认 `/dev/video45` 是否支持 `VIDIOC_EXPBUF`。~~ **已确认：支持**（2026-04-26 板端 C 测试验证，4 buffer 全部导出成功）
+- ~~TODO：确认 `/dev/video45` 是否支持同一个 buffer 同时 MMAP 和 EXPBUF。~~ **已确认：可用**（先 REQBUFS(MMAP) 再 EXPBUF，驱动允许）
+- ~~TODO：确认 `/dev/video45` 的 `VIDIOC_REQBUFS` 实际返回 buffer 数量。~~ **已确认：4**（请求 4 返回 4）
+- TODO：确认 RKISP/MIPI capture 节点、buffer type、主要格式和 plane 布局（需接入 MIPI 摄像头）。
 - TODO：确认 RKISP/MIPI 节点是否需要 `V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE` 和每 plane 独立 fd。
 - TODO：确认 RK3576 板端是否存在 `/dev/dma_heap/*`，以及权限配置。
 - TODO：确认 RGA、NPU、编码器是否可 import V4L2 export 出来的 DMA-BUF fd。
-- TODO：确认当前 `FrameHandle` 是否长期保持 ABI 不变。当前 Phase 1 已新增 `FrameDescriptor`，并兼容填充 `FrameHandle`。
-- TODO：确认 `FramePacket` 是否作为长期公开命名，或后续在 DataPlaneV2 前重命名为 `FrameEnvelope`。
+- ~~TODO：确认当前 `FrameHandle` 是否长期保持 ABI 不变。~~ **已决策：Phase 1 新增 `FrameDescriptor`，并兼容填充 `FrameHandle`，不破坏旧 ABI**
+- ~~TODO：确认 `FramePacket` 是否作为长期公开命名。~~ **已决策：Phase 1 使用 `FramePacket`，后续 DataPlaneV2 前可重命名**
 - TODO：确认 Phase 2 独立 release channel 的 socket path、连接生命周期和 batch release 格式。
 - TODO：确认 DMA-BUF CPU mmap 后可用的 sync ioctl / helper，以及失败时的 fallback 行为。
 
-### 12.2 主要风险
+### 12.2 下一步开发计划
+
+Phase 1 代码已落地（提交 2cb8017），当前状态为"待板端集成验证"。按优先级排序：
+
+| 优先级 | 任务 | 说明 |
+|--------|------|------|
+| P0 | 板端集成验证：用 `IoMethod::kDmaBuf` 配置启动 publisher，确认 EXPBUF 路径在完整进程中工作 | 当前只在独立 C 测试中验证了 EXPBUF，尚未在 `camera_publisher_example` 中启用 DMA-BUF 模式运行 |
+| P0 | 补 DMA-BUF probe/smoke test：在 `camera_publisher_example` 中增加 `--io-method dmabuf` 参数，启动时输出 EXPBUF 探测结果 | 当前 `CameraConfig::io_method_` 需要显式设置，示例程序尚未暴露该配置 |
+| P0 | 验证 lease release 后 QBUF 时序：在板端运行 DMA-BUF 模式，观察 lease 计数、QBUF 时机、帧率是否稳定 | 核心验收项，确认不会出现 buffer 过早复用或帧率抖动 |
+| P1 | 衡 `ShouldUseDmaBufPath()` 性能优化：缓存 `frame_packet_callback_` 布尔值，避免每帧加锁 | 当前每帧 DQBUF 后都加 `callback_mutex_`，高帧率下不必要 |
+| P1 | 衡 DMA-BUF 统计 metrics：暴露 `dma_buf_export_failures`、`lease_exhausted_count`、`lease_timeout_count` 到 publisher stats | 当前已有原子计数器，但未在 publisher 周期性日志中输出 |
+| P1 | 衡 `DmaBufSyncHelper`：封装 CPU mmap 读路径的 `DMA_BUF_IOCTL_SYNC` | 仅用于调试 CPU 读路径或 Web Preview fallback，不阻塞主链路 |
+| P1 | 验证 CPU mmap DMA-BUF cache 行为：消费者 mmap 后读帧数据，对比 MMAP copy 路径的帧内容 | 确认无脏数据，评估是否需要显式 sync |
+| P2 | 接入 MIPI 摄像头后验证 RKISP 节点 EXPBUF 和多平面 | 依赖硬件接入，不阻塞当前 USB 验证 |
+| P2 | 验证 RGA/NPU/编码器 import DMA-BUF fd | 依赖硬件模块接入 |
+| P2 | DataPlaneV2 设计与实现 | Phase 1 稳定后启动 |
+
+### 12.3 主要风险
 
 | 风险 | 影响 | 缓解 |
 |------|------|------|
@@ -611,7 +630,7 @@ ReleaseFrame()
 | cache coherency 未处理 | CPU 读写看到脏数据 | Phase 1 CPU mmap 读路径预留 DMA-BUF sync helper |
 | Web Preview 阻塞主链路 | 调试页面影响生产链路 | Web 默认低优先级和 copy/JPEG fallback |
 
-### 12.3 不应在第一版做的事
+### 12.4 不应在第一版做的事
 
 1. 不直接重写完整数据面 IPC。
 2. 不把所有格式转换、RGA、NPU、编码器接入一次性完成。
