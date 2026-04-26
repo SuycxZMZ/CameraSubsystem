@@ -7,7 +7,8 @@
 
 > **文档硬规范**
 >
-> - 本项目所有流程图、框图、时序图、状态机图、目录结构图等图示必须使用 Mermaid fenced code block（语言标识为 `mermaid`）。
+> - 本项目的系统架构图、模块框图、部署拓扑图和数据路径框图必须使用 `architecture-diagram` skill 生成的独立 HTML / inline SVG 图表产物；Markdown 中优先直接引用导出的 `.svg`，并附完整 HTML 图表链接。
+> - 时序图、状态机图、目录结构图等仍使用 Mermaid fenced code block（语言标识为 `mermaid`）。
 > - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
@@ -55,31 +56,9 @@
 
 ## 3. 当前系统架构基线
 
-```mermaid
-flowchart TB
-    subgraph CorePublisher["核心发布端进程"]
-        ControlServer["CameraControlServer<br/>控制面 IPC"]
-        SessionManager["CameraSessionManager<br/>订阅引用计数 / 按路启停"]
-        Source["CameraSource<br/>采集后端适配<br/>当前 V4L2 / MMAP"]
-        DataServer["DataSocketServer<br/>示例数据面 IPC"]
-    end
+![CameraSubsystem 系统架构基线](diagrams/camera_subsystem_system_architecture.svg)
 
-    subgraph Consumers["下游进程"]
-        SubPublisher["子发布端（规划）"]
-        SubscriberA["订阅端 A"]
-        SubscriberB["订阅端 B"]
-    end
-
-    SubPublisher -->|Subscribe / Unsubscribe| ControlServer
-    SubscriberA -->|Subscribe / Unsubscribe| ControlServer
-    SubscriberB -->|Subscribe / Unsubscribe| ControlServer
-    ControlServer --> SessionManager
-    SessionManager -->|0->1 Start / 1->0 Stop| Source
-    Source --> DataServer
-    DataServer -->|FrameHeader + FrameBytes| SubPublisher
-    DataServer -->|FrameHeader + FrameBytes| SubscriberA
-    DataServer -->|FrameHeader + FrameBytes| SubscriberB
-```
+[打开完整 HTML 图表](diagrams/camera_subsystem_architecture.html)
 
 已落地模块：
 

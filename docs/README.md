@@ -4,7 +4,8 @@
 
 > **文档硬规范**
 >
-> - 本项目所有流程图、框图、时序图、状态机图、目录结构图等图示必须使用 Mermaid fenced code block（语言标识为 `mermaid`）。
+> - 本项目的系统架构图、模块框图、部署拓扑图和数据路径框图必须使用 `architecture-diagram` skill 生成的独立 HTML / inline SVG 图表产物；Markdown 中优先直接引用导出的 `.svg`，并附完整 HTML 图表链接。
+> - 时序图、状态机图、目录结构图等仍使用 Mermaid fenced code block（语言标识为 `mermaid`）。
 > - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
@@ -74,7 +75,7 @@
 3. 架构评审建议只写在 [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)。
 4. API 变化必须同步 [../API_REFERENCE.md](../API_REFERENCE.md)。
 5. 构建、脚本、交叉编译入口变化必须同步 [../README.md](../README.md) 和 [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)。
-6. 文档中的图示必须使用 Mermaid；目录结构图也使用 Mermaid，不使用 ASCII 树。
+6. 文档中的系统架构图、模块框图、部署拓扑图和数据路径框图必须使用 `architecture-diagram` skill；Markdown 中优先直接引用导出的 `.svg`，并附完整 HTML 图表链接。目录结构图、时序图、状态机图继续使用 Mermaid，不使用 ASCII 树。
 7. `third_party/` 下游文档不按本项目规范改写，避免污染上游来源。
 
 ---

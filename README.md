@@ -7,7 +7,8 @@
 
 > **文档硬规范**
 >
-> - 本项目所有流程图、框图、时序图、状态机图、目录结构图等图示必须使用 Mermaid fenced code block（语言标识为 `mermaid`）。
+> - 本项目的系统架构图、模块框图、部署拓扑图和数据路径框图必须使用 `architecture-diagram` skill 生成的独立 HTML / inline SVG 图表产物；Markdown 中优先直接引用导出的 `.svg`，并附完整 HTML 图表链接。
+> - 时序图、状态机图、目录结构图等仍使用 Mermaid fenced code block（语言标识为 `mermaid`）。
 > - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
@@ -147,58 +148,17 @@ graph TB
 
 ### 5.1 系统架构
 
-```mermaid
-flowchart TB
-    subgraph Publisher["核心发布端进程"]
-        Control["控制面 IPC<br/>CameraControlServer"]
-        Session["CameraSessionManager<br/>按订阅引用启停"]
-        Source["CameraSource<br/>采集后端适配<br/>当前 V4L2/MMAP"]
-        Data["数据面 IPC<br/>DataSocketServer"]
-    end
+![CameraSubsystem 系统架构](docs/diagrams/camera_subsystem_system_architecture.svg)
 
-    subgraph Extensions["extensions 扩展层"]
-        subgraph WebPreview["web_preview"]
-            GW["web_preview_gateway<br/>CameraSubscriberClient<br/>+ HTTP/WebSocket Server"]
-            Frontend["React 前端<br/>帧渲染 + 流管理"]
-        end
-    end
-
-    subgraph Consumers["其他下游进程"]
-        SubPublisher["子发布端（可选）"]
-        Subscriber["订阅端 / AI / 编码 / 录制"]
-    end
-
-    GW -->|Subscribe / Unsubscribe| Control
-    SubPublisher -->|Subscribe / Unsubscribe| Control
-    Subscriber -->|Subscribe / Unsubscribe| Control
-    Control --> Session
-    Session -->|0→1 Start / 1→0 Stop| Source
-    Source --> Data
-    Data --> GW
-    Data --> SubPublisher
-    Data --> Subscriber
-    GW <-->|WebSocket 二进制帧| Frontend
-
-    style Extensions fill:#e8f5e9,stroke:#4caf50
-    style WebPreview fill:#c8e6c9,stroke:#4caf50
-```
+[打开完整 HTML 图表](docs/diagrams/camera_subsystem_architecture.html)
 
 ### 5.2 数据路径
 
 当前数据路径是可运行示例路径，不是最终生产级零拷贝路径：
 
-```mermaid
-flowchart LR
-    Camera["Camera Hardware"] --> Backend["Camera Backend<br/>当前 V4L2 Driver"]
-    Backend -->|MMAP / DQBUF<br/>或其他后端帧句柄| Source["CameraSource"]
-    Source -->|copy| Pool["BufferPool"]
-    Pool --> Frame["FrameHandle"]
-    Frame --> DataIPC["DataSocketServer<br/>Unix Socket"]
-    DataIPC --> Subscriber["本地订阅端"]
-    DataIPC --> Gateway["web_preview_gateway"]
-    Gateway -->|WebFrameHeader<br/>+ JPEG payload| WS["WebSocket"]
-    WS --> Browser["浏览器 Canvas"]
-```
+![CameraSubsystem 当前数据路径](docs/diagrams/camera_subsystem_data_path.svg)
+
+[打开完整 HTML 图表](docs/diagrams/camera_subsystem_architecture.html)
 
 ### 5.3 Web Preview 扩展
 

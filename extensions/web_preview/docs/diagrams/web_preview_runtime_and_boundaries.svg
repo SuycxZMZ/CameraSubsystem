@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 760" role="img" aria-label="Web Preview detailed block diagrams">
+  <style><![CDATA[
+svg { background: #020617; font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace; }
+.label { fill: #94a3b8; font-size: 9px; text-anchor: middle; }
+]]></style>
+        <defs>
+          <marker id="arrow2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/></marker>
+          <pattern id="grid2" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid2)"/>
+
+        <text x="40" y="42" fill="#e2e8f0" font-size="12" font-weight="600">Runtime access model</text>
+        <rect x="45" y="70" width="130" height="58" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="110" y="95" fill="white" font-size="11" font-weight="600" text-anchor="middle">Dev PC</text>
+        <text x="110" y="112" fill="#94a3b8" font-size="9" text-anchor="middle">build web/dist</text>
+        <rect x="250" y="70" width="150" height="58" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="325" y="95" fill="white" font-size="11" font-weight="600" text-anchor="middle">Board Gateway</text>
+        <text x="325" y="112" fill="#94a3b8" font-size="9" text-anchor="middle">0.0.0.0:8080</text>
+        <rect x="475" y="70" width="140" height="58" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="545" y="95" fill="white" font-size="11" font-weight="600" text-anchor="middle">PC Browser</text>
+        <text x="545" y="112" fill="#94a3b8" font-size="9" text-anchor="middle">http://board:8080</text>
+        <rect x="665" y="70" width="140" height="58" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="735" y="95" fill="white" font-size="11" font-weight="600" text-anchor="middle">Other Node</text>
+        <text x="735" y="112" fill="#94a3b8" font-size="9" text-anchor="middle">LAN only</text>
+        <line x1="175" y1="99" x2="248" y2="99" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="400" y1="99" x2="473" y2="99" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="665" y1="99" x2="617" y2="99" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+        <text x="40" y="190" fill="#e2e8f0" font-size="12" font-weight="600">JPEG pass-through MVP</text>
+        <rect x="45" y="220" width="130" height="58" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="110" y="245" fill="white" font-size="11" font-weight="600" text-anchor="middle">USB Camera</text>
+        <text x="110" y="262" fill="#94a3b8" font-size="9" text-anchor="middle">JPEG / MJPEG</text>
+        <rect x="250" y="220" width="150" height="58" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="325" y="245" fill="white" font-size="11" font-weight="600" text-anchor="middle">camera_publisher</text>
+        <text x="325" y="262" fill="#94a3b8" font-size="9" text-anchor="middle">core data plane</text>
+        <rect x="475" y="220" width="150" height="58" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="550" y="245" fill="white" font-size="11" font-weight="600" text-anchor="middle">Gateway</text>
+        <text x="550" y="262" fill="#94a3b8" font-size="9" text-anchor="middle">WebFrameHeader + JPEG</text>
+        <rect x="700" y="220" width="150" height="58" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="775" y="245" fill="white" font-size="11" font-weight="600" text-anchor="middle">Browser Decode</text>
+        <text x="775" y="262" fill="#94a3b8" font-size="9" text-anchor="middle">Canvas / ImageBitmap</text>
+        <line x1="175" y1="249" x2="248" y2="249" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="400" y1="249" x2="473" y2="249" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="625" y1="249" x2="698" y2="249" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+        <text x="40" y="340" fill="#e2e8f0" font-size="12" font-weight="600">FrameTransformPipeline strategy</text>
+        <rect x="45" y="370" width="150" height="58" rx="6" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="120" y="395" fill="white" font-size="11" font-weight="600" text-anchor="middle">CameraFrame</text>
+        <text x="120" y="412" fill="#94a3b8" font-size="9" text-anchor="middle">from Data IPC</text>
+        <rect x="270" y="370" width="150" height="58" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="345" y="395" fill="white" font-size="11" font-weight="600" text-anchor="middle">FrameAdapter</text>
+        <text x="345" y="412" fill="#94a3b8" font-size="9" text-anchor="middle">normalize metadata</text>
+        <rect x="495" y="332" width="145" height="44" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="568" y="359" fill="white" font-size="10" font-weight="600" text-anchor="middle">JPEG pass-through</text>
+        <rect x="495" y="392" width="145" height="44" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="568" y="419" fill="white" font-size="10" font-weight="600" text-anchor="middle">RGB / RGBA pass</text>
+        <rect x="495" y="452" width="145" height="44" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="568" y="479" fill="white" font-size="10" font-weight="600" text-anchor="middle">CPU / HW reserved</text>
+        <rect x="710" y="392" width="145" height="44" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="783" y="419" fill="white" font-size="10" font-weight="600" text-anchor="middle">WebFramePacket</text>
+        <line x1="195" y1="399" x2="268" y2="399" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="420" y1="399" x2="493" y2="354" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="420" y1="399" x2="493" y2="414" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="420" y1="399" x2="493" y2="474" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="640" y1="414" x2="708" y2="414" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+        <text x="40" y="560" fill="#e2e8f0" font-size="12" font-weight="600">Gateway modules and AI boundary</text>
+        <rect x="45" y="590" width="130" height="58" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="110" y="615" fill="white" font-size="11" font-weight="600" text-anchor="middle">App</text>
+        <text x="110" y="632" fill="#94a3b8" font-size="9" text-anchor="middle">lifecycle</text>
+        <rect x="230" y="560" width="140" height="46" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="300" y="588" fill="white" font-size="10" font-weight="600" text-anchor="middle">CameraSubscriberClient</text>
+        <rect x="230" y="628" width="140" height="46" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="300" y="656" fill="white" font-size="10" font-weight="600" text-anchor="middle">FramePipeline</text>
+        <rect x="430" y="560" width="140" height="46" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="500" y="588" fill="white" font-size="10" font-weight="600" text-anchor="middle">WebServer</text>
+        <rect x="430" y="628" width="140" height="46" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="500" y="656" fill="white" font-size="10" font-weight="600" text-anchor="middle">CommandRouter</text>
+        <rect x="660" y="558" width="145" height="56" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="733" y="582" fill="white" font-size="10" font-weight="600" text-anchor="middle">AI Subscriber</text>
+        <text x="733" y="599" fill="#94a3b8" font-size="9" text-anchor="middle">external process</text>
+        <rect x="880" y="558" width="145" height="56" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="953" y="582" fill="white" font-size="10" font-weight="600" text-anchor="middle">Browser Overlay</text>
+        <text x="953" y="599" fill="#94a3b8" font-size="9" text-anchor="middle">DetectionResult</text>
+        <line x1="175" y1="619" x2="228" y2="583" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="175" y1="619" x2="228" y2="651" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="370" y1="583" x2="428" y2="583" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="370" y1="651" x2="428" y2="651" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="805" y1="586" x2="878" y2="586" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <line x1="570" y1="583" x2="878" y2="586" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow2)"/>
+      </svg>

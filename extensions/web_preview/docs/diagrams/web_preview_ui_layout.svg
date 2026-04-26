@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 420" role="img" aria-label="Web Preview UI layout">
+  <style><![CDATA[
+svg { background: #020617; font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace; }
+.label { fill: #94a3b8; font-size: 9px; text-anchor: middle; }
+]]></style>
+        <defs>
+          <marker id="arrow3" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/></marker>
+          <pattern id="grid3" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid3)"/>
+        <rect x="55" y="55" width="1010" height="310" rx="12" fill="rgba(8, 51, 68, 0.08)" stroke="#22d3ee" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="75" y="80" fill="#22d3ee" font-size="10" font-weight="600">Web Preview UI</text>
+        <rect x="100" y="105" width="860" height="45" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="530" y="133" fill="white" font-size="11" font-weight="600" text-anchor="middle">Header: CameraSubsystem Web Preview / Gateway status</text>
+        <rect x="100" y="185" width="590" height="135" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="395" y="210" fill="white" font-size="11" font-weight="600" text-anchor="middle">Adaptive Stream Grid</text>
+        <rect x="125" y="230" width="155" height="65" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="202" y="256" fill="white" font-size="10" font-weight="600" text-anchor="middle">StreamTile</text>
+        <text x="202" y="273" fill="#94a3b8" font-size="9" text-anchor="middle">FrameCanvas + Overlay</text>
+        <rect x="315" y="230" width="155" height="65" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="392" y="256" fill="white" font-size="10" font-weight="600" text-anchor="middle">StreamTile</text>
+        <text x="392" y="273" fill="#94a3b8" font-size="9" text-anchor="middle">future_mipi_0</text>
+        <rect x="505" y="230" width="155" height="65" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="582" y="256" fill="white" font-size="10" font-weight="600" text-anchor="middle">StreamTile</text>
+        <text x="582" y="273" fill="#94a3b8" font-size="9" text-anchor="middle">...</text>
+        <rect x="735" y="185" width="225" height="135" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="848" y="210" fill="white" font-size="11" font-weight="600" text-anchor="middle">Right Panel</text>
+        <text x="848" y="237" fill="#94a3b8" font-size="9" text-anchor="middle">stream list / parameters</text>
+        <text x="848" y="257" fill="#94a3b8" font-size="9" text-anchor="middle">Start / Stop / Record</text>
+        <text x="848" y="277" fill="#94a3b8" font-size="9" text-anchor="middle">Detect / Snapshot</text>
+      </svg>
