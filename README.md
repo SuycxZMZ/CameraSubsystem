@@ -1,9 +1,9 @@
 # CameraSubsystem
 
-**目标平台:** Linux / Debian @ RK3576（预留 Android 迁移）<br>
+**目标平台:** Linux / 嵌入式边缘设备（当前已接入 RK3576 / Debian 验证链路，预留 Android 迁移）<br>
 **开发语言:** C++17 / C POD 数据结构<br>
-**核心方向:** Camera / V4L2 -> Publish/Subscribe -> AI / 编码 / 录制<br>
-**最后更新:** 2026-04-25
+**核心方向:** Camera 采集后端 -> Publish/Subscribe -> AI / 编码 / 录制<br>
+**最后更新:** 2026-04-26
 
 > **文档硬规范**
 >
@@ -31,14 +31,16 @@
 
 ## 1. 项目定位
 
-CameraSubsystem 是面向 RK3576 边缘设备的 Camera 数据流基座。它的职责是把底层 Camera 设备访问、采集会话管理、帧分发、订阅关系治理和平台差异收敛到一个可维护的基础子系统中，向上服务 AI 推理、编码、录制和调试预览等模块。
+CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基座。它的职责是把底层 Camera 设备访问、采集会话管理、帧分发、订阅关系治理和平台差异收敛到一个可维护的基础子系统中，向上服务 AI 推理、编码、录制和调试预览等模块。
+
+项目设计不绑定单一 SoC 或单一采集 API。当前已落地的采集后端以 Linux V4L2/MMAP 为主，RK3576 / Debian 是当前已接入的交叉编译与板端验证平台；后续可以继续扩展 Android Camera HAL、厂商媒体栈、USB/UVC、MIPI/CSI 多平面链路或其他平台私有后端。
 
 当前主线目标：
 
-1. 核心发布端独占 V4L2 设备入口，订阅端不直接访问 `/dev/videoX`。
+1. 核心发布端独占底层 Camera 设备或采集后端入口，订阅端不直接访问平台设备节点。
 2. 使用控制面 IPC 管理订阅/退订，使用数据面链路传输帧数据。
 3. 按订阅引用计数启停 Camera，会话无人订阅时释放设备资源。
-4. 在 Ubuntu 本机可调试，在 RK3576 Debian 12 上可交叉编译并逐步验证。
+4. 在 Ubuntu 本机可调试，并保留面向不同边缘设备的交叉编译和板端验证路径。
 
 ---
 
@@ -47,13 +49,13 @@ CameraSubsystem 是面向 RK3576 边缘设备的 Camera 数据流基座。它的
 | 项目 | 状态 | 说明 |
 |------|------|------|
 | 本机构建与测试 | 已通过 | `./scripts/build.sh` 可完成构建与测试 |
-| RK3576 交叉编译 | 已通过 | 使用 Omni3576 SDK 官方 GCC 10.3 工具链 |
+| 交叉编译链路 | 已通过 | 当前已接入 RK3576 / Omni3576 SDK 官方 GCC 10.3 工具链 |
 | 发布端/订阅端示例 | 已落地 | `camera_publisher_example` / `camera_subscriber_example` |
 | 控制面 IPC | 基础落地 | Subscribe / Unsubscribe / Ping |
 | 数据面 IPC | 示例落地 | Unix Socket 复制帧头 + 帧数据 |
 | Buffer 生命周期治理 | 基础落地 | `BufferPool` / `BufferGuard` / 状态机 / 泄漏检测 |
-| DMA-BUF 零拷贝主链路 | 未完成 | 当前仍是 V4L2 MMAP -> BufferPool 的拷贝模式 |
-| 板端运行验证 | 待完成 | 需在 RK3576 Debian 12 上做 smoke test |
+| DMA-BUF 零拷贝主链路 | 未完成 | 当前 V4L2 后端仍是 MMAP -> BufferPool 的拷贝模式 |
+| 板端运行验证 | 初步完成 | 已在 RK3576 Debian 12 上完成 publisher/subscriber smoke test |
 
 ---
 
@@ -101,7 +103,7 @@ flowchart TB
     subgraph Publisher["核心发布端进程"]
         Control["控制面 IPC<br/>CameraControlServer"]
         Session["CameraSessionManager<br/>按订阅引用启停"]
-        Source["CameraSource<br/>V4L2/MMAP 采集"]
+        Source["CameraSource<br/>采集后端适配<br/>当前 V4L2/MMAP"]
         Data["数据面 IPC<br/>示例帧传输"]
     end
 
@@ -123,8 +125,8 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    Camera["Camera Hardware"] --> V4L2["V4L2 Driver"]
-    V4L2 -->|MMAP / DQBUF| Source["CameraSource"]
+    Camera["Camera Hardware"] --> Backend["Camera Backend<br/>当前 V4L2 Driver"]
+    Backend -->|MMAP / DQBUF<br/>或其他后端帧句柄| Source["CameraSource"]
     Source -->|copy| Pool["BufferPool"]
     Pool --> Frame["FrameHandle"]
     Frame --> Broker["FrameBroker / Data IPC"]
@@ -143,7 +145,7 @@ flowchart LR
 
 该脚本会配置 CMake、编译工程并执行 CTest。
 
-### 6.2 RK3576 交叉编译
+### 6.2 交叉编译示例（RK3576）
 
 默认 SDK 路径为项目同级目录 `../Omni3576-sdk`：
 
@@ -157,7 +159,7 @@ flowchart LR
 OMNI3576_SDK_ROOT=/path/to/Omni3576-sdk ./scripts/build-rk3576.sh
 ```
 
-RK3576 产物输出到：
+当前 RK3576 产物输出到：
 
 ```text
 bin/rk3576/
@@ -190,7 +192,7 @@ bin/rk3576/
 ./bin/camera_subscriber_example
 ```
 
-### 7.2 RK3576 运行
+### 7.2 板端运行（以 RK3576 为例）
 
 将 `bin/rk3576/` 下产物复制到开发板后运行：
 
@@ -227,7 +229,7 @@ bin/rk3576/
 2. 架构风险、评审意见、ARCH-* 项不得分散写入 README 或实现状态文档。
 3. 新增公共接口必须同步更新 [API_REFERENCE.md](API_REFERENCE.md)。
 4. 新增命名或目录约定必须同步更新 [NAMING_CONVENTION.md](NAMING_CONVENTION.md)。
-5. 新增 RK3576 平台依赖必须同步更新 toolchain/build 脚本和文档索引。
+5. 新增平台依赖必须同步更新 toolchain/build 脚本和文档索引。
 6. 代码变更后优先运行 `./scripts/build.sh`；交叉编译相关变更还应运行 `./scripts/build-rk3576.sh`。
 
 ---
@@ -240,6 +242,6 @@ bin/rk3576/
 2. DMA-BUF 零拷贝主链路尚未打通。
 3. 背压策略只有基础队列上限和池耗尽丢帧，尚未参数化。
 4. 设备断连恢复、订阅端异常恢复、核心发布端重启恢复仍未形成完整状态机。
-5. RK3576 Debian 12 板端 smoke test 尚未完成。
+5. 多平台后端能力发现、设备热插拔与恢复策略仍需完善。
 
 下一步建议按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 的 P0/P1 优先级推进。

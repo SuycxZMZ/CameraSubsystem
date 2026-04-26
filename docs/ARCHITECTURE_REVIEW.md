@@ -1,7 +1,7 @@
 # CameraSubsystem 架构评审与建议
 
 **文档版本:** v0.4<br>
-**评审范围:** 当前主干代码与项目文档（截至 2026-04-25）<br>
+**评审范围:** 当前主干代码与项目文档（截至 2026-04-26）<br>
 **评审角色:** 高级系统架构师<br>
 **关联文档:** [README.md](../README.md)、[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)、[API_REFERENCE.md](../API_REFERENCE.md)
 
@@ -34,7 +34,7 @@
 
 本次评审聚焦三个层面：
 
-1. **系统架构**：当前分层、进程模型、数据通路是否支撑 RK3576 上长期运行。
+1. **系统架构**：当前分层、进程模型、数据通路是否支撑边缘设备上的长期运行与多平台演进。
 2. **代码架构**：模块边界、线程模型、生命周期管理、IPC 协议是否具备继续演进的稳定基础。
 3. **评审建议归档**：将 README、PROJECT_OVERVIEW、IMPLEMENTATION_STATUS、structure 等文档中分散的架构建议集中维护到本文档，避免主文档重复堆叠。
 
@@ -42,14 +42,14 @@
 
 ## 2. 总体结论
 
-当前 CameraSubsystem 已经从“单进程概念原型”进入“可运行的核心发布端 + 订阅端双进程原型”阶段，方向正确，工程边界也比早期清晰：核心发布端独占 V4L2、控制面 IPC 管理订阅关系、数据面 IPC 做示例帧传输、BufferPool/BufferGuard 解决了基础生命周期问题，RK3576 官方工具链也已接入。
+当前 CameraSubsystem 已经从“单进程概念原型”进入“可运行的核心发布端 + 订阅端双进程原型”阶段，方向正确，工程边界也比早期清晰：核心发布端独占底层 Camera 设备或采集后端、控制面 IPC 管理订阅关系、数据面 IPC 做示例帧传输、BufferPool/BufferGuard 解决了基础生命周期问题，RK3576 官方工具链也已作为首个板端验证链路接入。
 
 但从生产级边缘系统角度看，目前仍是 **可运行原型**，不是稳定生产架构。下一阶段必须优先解决四件事：
 
 1. 将数据面从“socket 复制示例”升级为可部署的数据通路，明确拷贝模式与零拷贝模式边界。
 2. 将背压、队列、优先级和延迟阈值从硬编码能力升级为可配置策略。
 3. 补齐设备断连、订阅端异常、核心发布端重启后的恢复闭环。
-4. 建立统一 Metrics/Tracing 接口，否则 RK3576 板端问题很难定位。
+4. 建立统一 Metrics/Tracing 接口，否则不同板端和不同采集后端的问题很难定位。
 
 ---
 
@@ -60,7 +60,7 @@ flowchart TB
     subgraph CorePublisher["核心发布端进程"]
         ControlServer["CameraControlServer<br/>控制面 IPC"]
         SessionManager["CameraSessionManager<br/>订阅引用计数 / 按路启停"]
-        Source["CameraSource<br/>V4L2 / MMAP 采集"]
+        Source["CameraSource<br/>采集后端适配<br/>当前 V4L2 / MMAP"]
         DataServer["DataSocketServer<br/>示例数据面 IPC"]
     end
 
@@ -85,13 +85,13 @@ flowchart TB
 
 | 模块 | 当前状态 | 评审判断 |
 |------|----------|----------|
-| `CameraSource` | V4L2 + MMAP 采集，拷贝到 BufferPool | 可用于 Ubuntu/RK3576 初期调试，尚非零拷贝主链路 |
+| `CameraSource` | 当前已落地 V4L2 + MMAP 采集后端，拷贝到 BufferPool | 可用于 Ubuntu/RK3576 初期调试，尚非零拷贝主链路，也不是最终唯一后端 |
 | `FrameBroker` | 订阅者管理、优先级队列、多 worker 分发 | 基础结构合理，策略与观测不足 |
 | `BufferPool` / `BufferGuard` | 预分配、RAII 归还、状态机、泄漏检测 | 方向正确，需进一步约束销毁时序与多消费者生命周期 |
 | `CameraSessionManager` | 核心发布端单实例、按订阅引用启停 | 职责清晰，但回调持锁执行需要调整 |
 | 控制面 IPC | Unix Domain Socket，请求/响应协议 | 适合原型，需补超时、鉴权、版本协商 |
 | 数据面 IPC | 示例 socket 传输帧头 + 帧数据 | 只能作为示例，不能作为 4K 高帧率生产路径 |
-| RK3576 构建 | 官方 GCC 10.3 toolchain 已接入 | 编译闭环完成，板端运行验证待补 |
+| 交叉编译 | RK3576 官方 GCC 10.3 toolchain 已接入 | 编译闭环完成，后续应按平台扩展 toolchain 与部署脚本 |
 
 ---
 
@@ -100,19 +100,19 @@ flowchart TB
 ### 4.1 优点
 
 1. **设备入口收敛正确**
-   核心发布端独占 V4L2 设备节点，订阅端不能直接打开 `/dev/videoX`。这是后续做稳定采集、资源仲裁、权限控制和故障恢复的前提。
+   核心发布端独占底层 Camera 设备或采集后端入口，订阅端不能直接打开平台设备节点。这是后续做稳定采集、资源仲裁、权限控制和故障恢复的前提。
 
 2. **控制面与数据面开始分离**
    Subscribe/Unsubscribe/Ping 与帧数据传输分离，避免把控制语义塞进热路径。这个方向适合继续扩展能力协商、心跳、鉴权和多路 Camera 路由。
 
 3. **按订阅启停符合边缘设备资源约束**
-   没有订阅时不采集，能减少 RK3576 上的 ISP/V4L2/CPU 内存消耗。
+   没有订阅时不采集，能减少具体平台上的 ISP、Camera 后端、CPU 与内存消耗。
 
 4. **Buffer 生命周期开始工程化**
    `BufferGuard`、`BufferPool`、状态机与泄漏检测解决了早期“谁归还 Buffer”的模糊问题。
 
 5. **交叉编译入口已标准化**
-   `cmake/toolchains/rk3576.cmake` 与 `scripts/build-rk3576.sh` 让开发板适配从口头说明变成可执行路径。
+   `cmake/toolchains/rk3576.cmake` 与 `scripts/build-rk3576.sh` 已把首个开发板适配从口头说明变成可执行路径，后续平台应沿用同类结构扩展。
 
 ### 4.2 主要缺口
 
@@ -120,7 +120,7 @@ flowchart TB
    当前示例把帧数据通过 Unix Socket 复制给订阅端。该路径适合验证发布/订阅流程，但不适合 4K@30/60fps 的生产主链路。生产路径需要 DMA-BUF fd 传递、共享内存 ring、或平台媒体栈原生 buffer 句柄传递。
 
 2. **“零拷贝”仍是目标，不是当前事实**
-   当前 `CameraSource` 使用 V4L2 MMAP 后复制到 `BufferPool`，`FrameHandle::memory_type_` 也设置为 heap。文档中必须持续区分“目标零拷贝”和“当前拷贝模式”，避免误导上层 AI/编码模块。
+   当前已落地的 V4L2 后端使用 MMAP 后复制到 `BufferPool`，`FrameHandle::memory_type_` 也设置为 heap。文档中必须持续区分“目标零拷贝”和“当前拷贝模式”，避免误导上层 AI/编码模块。
 
 3. **恢复机制还没有形成状态机**
    当前有启停引用计数，但没有设备断连、`VIDIOC_DQBUF` 持续失败、订阅端断链、核心发布端重启后的统一状态机。边缘设备场景下，这会是 P1 稳定性风险。
@@ -129,7 +129,7 @@ flowchart TB
    分散统计已有雏形，但缺少统一 Metrics 接口、指标命名、采样周期、导出方式和故障快照。
 
 5. **多路 Camera 能力探测还停留在文档层**
-   平台能力模型和建议上限 API 有草案，但尚未接入启动流程，也没有基于 RK3576 的标定数据。
+   平台能力模型和建议上限 API 有草案，但尚未接入启动流程，也缺少按平台、传感器和采集后端维护的标定数据。
 
 ---
 
@@ -142,10 +142,10 @@ flowchart TB
 | 层级 | 现状 | 建议 |
 |------|------|------|
 | `core` | POD、Buffer、Config、类型定义 | 保持无平台依赖，后续新增 metrics 类型也应先放 core 或独立 observability |
-| `camera` | V4L2 CameraSource + SessionManager | 建议继续拆分 `v4l2_device` / `camera_source`，降低 CameraSource 体积 |
+| `camera` | CameraSource + SessionManager，当前 CameraSource 内含 V4L2 后端实现 | 建议继续拆分 `camera_source` 与具体后端实现，例如 `v4l2_device`、Android HAL 或厂商媒体栈适配 |
 | `broker` | 进程内分发 | 适合做策略化背压，但不要承担跨进程传输职责 |
 | `ipc` | 控制面/数据面协议 | 需要明确“示例协议”和“生产协议”的版本边界 |
-| `platform` | 线程、epoll、日志 | 可以继续沉淀 Linux/RK3576 平台差异 |
+| `platform` | 线程、epoll、日志 | 可以继续沉淀 Linux、Android 和不同板端平台差异 |
 | `examples` | 双进程示例 | 当前包含较多数据面服务逻辑，后续应抽成库或 app 层模块 |
 
 ### 5.2 线程与锁
@@ -191,13 +191,13 @@ flowchart TB
 | ARCH-018 | 发布端/订阅端解耦 | 基础控制面 + 数据面示例已打通 |
 | ARCH-019 | 按订阅启停 Camera | `CameraSessionManager` 已实现引用计数启停 |
 | ARCH-020 | 控制/数据面协议头协定 | 已有 endpoint、role、magic、version 基础字段 |
-| ARCH-021 | RK3576 交叉编译入口 | 官方工具链与构建脚本已落地 |
+| ARCH-021 | RK3576 交叉编译入口 | 官方工具链与构建脚本已作为首个平台样例落地 |
 
 ### 6.2 需要继续推进
 
 | 主题 | 原始建议归纳 | 建议归属 |
 |------|--------------|----------|
-| DMA-BUF 零拷贝 | 打通 V4L2 DMABUF -> FrameHandle -> Broker -> Consumer | P1 数据通路 |
+| DMA-BUF 零拷贝 | 先打通 V4L2 DMABUF -> FrameHandle -> Broker -> Consumer，并保留其他后端句柄扩展空间 | P1 数据通路 |
 | 多平面格式 | 补齐 plane fd、stride、offset、size 的跨进程表达 | P1 数据通路 |
 | 背压参数化 | 支持延迟阈值、队列深度、订阅者优先级、DropPolicy | P1 Broker |
 | 设备恢复 | 设备断连检测、重连、会话恢复、降级策略 | P1 稳定性 |
@@ -205,7 +205,7 @@ flowchart TB
 | 能力探测 | 平台能力 -> 建议路数/线程数/订阅者上限 | P2 平台适配 |
 | 生产级 IPC | 版本协商、能力位、鉴权、重传/拥塞控制 | P2 协议 |
 | 线程亲和性 | 采集/分发线程绑定大核/小核，降低调度抖动 | P2 性能 |
-| 板端验证 | RK3576 Debian 12 上最小运行验证与部署脚本 | P1 部署 |
+| 板端验证 | 以 RK3576 Debian 12 为首个样例，沉淀可复用的最小运行验证与部署脚本 | P1 部署 |
 
 ---
 
@@ -226,7 +226,7 @@ flowchart TB
 | 背压策略不足 | 慢消费者导致延迟抖动或队列堆积 | 引入 BackpressureConfig 和 DropPolicy |
 | 设备异常恢复不足 | 板端现场断连后需要人工干预 | 建立 CameraSession 状态机和重试策略 |
 | 指标体系不足 | 难以定位性能与稳定性问题 | 统一 Metrics 接口，至少覆盖 FPS、drop、latency、queue |
-| 板端运行未验证 | 交叉编译通过不等于系统可用 | 在 RK3576 Debian 12 跑 publisher/subscriber smoke test |
+| 板端验证覆盖不足 | 单一板端 smoke test 不等于多平台可用 | 沉淀通用板端自检脚本，并扩展到更多采集后端和设备节点 |
 
 ### P2：生产化前完成
 
@@ -252,12 +252,12 @@ flowchart TB
 | ARCH-008 | 降级策略 | 计划中 | 支持降帧、降分辨率、暂停低优先级订阅 |
 | ARCH-009 | 统一 Metrics | 计划中 | 定义指标结构与导出接口 |
 | ARCH-010 | 数据面生产协议 | 计划中 | 设计 DMA-BUF fd 或共享内存 ring |
-| ARCH-011 | 多路能力探测 | 计划中 | 接入启动流程与 RK3576 标定 |
+| ARCH-011 | 多路能力探测 | 计划中 | 接入启动流程与平台标定 |
 | ARCH-012 | 线程亲和性 | 计划中 | 采集/分发线程绑定策略 |
 | ARCH-018 | 发布端/订阅端解耦 | 基础落地 | 补生产级协议与异常恢复 |
 | ARCH-019 | 按订阅启停 Camera | 基础落地 | 补防抖 grace period 与失败回滚 |
 | ARCH-020 | 协议头协定扩展 | 基础落地 | 补 endpoint、plane、capability、flags |
-| ARCH-021 | RK3576 交叉编译入口 | 已完成 | 做板端 smoke test |
+| ARCH-021 | RK3576 交叉编译入口 | 已完成 | 将 smoke test 经验沉淀为通用板端验证流程 |
 
 ---
 
@@ -269,7 +269,7 @@ flowchart TB
 2. 文档和 API 明确当前数据面是示例复制链路，新增生产数据面设计草案。
 3. `FrameBroker` 支持可配置队列上限、DropPolicy、慢消费者统计。
 4. 统一输出最小 metrics：采集 FPS、发布 FPS、队列深度、丢帧数、发送失败数、端到端延迟。
-5. RK3576 Debian 12 板端完成 `camera_publisher_example` 与 `camera_subscriber_example` 最小运行验证。
+5. RK3576 Debian 12 板端完成 `camera_publisher_example` 与 `camera_subscriber_example` 最小运行验证，并抽象出可复用的板端 smoke test 流程。
 6. 设备断连或 `/dev/videoX` 不可用时，发布端能输出明确错误状态并保持进程可控退出或等待恢复。
 
 ---
@@ -278,4 +278,4 @@ flowchart TB
 
 当前系统架构方向是正确的：设备入口集中、进程隔离、控制面与数据面分离、Buffer 生命周期开始可控。代码架构也已经具备继续演进的骨架。
 
-真正的风险不在“能不能跑”，而在“能不能在 RK3576 上长期、可观测、可恢复地跑”。下一阶段应把工作重心从补功能转向补生产控制面：数据面零拷贝、背压参数化、设备恢复、metrics、板端验证。只有这些闭环完成后，CameraSubsystem 才适合承载 AI 推理、编码、录制等上层模块的稳定接入。
+真正的风险不在“能不能跑”，而在“能不能在不同边缘设备和不同采集后端上长期、可观测、可恢复地跑”。下一阶段应把工作重心从补功能转向补生产控制面：数据面零拷贝、背压参数化、设备恢复、metrics、板端验证。只有这些闭环完成后，CameraSubsystem 才适合承载 AI 推理、编码、录制等上层模块的稳定接入。

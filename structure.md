@@ -1,12 +1,12 @@
 # Camera 推流与 AI 基座子系统架构设计文档
 
-文档版本:     v0.5 (RK3576 交叉编译适配版)
-目标平台:     Linux / Debian @ RK3576 (预留 Android 迁移)
+文档版本:     v0.6 (通用 Camera 数据流基座设计版)
+目标平台:     Linux / 嵌入式边缘设备（当前已接入 RK3576 / Debian 验证链路，预留 Android 迁移）
 开发语言:     C/C++ 混合 (数据层 C POD, 框架层 C++17)
-核心方向:     Camera / V4L2 -> Zero-Copy Pub/Sub -> NPU / AI
+核心方向:     Camera 采集后端 -> Zero-Copy Pub/Sub -> NPU / AI
 文档作者:     架构设计团队
 创建日期:     2026-01-27
-最后更新:     2026-04-25
+最后更新:     2026-04-26
 
 > **文档硬规范**
 >
@@ -60,7 +60,7 @@
         - 7x24 小时稳定运行,MTBF > 10000 小时
 
     可维护性与可扩展性:
-        - 跨平台抽象,核心逻辑与平台 API (Linux V4L2/Android HAL) 解耦
+        - 跨平台抽象,核心逻辑与采集后端 API (Linux V4L2/Android HAL/厂商媒体栈) 解耦
         - 模块化设计,支持插件式扩展
         - 完善的日志和监控体系
 
@@ -92,7 +92,7 @@
 
     包含:
         - Camera 设备管理 (设备发现、打开、配置、关闭)
-        - V4L2 流控 (格式协商、Buffer 管理、流控制)
+        - 采集后端流控 (当前 V4L2 后端覆盖格式协商、Buffer 管理、流控制)
         - 帧数据封装 (FrameHandle 构建、元数据管理)
         - 进程内高性能分发 (发布订阅、任务队列、线程池)
         - 发布端/订阅端解耦通信 (控制面 IPC + 数据面 IPC，基础实现)
@@ -126,7 +126,7 @@ flowchart TB
     end
 
     subgraph CameraLayer["Camera Source Layer"]
-        Source["CameraSource<br/>V4L2 Device Control<br/>Buffer Pool Management<br/>Capture Thread (Epoll Wait)"]
+        Source["CameraSource<br/>Camera Backend Adapter<br/>Buffer Pool Management<br/>Capture Thread"]
     end
 
     subgraph PlatformLayer["Platform Abstraction Layer"]
@@ -148,7 +148,7 @@ flowchart TB
 
 | 组件名称 | 职责描述 | 关键特性 |
 |----------|----------|----------|
-| CameraSource | 负责 Camera 设备的初始化、参数配置、流控及原始帧数据捕获 | 多实例支持；V4L2 完整封装；Buffer 预分配与复用；设备热插拔支持 |
+| CameraSource | 负责 Camera 设备的初始化、参数配置、流控及原始帧数据捕获 | 多实例支持；采集后端适配（当前 V4L2）；Buffer 预分配与复用；设备热插拔支持 |
 | FrameBroker | 系统中枢，管理订阅关系，将帧数据分发给所有订阅者 | 线程池调度；弱引用管理；优先级队列；按 Camera ID 订阅过滤 |
 | FrameHandle | 帧数据的元数据描述符，包含内存句柄而非数据指针 | C 风格 POD；支持 Stride 和多平面格式；零拷贝传输；跨语言兼容 |
 | PlatformLayer | 封装操作系统相关接口（Epoll、Thread、Log） | 跨平台适配；统一错误码；资源抽象 |
@@ -157,18 +157,18 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    Hardware["Camera Hardware"] --> Driver["V4L2 Driver"]
-    Driver -->|DQBUF / DMA-BUF| Source["CameraSource"]
+    Hardware["Camera Hardware"] --> Driver["Camera Backend<br/>当前 V4L2 Driver"]
+    Driver -->|DQBUF / DMA-BUF<br/>或其他后端帧句柄| Source["CameraSource"]
     Source -->|FrameHandle| Broker["FrameBroker"]
     Broker -->|Dispatch / OnFrame| Subscribers["Subscribers"]
 ```
 
     Buffer 生命周期:
-        1. CameraSource 从 V4L2 驱动获取 Buffer (MMAP)
+        1. CameraSource 从采集后端获取 Buffer（当前 V4L2 后端使用 MMAP）
         2. 拷贝到 BufferPool 并封装为 FrameHandle
         3. 通过 FrameBroker 分发给所有订阅者
         4. 订阅者处理完毕后,自动归还 BufferPool
-        5. CameraSource 将驱动 Buffer 重新入队 (QBUF)
+        5. CameraSource 将后端 Buffer 重新入队（当前 V4L2 后端使用 QBUF）
 
     背压与丢帧策略:
         1. 采集层池耗尽时丢帧,避免阻塞采集线程
@@ -178,7 +178,7 @@ flowchart LR
 ### 2.4 发布端/订阅端进程模型 (当前落地)
 
     目标约束:
-        1. 同一路 Camera 设备仅允许核心发布端直连 V4L2
+        1. 同一路 Camera 设备仅允许核心发布端直连底层采集后端
         2. 子发布端/订阅端通过 IPC 接入,不直接持有设备句柄
         3. 按订阅引用计数启停采集,无订阅不占用设备资源
 
@@ -1283,7 +1283,7 @@ flowchart LR
     文件头注释:
         /**
          * @file camera_source.h
-         * @brief Camera 数据源模块,负责 V4L2 设备管理和帧数据采集
+         * @brief Camera 数据源模块,负责采集后端设备管理和帧数据采集
          * @author CameraSubsystem Team
          * @date 2026-01-27
          */
@@ -1291,7 +1291,7 @@ flowchart LR
     类注释:
         /**
          * @class CameraSource
-         * @brief Camera 数据源类,封装 V4L2 设备操作
+         * @brief Camera 数据源类,封装采集后端设备操作
          *
          * 该类负责 Camera 设备的初始化、配置、流控制和帧数据采集。
          * 支持多实例并行运行,每个实例对应一个 Camera 设备。
@@ -1304,7 +1304,7 @@ flowchart LR
          * @return 成功返回 ErrorCode::kOk,失败返回对应错误码
          *
          * 该函数完成以下操作:
-         * 1. 打开 V4L2 设备
+         * 1. 打开 Camera 设备或采集后端入口
          * 2. 查询并设置采集格式
          * 3. 申请并映射 Buffer
          * 4. 创建 Epoll 实例
@@ -1315,7 +1315,7 @@ flowchart LR
         ErrorCode Initialize(const CameraConfig& config);
 
     成员变量注释:
-        // V4L2 设备文件描述符
+        // 采集后端设备句柄（当前 V4L2 后端为 fd）
         int device_fd_;
 
         // 采集线程

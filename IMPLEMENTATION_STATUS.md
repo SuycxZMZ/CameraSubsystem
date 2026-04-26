@@ -1,6 +1,6 @@
 # CameraSubsystem 实现状态
 
-**更新日期:** 2026-04-25
+**更新日期:** 2026-04-26
 
 > **文档硬规范**
 >
@@ -22,7 +22,7 @@
 - [架构完善项（面向边缘设备）](#架构完善项面向边缘设备)
 - [发布端/订阅端解耦模型状态](#发布端订阅端解耦模型状态)
 - [架构设计细化（Buffer 生命周期与背压策略）](#架构设计细化buffer-生命周期与背压策略)
-- [边缘设备适配与交叉编译状态（RK3576 / Debian）](#边缘设备适配与交叉编译状态rk3576--debian)
+- [边缘设备适配与交叉编译状态](#边缘设备适配与交叉编译状态)
 - [技术债务](#技术债务)
 - [贡献指南](#贡献指南)
 - [许可证](#许可证)
@@ -30,7 +30,7 @@
 
 ## 项目概述
 
-CameraSubsystem 项目已完成核心模块的实现，进入优化和完善阶段。项目旨在构建一个高性能、低延迟、可扩展的 Camera 数据流基座，作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源。
+CameraSubsystem 项目已完成核心模块的实现，进入优化和完善阶段。项目旨在构建一个高性能、低延迟、可扩展的通用 Camera 数据流基座，作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源。
 
 本文档只维护实现进度、测试状态和技术债务执行状态。架构评审建议与 ARCH-* 跟踪项统一维护在 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)。
 
@@ -155,7 +155,7 @@ flowchart TB
 
 **已实现:**
 
-- ✅ `camera_source.h/cpp` - Camera数据源实现（V4L2 + MMAP）
+- ✅ `camera_source.h/cpp` - Camera数据源实现（当前 V4L2 + MMAP 后端）
 - ✅ 设备打开/格式配置/帧采集/回调分发
 - ✅ BufferPool 复用池接入（拷贝模式）
 - ✅ 基础背压：池耗尽时丢帧
@@ -163,7 +163,7 @@ flowchart TB
 
 **待实现:**
 
-- ⏳ V4L2 多平面与 DMA-BUF 支持
+- ⏳ 采集后端扩展、V4L2 多平面与 DMA-BUF 支持
 - ⏳ 高级 Buffer 管理机制
 
 ### 5. 工具类 (Utils) 🚧
@@ -298,15 +298,15 @@ flowchart TB
 
 当前实现状态摘要：
 
-1. Buffer 生命周期与复用池基础治理已完成，当前仍是 V4L2 MMAP -> BufferPool 的拷贝模式。
+1. Buffer 生命周期与复用池基础治理已完成，当前已落地的 V4L2 后端仍是 MMAP -> BufferPool 的拷贝模式。
 2. 发布端/订阅端解耦、按订阅启停、控制面/数据面协议已形成双进程可运行原型。
-3. 零拷贝主链路、背压参数化、设备恢复、统一 metrics、板端 smoke test 仍是下一阶段重点。
+3. 零拷贝主链路、背压参数化、设备恢复、统一 metrics、通用板端自检流程仍是下一阶段重点。
 
 ## 发布端/订阅端解耦模型状态
 
 | 能力 | 当前状态 | 权威说明 |
 |------|----------|----------|
-| 核心发布端独占 V4L2 设备 | 已落地 | [README.md](README.md#5-架构概览) |
+| 核心发布端独占 Camera 设备或采集后端 | 已落地基础模型 | [README.md](README.md#5-架构概览) |
 | 控制面订阅/退订/Ping | 已落地基础协议 | [API_REFERENCE.md](API_REFERENCE.md#17-控制面-ipc-接口新增) |
 | 数据面帧传输 | 已落地示例复制链路 | [API_REFERENCE.md](API_REFERENCE.md#18-数据面协议示例) |
 | 按订阅引用计数启停 Camera | 已落地基础会话管理 | [API_REFERENCE.md](API_REFERENCE.md#16-camerasessionmanager-接口新增) |
@@ -321,15 +321,17 @@ flowchart TB
 1. `BufferPool` / `BufferGuard` / `BufferState` 已落地基础生命周期治理。
 2. 背压当前只有池耗尽丢帧与 Broker 队列上限丢帧，尚未形成可配置策略。
 
-## 边缘设备适配与交叉编译状态（RK3576 / Debian）
+## 边缘设备适配与交叉编译状态
 
+- ✅ 已建立可扩展的交叉编译入口，当前示例平台为 RK3576 / Debian
 - ✅ 已引入 CMake Toolchain 文件：`cmake/toolchains/rk3576.cmake`
 - ✅ 已引入交叉构建脚本：`scripts/build-rk3576.sh`
 - ✅ 使用 Luckfox Omni3576 SDK 官方 GCC 10.3 工具链：`aarch64-none-linux-gnu-`
 - ✅ 默认输出 RK3576 产物到 `bin/rk3576/`
 - ✅ 当前交叉编译已通过，生成 `camera_publisher_example` 与 `camera_subscriber_example` 的 ARM aarch64 ELF
-- ⏳ 待完成板端 Debian 12 运行验证与部署脚本
-- ⏳ 后续接入 RGA / RKNN / MPP 时补充设备侧 sysroot 依赖清单
+- ✅ 已完成 RK3576 Debian 12 初步 publisher/subscriber smoke test
+- ⏳ 后续接入 RGA / RKNN / MPP 或其他平台媒体栈时补充设备侧 sysroot 依赖清单
+- ⏳ 后续新增平台时补充对应 toolchain、部署脚本和板端自检流程
 
 ## 技术债务
 
@@ -342,7 +344,7 @@ flowchart TB
 - [ ] 完善日志系统
 - [ ] 添加代码覆盖率检查
 - [x] 增加 RK3576 跨架构编译入口 ✅ 2026-04-25
-- [ ] 增加 RK3576 板端运行时自检
+- [ ] 增加通用板端运行时自检，并保留 RK3576 作为首个验证实例
 - [ ] 完善多平面与 DMA-BUF 实现细节
 - [ ] 将 BufferPool 与 DMA-BUF 零拷贝打通
 - [ ] 背压策略参数化（延迟阈值/优先级规则）

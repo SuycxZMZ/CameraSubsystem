@@ -1,6 +1,6 @@
 # CameraSubsystem 项目概览
 
-**最后更新:** 2026-04-25
+**最后更新:** 2026-04-26
 
 > **文档硬规范**
 >
@@ -28,7 +28,9 @@
 
 ## 项目简介
 
-CameraSubsystem 是一个面向 RK3576 的 Camera 数据流基座（预留 Android 迁移）。它作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源，当前已形成 V4L2/MMAP 采集、BufferPool 生命周期治理、发布端/订阅端双进程示例和 RK3576 交叉编译链路；DMA-BUF 零拷贝仍是下一阶段生产化目标。
+CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基座。它作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源，当前已形成采集后端适配、BufferPool 生命周期治理、发布端/订阅端双进程示例和交叉编译链路；DMA-BUF 或共享内存等低拷贝数据面仍是下一阶段生产化目标。
+
+项目不把架构绑定到单一 SoC 或单一采集 API。当前实现以 Linux V4L2/MMAP 后端和 RK3576 / Debian 板端验证为基线，后续可继续扩展 Android Camera HAL、厂商媒体栈、USB/UVC、MIPI/CSI 多平面链路或其他平台私有后端。
 
 本文档只描述项目定位、能力边界、技术栈和快速开始。架构评审建议统一维护在 [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)，接口细节统一维护在 [../API_REFERENCE.md](../API_REFERENCE.md)。
 
@@ -36,10 +38,10 @@ CameraSubsystem 是一个面向 RK3576 的 Camera 数据流基座（预留 Andro
 
 ### 性能特性
 
-- **当前链路**: V4L2/MMAP 采集后拷贝到 BufferPool，适合本机与板端初期联调。
+- **当前链路**: 已落地 Linux V4L2/MMAP 后端，采集后拷贝到 BufferPool，适合本机与板端初期联调。
 - **生产目标**: 后续打通 DMA-BUF 或共享内存数据面，降低 CPU 拷贝成本。
 - **调度基础**: 已具备线程池分发、Buffer 复用和基础丢帧保护。
-- **指标口径**: 4K 高帧率、端到端延迟、内存占用等指标需要以 RK3576 板端实测为准。
+- **指标口径**: 4K 高帧率、端到端延迟、内存占用等指标需要按具体平台和采集后端实测。
 
 ### 并发能力
 
@@ -78,7 +80,7 @@ flowchart TB
     end
 
     subgraph CameraLayer["Camera Source Layer"]
-        Source["CameraSource<br/>V4L2 Device Control<br/>Buffer Pool Management<br/>Capture Thread (Epoll Wait)"]
+        Source["CameraSource<br/>Camera Backend Adapter<br/>Buffer Pool Management<br/>Capture Thread"]
     end
 
     subgraph PlatformLayer["Platform Abstraction Layer"]
@@ -100,15 +102,15 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    Hardware["Camera Hardware"] --> Driver["V4L2 Driver"]
-    Driver -->|DQBUF / MMAP| Source["CameraSource"]
+    Hardware["Camera Hardware"] --> Driver["Camera Backend<br/>当前 V4L2 Driver"]
+    Driver -->|DQBUF / MMAP<br/>或其他后端帧句柄| Source["CameraSource"]
     Source -->|FrameHandle| Broker["FrameBroker"]
     Broker -->|Dispatch / OnFrame| Subscribers["Subscribers"]
 ```
 
 ### 发布端/订阅端解耦架构调整
 
-当前项目增加发布端/订阅端解耦演进方向，满足“唯一核心发布端（V4L2 直连）+ 多子发布端/订阅端”的业务场景：
+当前项目增加发布端/订阅端解耦演进方向，满足“唯一核心发布端直连采集后端 + 多子发布端/订阅端”的业务场景：
 
 1. 核心发布端实例 `camera_publisher_core` 统一管理摄像头与分发，并独占设备访问。
 2. 子发布端实例 `camera_sub_publisher`（可选）作为核心发布端的订阅者，执行编解码/转封装后可再发布。
@@ -201,7 +203,7 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 #### 1. CameraSource
 
 - **职责**: 负责 Camera 设备的初始化、参数配置、流控及原始帧数据的捕获
-- **特性**: V4L2/MMAP 采集、Buffer 预分配与复用、RK3576 交叉编译适配；多平面、DMA-BUF、设备热插拔恢复待完善
+- **特性**: 已落地 V4L2/MMAP 采集后端、Buffer 预分配与复用、RK3576 交叉编译适配；多平面、DMA-BUF、其他采集后端、设备热插拔恢复待完善
 
 #### 2. FrameBroker
 
@@ -246,7 +248,7 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 ### 吞吐量
 
 - 目标支持 4K@60fps 稳定采集
-- 目标支持多路并发采集（具体路数由 RK3576 媒体栈、内存带宽和业务负载决定）
+- 目标支持多路并发采集（具体路数由平台媒体栈、内存带宽和业务负载决定）
 - 目标支持多订阅者同时消费同一路 Camera 数据
 
 ### 延迟
@@ -272,7 +274,7 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 ### 包含的功能
 
 - Camera 设备管理（设备发现、打开、配置、关闭）
-- V4L2 流控（格式协商、Buffer 管理、流控制）
+- 采集后端流控（当前 V4L2 后端已覆盖格式协商、Buffer 管理、流控制）
 - 帧数据封装（FrameHandle 构建、元数据管理）
 - 进程内高性能分发（发布订阅、任务队列、线程池）
 - 线程池管理（任务调度、负载均衡）
@@ -324,7 +326,7 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 - ✅ 平台抽象层实现
 - ✅ 分发层实现（FrameBroker）
 - ✅ 信号处理工具（utils/signal_handler）
-- ✅ CameraSource（V4L2 + MMAP 采集）
+- ✅ CameraSource（当前已落地 V4L2 + MMAP 采集后端）
 - ✅ BufferPool（统一生命周期与复用池，拷贝模式）
 - ✅ Buffer 生命周期治理（BufferGuard / BufferState / 泄漏检测）
 - ✅ CameraSessionManager（按订阅引用计数启停）
@@ -423,9 +425,9 @@ sudo apt-get update
 sudo apt-get install -y libgtest-dev
 ```
 
-### 边缘设备与交叉编译（RK3576 / Debian）
+### 边缘设备与交叉编译
 
-当前已支持使用 Luckfox Omni3576 SDK 自带 GCC 10.3 aarch64 工具链交叉编译：
+当前已接入 RK3576 / Debian 交叉编译示例，使用 Luckfox Omni3576 SDK 自带 GCC 10.3 aarch64 工具链：
 
 - Toolchain 文件：`cmake/toolchains/rk3576.cmake`
 - 构建脚本：`scripts/build-rk3576.sh`
@@ -442,7 +444,7 @@ cd build
 ctest --output-on-failure
 ```
 
-RK3576 交叉编译：
+交叉编译示例（RK3576）：
 
 ```bash
 ./scripts/build-rk3576.sh

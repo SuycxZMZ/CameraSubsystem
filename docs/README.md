@@ -43,13 +43,13 @@
 3. [../NAMING_CONVENTION.md](../NAMING_CONVENTION.md)
 4. [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)
 
-### 做 RK3576 板端适配
+### 做板端适配与交叉编译
 
 1. [../README.md](../README.md)
 2. [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)
 3. [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)
-4. `../cmake/toolchains/rk3576.cmake`
-5. `../scripts/build-rk3576.sh`
+4. 参考当前已接入的 RK3576 示例：`../cmake/toolchains/rk3576.cmake`
+5. 参考当前已接入的 RK3576 示例：`../scripts/build-rk3576.sh`
 
 ---
 
