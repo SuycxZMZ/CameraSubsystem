@@ -1,9 +1,9 @@
 # CameraSubsystem 架构评审与建议
 
-**文档版本:** v0.4<br>
-**评审范围:** 当前主干代码与项目文档（截至 2026-04-26）<br>
+**文档版本:** v0.5<br>
+**评审范围:** 当前主干代码与项目文档（截至 2026-04-27）<br>
 **评审角色:** 高级系统架构师<br>
-**关联文档:** [README.md](../README.md)、[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)、[DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)、[API_REFERENCE.md](../API_REFERENCE.md)
+**关联文档:** [README.md](../README.md)、[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)、[DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)、[CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)、[API_REFERENCE.md](../API_REFERENCE.md)
 
 > **文档硬规范**
 >
@@ -234,6 +234,7 @@
 | ARCH-010A | DMA-BUF CPU sync helper | 已完成 | 已抽象 `core::DmaBufSyncHelper`，板端 CPU mmap/sync smoke 通过 |
 | ARCH-010B | DataPlaneV2 协议层 | 进行中 | 已新增 DataPlaneV2 descriptor、ReleaseFrame 消息结构、SCM_RIGHTS fd 传递 helper、release tracker、publisher release UDS server，并接入 publisher/subscriber 示例；RK3576 smoke 已通过，本机异常单测已覆盖 fd 清理、无效 release、部分 release 超时和重复/未知 release |
 | ARCH-010C | MPLANE DMA-BUF 探测 | 进行中 | 已新增 `mplane_dmabuf_probe`，RKISP/RKVpss MPLANE 节点 `REQBUFS + QUERYBUF + EXPBUF` 成功；STREAMON 仍依赖真实 MIPI sensor/media pipeline |
+| ARCH-010D | H.264 录制编码服务 | 设计中 | 新增 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)，规划独立 `camera_codec_server` 订阅原始流，Web Preview 只转发录制控制；第一阶段以 USB JPEG/MJPEG -> H.264 文件落盘打通链路，MIPI/RKISP NV12 DMA-BUF 低拷贝路径后续扩展 |
 | ARCH-011 | 多路能力探测 | 计划中 | 接入启动流程与平台标定 |
 | ARCH-012 | 线程亲和性 | 计划中 | 采集/分发线程绑定策略 |
 | ARCH-018 | 发布端/订阅端解耦 | 基础落地 | 补生产级协议与异常恢复 |

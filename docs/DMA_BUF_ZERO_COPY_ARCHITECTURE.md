@@ -1,7 +1,8 @@
-# DMA-BUF 零拷贝主链路架构设计
+# DMA-BUF 数据面阶段性设计与验证记录
 
-**最后更新:** 2026-04-26<br>
-**Phase 2 代码状态:** DataPlaneV2 + `SCM_RIGHTS` + 独立 ReleaseFrame 通道已落地，并通过 RK3576 `/dev/video45` 冒烟验证
+**最后更新:** 2026-04-27<br>
+**阶段状态:** DMA-BUF Phase 2 阶段性任务已完成；DataPlaneV2 + `SCM_RIGHTS` + 独立 ReleaseFrame 通道已落地，并通过 RK3576 `/dev/video45` 冒烟验证<br>
+**后续承接:** H.264 编码录制架构见 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)
 
 > **文档硬规范**
 >
@@ -15,6 +16,8 @@
 ## 目录
 
 - [1. 背景与结论](#1-背景与结论)
+  - [1.1 本轮架构评审结论](#11-本轮架构评审结论)
+  - [1.2 为什么保留本文档](#12-为什么保留本文档)
 - [2. 当前链路基线](#2-当前链路基线)
 - [3. 目标架构](#3-目标架构)
 - [4. 推荐演进路线](#4-推荐演进路线)
@@ -39,11 +42,12 @@
 
 结论：
 
-1. **可以继续演进 DMA-BUF 零拷贝主链路**。现有 `FrameHandle` 已预留 `MemoryType::kDmaBuf`、`buffer_fd_`、plane、stride、offset 等字段，方向上具备承接基础。
-2. **第一阶段应优先打通 V4L2 buffer export 路径**，即仍由 V4L2 驱动分配采集 buffer，CameraSubsystem 通过 `VIDIOC_EXPBUF` 导出 DMA-BUF fd，避免采集帧再复制到 heap `BufferPool`。
-3. **不能过早 QBUF 复用底层 V4L2 buffer**。只要消费者还在使用该帧对应的 DMA-BUF，生产端就不能把同一个 V4L2 buffer 重新入队，否则消费者可能读到被覆盖的新帧。
-4. **跨进程零拷贝需要数据面协议 v2**。当前 `CameraDataFrameHeader + payload` 是复制链路；生产级零拷贝需要通过 Unix Domain Socket `SCM_RIGHTS` 传递 fd，并增加 `ReleaseFrame` 或等价回收协议。
-5. **多平面和 RKISP/MIPI 是必须纳入设计的能力**。当前 USB MJPEG 预览可以继续走 JPEG payload 透传，但 MIPI/RKISP 常见 NV12、多平面 buffer 才是 DMA-BUF 零拷贝的主要收益场景。
+1. **DMA-BUF 阶段性任务已经完成从设计到板端冒烟的闭环**。现有 `FrameDescriptor`、`FrameLease`、DataPlaneV2、`SCM_RIGHTS` fd 传递和独立 ReleaseFrame 通道已经具备后续业务订阅端接入基础。
+2. **V4L2 buffer export 路径已作为显式能力接入**，即仍由 V4L2 驱动分配采集 buffer，CameraSubsystem 通过 `VIDIOC_EXPBUF` 导出 DMA-BUF fd；驱动或板端环境不支持时仍回退到 MMAP + copy。
+3. **QBUF 时机已经成为数据面契约的一部分**。只要消费者还在使用该帧对应的 DMA-BUF，生产端就不能把同一个 V4L2 buffer 重新入队，否则消费者可能读到被覆盖的新帧。
+4. **跨进程零拷贝的最小协议已经落地**。DataPlaneV2 通过 Unix Domain Socket `SCM_RIGHTS` 传递 fd，并通过 ReleaseFrame 回收底层 lease。
+5. **多平面和 RKISP/MIPI 已完成能力探测但仍需真实 sensor 出帧验证**。当前 RKISP/RKVpss 节点可 `REQBUFS + QUERYBUF + EXPBUF`，RGA/MPP buffer import 也已验证；真实 STREAMON 仍依赖 sensor/media pipeline。
+6. **编码录制不继续在本文承载**。H.264 录制、`camera_codec_server`、Web 录制按钮和 MPP encoder 设计转入 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)。
 
 ### 1.1 本轮架构评审结论
 
@@ -57,6 +61,25 @@
 6. 只要 Phase 1 存在 CPU mmap DMA-BUF 的调试读路径，就必须预留 DMA-BUF sync helper 或明确 fallback。
 
 本文后续章节已经把这些评审结论转化为 Phase 1 可编码契约、MVP 范围、验收标准和风险表。
+
+### 1.2 为什么保留本文档
+
+本文仍然需要保留，不建议直接合并进 README、项目总览或 Camera Codec Server 文档。
+
+原因如下：
+
+1. **本文是 DMA-BUF 数据面契约的权威记录**。`FrameDescriptor`、`FrameLease`、`DmaBufFrameLease`、DataPlaneV2、`SCM_RIGHTS` fd 传递、独立 ReleaseFrame 通道、QBUF 时机和 lease 上限都属于底层数据面约束，不能散落在上层业务文档里。
+2. **编码录制依赖本文，但不拥有本文**。`camera_codec_server` 后续接入 DataPlaneV2、DMA-BUF fd import 和 MIPI/RKISP NV12 低拷贝路径时，应引用本文的生命周期和 release 契约；编码文档只描述如何消费这些能力。
+3. **Web Preview 与编码录制都不应重新定义 DMA-BUF 语义**。Web Preview 当前仍走原始预览帧；录制服务第一阶段可先走 USB copy payload。二者后续接入零拷贝能力时，必须复用本文的数据面模型。
+4. **板端验证记录需要可追溯**。RK3576 `/dev/video45` 冒烟、RGA import、MPP import、RKISP/RKVpss 能力探测和后续 MIPI sensor 验证都属于底层平台适配历史，保留在本文更清晰。
+
+因此，文档分工调整为：
+
+| 文档 | 定位 |
+|------|------|
+| [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md) | 底层 DMA-BUF / DataPlaneV2 / fd 生命周期 / release 协议权威文档 |
+| [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md) | H.264 编码录制服务、Web 录制控制、USB 首阶段链路和 MIPI/RKISP 扩展路径 |
+| [README.md](../README.md) / [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) | 只保留入口级摘要和跳转 |
 
 ## 2. 当前链路基线
 
@@ -138,16 +161,18 @@ V4L2 kernel buffer -> DMA-BUF fd -> FrameHandle/FrameLease -> broker -> fd metad
 | `/dev/video45` (uvcvideo) `VIDIOC_EXPBUF` | **支持** | 4 buffer 全部导出成功，fd 有效，mmap 可读 |
 | `/dev/video45` MMAP + EXPBUF 组合 | **可用** | 先 REQBUFS(MMAP) 再 EXPBUF，驱动允许同一 buffer 同时 MMAP 映射和 EXPBUF 导出 |
 | `/dev/video45` `VIDIOC_REQBUFS` 实际返回 | **4** | 请求 4 个 buffer，驱动返回 4 个 |
-| RKISP/MIPI 节点 (`/dev/video0-4`) | **不可用** | `v4l2-ctl` 返回 "No such device"，MIPI 摄像头未接入 |
-| `/dev/dma_heap/*` | 待确认 | 尚未探测 |
-| RGA/NPU/编码器 import | 待确认 | 尚未探测 |
+| RKISP/RKVpss MPLANE 节点 | **可探测** | `/dev/video22`、`/dev/video23`、`/dev/video31`、`/dev/video32`、`/dev/video41` 均支持 MPLANE `REQBUFS + QUERYBUF + EXPBUF`；真实 STREAMON 仍依赖 sensor/media pipeline 配置 |
+| `/dev/dma_heap/*` | **存在** | 板端存在 `/dev/dma_heap/system` 和 `/dev/dma_heap/reserved`，权限为 `root:video`，当前 `luckfox` 用户具备 video 组访问条件 |
+| RGA import | **支持** | 板端存在 `/dev/rga`、`librga.so`、RGA headers；`rga_dmabuf_import_probe` 已验证 RGA 可 import RKISP/RKVpss MPLANE 导出的 DMA-BUF fd |
+| MPP buffer import | **支持** | 板端存在 `/dev/mpp_service`、`librockchip_mpp.so`、MPP headers；`mpp_dmabuf_import_probe` 已验证 MPP buffer 层可 import RKISP/RKVpss MPLANE 导出的 DMA-BUF fd |
+| NPU/RKNN import | 待确认 | 板端存在 `librknnrt.so`，RKNN `rknn_create_mem_from_fd` 需要具体 RKNN context/model，后续结合 AI 订阅端验证 |
 
 **剩余待确认项：**
 
-1. RKISP/MIPI 相关 `/dev/video*` 节点是否为 `V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE`（需接入 MIPI 摄像头后验证）。
-2. 目标格式是 MJPEG、YUYV、NV12、NV16 还是多平面 NV12。
-3. 板端是否存在 `/dev/dma_heap/*`，以及后续是否需要走外部分配。
-4. RGA / NPU / 编码器是否能直接 import 采集侧导出的 DMA-BUF fd。
+1. 真实 MIPI sensor 接入后，media pipeline 如何配置，以及 STREAMON 后 `bytesused`、timestamp、sequence 是否稳定。
+2. 目标格式是 MJPEG、YUYV、NV12、NV16 还是多 fd 多平面 NV12。
+3. 后续是否需要走 dma-heap 外部分配，并由 Camera/RGA/NPU/编码器共同 import 同一批 buffer。
+4. RKNN 是否能在具体模型 context 下通过 `rknn_create_mem_from_fd` 绑定采集侧 DMA-BUF fd，以及是否需要额外 tensor metadata、对齐、cache sync 或 fence。
 5. CPU mmap DMA-BUF 后是否需要显式 `DMA_BUF_IOCTL_SYNC`（V4L2 DQBUF 通常已做 cache invalidation，但跨 fd 传递后消费者 mmap 可能需要显式 sync）。
 
 ### 4.2 Phase 1：V4L2 export 零拷贝，进程内闭环
@@ -597,18 +622,20 @@ ReleaseFrame()
 - ~~TODO：确认 `/dev/video45` 是否支持 `VIDIOC_EXPBUF`。~~ **已确认：支持**（2026-04-26 板端 C 测试验证，4 buffer 全部导出成功）
 - ~~TODO：确认 `/dev/video45` 是否支持同一个 buffer 同时 MMAP 和 EXPBUF。~~ **已确认：可用**（先 REQBUFS(MMAP) 再 EXPBUF，驱动允许）
 - ~~TODO：确认 `/dev/video45` 的 `VIDIOC_REQBUFS` 实际返回 buffer 数量。~~ **已确认：4**（请求 4 返回 4）
-- TODO：确认 RKISP/MIPI capture 节点、buffer type、主要格式和 plane 布局（需接入 MIPI 摄像头）。
-- TODO：确认 RKISP/MIPI 节点是否需要 `V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE` 和每 plane 独立 fd。
-- TODO：确认 RK3576 板端是否存在 `/dev/dma_heap/*`，以及权限配置。
-- TODO：确认 RGA、NPU、编码器是否可 import V4L2 export 出来的 DMA-BUF fd。
+- ~~TODO：确认 RKISP/MIPI capture 节点、buffer type、主要格式和 plane 布局（需接入 MIPI 摄像头）。~~ **部分确认：** RKISP/RKVpss 节点已确认使用 `V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE`，当前默认 NV12、单 plane fd；真实 sensor 出帧仍待 media pipeline 配置后复测
+- ~~TODO：确认 RKISP/MIPI 节点是否需要 `V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE` 和每 plane 独立 fd。~~ **部分确认：** 当前 RKISP/RKVpss NV12 通过 MPLANE API 暴露，但为单 fd 单 plane；多 fd plane 仍需后续真实 MIPI sensor 或其他格式复测
+- ~~TODO：确认 RK3576 板端是否存在 `/dev/dma_heap/*`，以及权限配置。~~ **已确认：** 存在 `/dev/dma_heap/system` 和 `/dev/dma_heap/reserved`，设备权限为 `root:video`
+- ~~TODO：确认 RGA 是否可 import V4L2 export 出来的 DMA-BUF fd。~~ **已确认：** `rga_dmabuf_import_probe` 在 `/dev/video22`、`/dev/video23`、`/dev/video31`、`/dev/video32`、`/dev/video41` 上均可 import 4 个 V4L2 exported fd
+- ~~TODO：确认 MPP buffer 层是否可 import V4L2 export 出来的 DMA-BUF fd。~~ **已确认：** `mpp_dmabuf_import_probe` 在 `/dev/video22`、`/dev/video23`、`/dev/video31`、`/dev/video32`、`/dev/video41` 上均可 import 4 个 V4L2 exported fd
+- TODO：确认 RKNN 是否可在具体模型 context 下 import V4L2 export 出来的 DMA-BUF fd。
 - ~~TODO：确认当前 `FrameHandle` 是否长期保持 ABI 不变。~~ **已决策：Phase 1 新增 `FrameDescriptor`，并兼容填充 `FrameHandle`，不破坏旧 ABI**
 - ~~TODO：确认 `FramePacket` 是否作为长期公开命名。~~ **已决策：Phase 1 使用 `FramePacket`，后续 DataPlaneV2 前可重命名**
 - ~~TODO：确认 Phase 2 独立 release channel 的 socket path、连接生命周期和 batch release 格式。~~ **已决策：默认 `/tmp/camera_subsystem_release_v2.sock`，当前先使用逐帧 release，batch release 留作生产化优化**
 - ~~TODO：确认 DMA-BUF CPU mmap 后可用的 sync ioctl / helper，以及失败时的 fallback 行为。~~ **已确认：`dmabuf_smoke_test` 在 `/dev/video45` 上 CPU mmap 120 次成功，`DMA_BUF_IOCTL_SYNC` start/end 失败数均为 0**
 
-### 12.2 下一步开发计划
+### 12.2 后续承接计划
 
-Phase 1 代码已落地（提交 2cb8017），并已完成 RK3576 `/dev/video45` 板端集成 smoke。按优先级排序：
+DMA-BUF Phase 2 阶段性任务已经完成。本文后续只保留数据面自身的稳定性、MIPI/RKISP 出帧验证和硬件 import 边界；H.264 编码录制、Web 录制按钮和文件落盘转入 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)。按优先级排序：
 
 | 优先级 | 任务 | 说明 |
 |--------|------|------|
@@ -620,16 +647,20 @@ Phase 1 代码已落地（提交 2cb8017），并已完成 RK3576 `/dev/video45`
 | P1 | 衡 `DmaBufSyncHelper`：封装 CPU mmap 读路径的 `DMA_BUF_IOCTL_SYNC` | ✅ 已抽象 `core::DmaBufSyncHelper`，并由 `dmabuf_smoke_test` 在 RK3576 `/dev/video45` 复测通过 |
 | P1 | 验证 CPU mmap DMA-BUF cache 行为：消费者 mmap 后读帧数据，对比 MMAP copy 路径的帧内容 | ✅ smoke test CPU mmap 120 次成功，sync start/end 失败数为 0 |
 | P2 | 接入 MIPI 摄像头后验证 RKISP 节点 EXPBUF 和多平面 | 已新增 `mplane_dmabuf_probe` 并在 RK3576 `/dev/video22`、`/dev/video23`、`/dev/video31`、`/dev/video32`、`/dev/video41` 完成 MPLANE `REQBUFS + QUERYBUF + EXPBUF` 探测；当前 STREAMON 失败，说明真实 MIPI/RKISP 出帧链路仍依赖 sensor/media pipeline 接入 |
-| P2 | 验证 RGA/NPU/编码器 import DMA-BUF fd | 依赖硬件模块接入 |
+| P2 | 验证 RGA/MPP import DMA-BUF fd | ✅ RGA import 与 MPP buffer import 已完成最小验证；RKNN import 暂不做 |
 | P2 | DataPlaneV2 设计与实现 | ✅ 已完成协议结构、SCM_RIGHTS helper、ReleaseFrame helper、release tracker、publisher release server、publisher/subscriber 示例接入与 RK3576 smoke |
 | P2 | DataPlaneV2 长稳与异常验证 | 进行中：已补本机异常单测，覆盖无效 descriptor fd 清理、无效 release 计数、部分 release 超时回收、重复/未知 release 统计和 publisher 退出前 pending lease 清理；已补 subscriber 慢消费参数和 RK3576 慢消费者/多订阅者 smoke 脚本，并完成 `/dev/video45` 板端双订阅者验证 |
+| P3 | Web 录制按钮接入 camera_codec_server | 转入 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)，当前前端只有命令类型和禁用按钮，未接入后台录制 |
+| P3 | H.264 编码录制 | 转入 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)，建议独立 `camera_codec_server` 订阅原始流并使用 Rockchip MPP 编码 |
 
-后续开发顺序固定如下：
+DMA-BUF 数据面剩余开发顺序如下：
 
 1. **DataPlaneV2 异常验证**：优先验证 subscriber 崩溃、release socket 断开、release 超时、fd 泄漏检查和 publisher 退出清理，确保显式 release 通道不会造成 V4L2 buffer 泄漏或过早 QBUF。当前已完成本机单测覆盖和 publisher 退出 pending lease 清理，仍需在 RK3576 上做真实进程崩溃/断连验证。
 2. **慢消费者与多订阅者验证**：在 1 个慢消费者、1 个正常消费者和多消费者组合下观察 `lease_in_flight_max`、pending release、QBUF 时序、帧率和丢帧策略。当前已新增 `camera_subscriber_example --process-delay-ms N --release-delay-ms N`，其中 `--release-delay-ms` 用于 DataPlaneV2 场景下延迟发送 `ReleaseFrame`，模拟消费者长时间持有帧。RK3576 `/dev/video45` 已完成双订阅者验证：`SLOW_RELEASE_DELAY_MS=200` 时两个订阅者均 `release_fail=0`，publisher `release_timeout=0`；`SLOW_RELEASE_DELAY_MS=700` 时会触发 `release_timeout` 和 `lease_exhausted`，用于压力观察。
 3. **板端 smoke 脚本固化**：把当前手工 RK3576 验证流程整理成脚本，自动完成上传、启动、停止、日志采集和 counters 校验。当前已新增 `scripts/rk3576-dataplane-v2-slow-consumer-smoke.sh`，默认使用 `luckfox` 用户，支持 `BOARD_PASSWORD` 自动密码输入（优先 `sshpass`，否则使用 `expect`），启动 1 个正常 subscriber 和 1 个慢 release subscriber，日志回收至 `logs/rk3576-dataplane-v2-smoke/`。脚本已修复 `pkill -f` 误匹配远端 shell 的问题，并增加 counters 自动 PASS/FAIL 判定。
 4. **MIPI/RKISP 多平面验证**：接入 MPLANE capture 节点，验证 per-plane fd / offset / stride 和后续 RGA/NPU/编码器 import 可行性。当前已新增 `mplane_dmabuf_probe`，可在不改 CameraSource 主链路的前提下验证 RKISP/RKVpss 节点的 MPLANE DMA-BUF export 能力；真实 STREAMON 出帧仍需 sensor/media pipeline 完整配置。
+5. **RGA import 验证**：已完成最小验证。当前 `rga_dmabuf_import_probe` 只证明 `VIDIOC_EXPBUF` fd 能被 `librga` 的 `importbuffer_fd` 接收并释放，真实 RGA copy / resize / color convert 等待 live frame 后继续。
+6. **MPP buffer import 验证**：已完成最小验证。当前 `mpp_dmabuf_import_probe` 只证明 `MPP_BUFFER_TYPE_EXT_DMA + mpp_buffer_import_with_tag` 的最小可行性，完整 MPP encoder session 设计转入 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)。
 
 慢消费者与多订阅者板端验证建议命令：
 
@@ -678,6 +709,52 @@ MPLANE DMA-BUF probe 验证命令：
 1. 这些节点当前 NV12 报告为 MPLANE API 下的单 plane buffer，Y/UV 通过同一个 DMA-BUF fd 和 offset/stride 表达，不是多 fd plane。
 2. `v4l2-ctl --stream-mmap --stream-count=5` 在 `/dev/video22`、`/dev/video31` 返回 `VIDIOC_STREAMON Invalid argument`，`/dev/video41` 返回 `Broken pipe`。这说明当前板端还没有可用的完整 MIPI/RKISP 出帧链路，或 media pipeline/sensor 未配置完成。
 3. 下一步如果接入真实 MIPI sensor，应先用 `media-ctl` 配好 pipeline，再用 `mplane_dmabuf_probe` 和 `v4l2-ctl --stream-mmap` 复测 STREAMON 与 bytesused。
+
+RGA DMA-BUF import probe 验证命令：
+
+```bash
+./rga_dmabuf_import_probe /dev/video22 800 600 NV12
+```
+
+已验证结果：
+
+| 节点 | 类型 | 结果 |
+|------|------|------|
+| `/dev/video22` | `rkisp-vir0` mainpath | `rga_import_ok=4`，`rga_import_fail=0`，`rga_dmabuf_import_probe_result=PASS` |
+| `/dev/video23` | `rkisp-vir0` selfpath | `rga_import_ok=4`，`rga_import_fail=0`，`rga_dmabuf_import_probe_result=PASS` |
+| `/dev/video31` | `rkisp-vir1` mainpath | `rga_import_ok=4`，`rga_import_fail=0`，`rga_dmabuf_import_probe_result=PASS` |
+| `/dev/video32` | `rkisp-vir1` selfpath | `rga_import_ok=4`，`rga_import_fail=0`，`rga_dmabuf_import_probe_result=PASS` |
+| `/dev/video41` | `rkvpss-vir0` scale0 | `rga_import_ok=4`，`rga_import_fail=0`，`rga_dmabuf_import_probe_result=PASS` |
+
+RGA 验证边界：
+
+1. 当前只证明 RGA 可以 import 由 RKISP/RKVpss MPLANE `VIDIOC_EXPBUF` 导出的 fd，并能释放 handle。
+2. 当前没有证明真实 STREAMON 后的 live frame 可被 RGA 正确 copy / resize / color convert；这需要 sensor/media pipeline 可出帧后继续验证。
+3. 当前没有把 RGA 接入 CameraSubsystem 主链路，不改变 `FrameDescriptor`、DataPlaneV2 或 release 时序。
+4. MPP buffer import 已单独验证，不能把 RGA import 结果等同于 MPP/RKNN 可用。
+
+MPP DMA-BUF import probe 验证命令：
+
+```bash
+./mpp_dmabuf_import_probe /dev/video22 800 600 NV12
+```
+
+已验证结果：
+
+| 节点 | 类型 | 结果 |
+|------|------|------|
+| `/dev/video22` | `rkisp-vir0` mainpath | `mpp_import_ok=4`，`mpp_import_fail=0`，`mpp_dmabuf_import_probe_result=PASS` |
+| `/dev/video23` | `rkisp-vir0` selfpath | `mpp_import_ok=4`，`mpp_import_fail=0`，`mpp_dmabuf_import_probe_result=PASS` |
+| `/dev/video31` | `rkisp-vir1` mainpath | `mpp_import_ok=4`，`mpp_import_fail=0`，`mpp_dmabuf_import_probe_result=PASS` |
+| `/dev/video32` | `rkisp-vir1` selfpath | `mpp_import_ok=4`，`mpp_import_fail=0`，`mpp_dmabuf_import_probe_result=PASS` |
+| `/dev/video41` | `rkvpss-vir0` scale0 | `mpp_import_ok=4`，`mpp_import_fail=0`，`mpp_dmabuf_import_probe_result=PASS` |
+
+MPP 验证边界：
+
+1. 当前只证明 MPP buffer 层可以通过 `MPP_BUFFER_TYPE_EXT_DMA` import 由 RKISP/RKVpss MPLANE `VIDIOC_EXPBUF` 导出的 fd。
+2. 当前没有证明 MPP encoder session 可以直接消费这些帧；完整编码仍需要后续补齐 `MppFrame` metadata、format、stride、pts、EOS 和编码参数。
+3. 当前没有把 MPP 接入 CameraSubsystem 主链路，不改变 DataPlaneV2 或 release 时序。
+4. RKNN 需要具体 `rknn_context` 和模型输入 tensor 才能验证 `rknn_create_mem_from_fd`，不能用无模型 probe 等价证明。
 
 ### 12.3 主要风险
 

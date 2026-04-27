@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 620" role="img" aria-label="Camera Codec Server recording architecture">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+    </pattern>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
+    </marker>
+    <style>
+      text { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .title { fill: #f8fafc; font-size: 18px; font-weight: 700; }
+      .subtitle { fill: #94a3b8; font-size: 10px; }
+      .label { fill: #ffffff; font-size: 11px; font-weight: 600; text-anchor: middle; }
+      .sub { fill: #94a3b8; font-size: 8.5px; text-anchor: middle; }
+      .tiny { fill: #cbd5e1; font-size: 8px; text-anchor: middle; }
+      .frontend { fill: rgba(8, 51, 68, 0.4); stroke: #22d3ee; }
+      .backend { fill: rgba(6, 78, 59, 0.4); stroke: #34d399; }
+      .bus { fill: rgba(251, 146, 60, 0.3); stroke: #fb923c; }
+      .storage { fill: rgba(76, 29, 149, 0.4); stroke: #a78bfa; }
+      .external { fill: rgba(30, 41, 59, 0.5); stroke: #94a3b8; }
+      .boundary { fill: none; stroke: #fbbf24; stroke-width: 1.2; stroke-dasharray: 8 4; }
+      .box { stroke-width: 1.5; rx: 6; }
+      .arrow { fill: none; stroke: #64748b; stroke-width: 1.4; marker-end: url(#arrowhead); }
+      .control { fill: none; stroke: #22d3ee; stroke-width: 1.3; stroke-dasharray: 5 4; marker-end: url(#arrowhead); }
+      .record { fill: none; stroke: #a78bfa; stroke-width: 1.5; marker-end: url(#arrowhead); }
+    </style>
+  </defs>
+
+  <rect width="1120" height="620" fill="#020617"/>
+  <rect width="1120" height="620" fill="url(#grid)" opacity="0.65"/>
+
+  <text x="40" y="42" class="title">CameraSubsystem Camera Codec Server Architecture</text>
+  <text x="40" y="62" class="subtitle">Preview keeps raw stream path; recording is controlled through web_preview_gateway and executed by camera_codec_server</text>
+
+  <path class="arrow" d="M 170 222 C 230 222, 240 222, 300 222"/>
+  <path class="arrow" d="M 450 210 C 505 210, 520 210, 575 210"/>
+  <path class="arrow" d="M 730 190 C 790 190, 805 170, 865 170"/>
+  <path class="record" d="M 730 245 C 790 245, 805 285, 865 285"/>
+  <path class="control" d="M 960 470 C 760 505, 410 500, 210 430"/>
+  <path class="control" d="M 300 430 C 410 455, 520 455, 630 430"/>
+  <path class="arrow" d="M 720 430 C 780 430, 805 430, 865 430"/>
+
+  <rect x="26" y="88" width="462" height="224" rx="12" class="boundary"/>
+  <text x="50" y="110" fill="#fbbf24" font-size="10" font-weight="600">CameraSubsystem Core</text>
+
+  <rect x="50" y="160" width="120" height="84" rx="6" fill="#0f172a"/>
+  <rect x="50" y="160" width="120" height="84" class="box external"/>
+  <text x="110" y="184" class="label">CameraSource</text>
+  <text x="110" y="201" class="sub">USB MJPEG first</text>
+  <text x="110" y="216" class="sub">MIPI / RKISP later</text>
+
+  <rect x="300" y="150" width="150" height="104" rx="6" fill="#0f172a"/>
+  <rect x="300" y="150" width="150" height="104" class="box backend"/>
+  <text x="375" y="176" class="label">camera_publisher</text>
+  <text x="375" y="194" class="sub">control IPC</text>
+  <text x="375" y="209" class="sub">DataPlaneV2 / copy</text>
+  <text x="375" y="224" class="sub">DMA-BUF fd passing</text>
+
+  <rect x="548" y="88" width="548" height="224" rx="12" class="boundary"/>
+  <text x="572" y="110" fill="#fbbf24" font-size="10" font-weight="600">Board-side Consumers</text>
+
+  <rect x="575" y="135" width="155" height="85" rx="6" fill="#0f172a"/>
+  <rect x="575" y="135" width="155" height="85" class="box backend"/>
+  <text x="652" y="159" class="label">web_preview_gateway</text>
+  <text x="652" y="177" class="sub">raw preview subscriber</text>
+  <text x="652" y="192" class="sub">record control proxy</text>
+
+  <rect x="575" y="238" width="155" height="52" rx="6" fill="#0f172a"/>
+  <rect x="575" y="238" width="155" height="52" class="box bus"/>
+  <text x="652" y="260" class="label">codec control API</text>
+  <text x="652" y="276" class="sub">start / stop / status</text>
+
+  <rect x="865" y="118" width="150" height="88" rx="6" fill="#0f172a"/>
+  <rect x="865" y="118" width="150" height="88" class="box frontend"/>
+  <text x="940" y="142" class="label">Browser UI</text>
+  <text x="940" y="160" class="sub">live raw preview</text>
+  <text x="940" y="175" class="sub">Record button</text>
+
+  <rect x="865" y="250" width="150" height="94" rx="6" fill="#0f172a"/>
+  <rect x="865" y="250" width="150" height="94" class="box backend"/>
+  <text x="940" y="274" class="label">camera_codec_server</text>
+  <text x="940" y="292" class="sub">Camera subscriber</text>
+  <text x="940" y="307" class="sub">MPP H.264 encoder</text>
+  <text x="940" y="322" class="sub">recording sessions</text>
+
+  <rect x="26" y="358" width="770" height="132" rx="12" class="boundary"/>
+  <text x="50" y="380" fill="#fbbf24" font-size="10" font-weight="600">camera_codec_server Internal Pipeline</text>
+
+  <rect x="55" y="405" width="130" height="58" rx="6" fill="#0f172a"/>
+  <rect x="55" y="405" width="130" height="58" class="box backend"/>
+  <text x="120" y="429" class="label">Subscriber</text>
+  <text x="120" y="446" class="sub">copy / DataPlaneV2</text>
+
+  <rect x="230" y="405" width="135" height="58" rx="6" fill="#0f172a"/>
+  <rect x="230" y="405" width="135" height="58" class="box backend"/>
+  <text x="298" y="429" class="label">FrameImport</text>
+  <text x="298" y="446" class="sub">JPEG decode / fd import</text>
+
+  <rect x="410" y="405" width="130" height="58" rx="6" fill="#0f172a"/>
+  <rect x="410" y="405" width="130" height="58" class="box backend"/>
+  <text x="475" y="429" class="label">H264MppEncoder</text>
+  <text x="475" y="446" class="sub">Rockchip MPP</text>
+
+  <rect x="585" y="405" width="130" height="58" rx="6" fill="#0f172a"/>
+  <rect x="585" y="405" width="130" height="58" class="box storage"/>
+  <text x="650" y="429" class="label">FileWriter</text>
+  <text x="650" y="446" class="sub">.h264 first</text>
+
+  <path class="arrow" d="M 185 434 C 200 434, 215 434, 230 434"/>
+  <path class="arrow" d="M 365 434 C 380 434, 395 434, 410 434"/>
+  <path class="arrow" d="M 540 434 C 555 434, 570 434, 585 434"/>
+
+  <rect x="865" y="400" width="150" height="80" rx="6" fill="#0f172a"/>
+  <rect x="865" y="400" width="150" height="80" class="box storage"/>
+  <text x="940" y="424" class="label">Recordings</text>
+  <text x="940" y="442" class="sub">/home/luckfox/recordings</text>
+  <text x="940" y="457" class="sub">stream_timestamp.h264</text>
+
+  <rect x="55" y="540" width="210" height="34" rx="5" class="box external"/>
+  <text x="160" y="562" class="tiny">USB first: MJPEG/JPEG -> decode -> NV12 -> H.264</text>
+  <rect x="325" y="540" width="230" height="34" rx="5" class="box external"/>
+  <text x="440" y="562" class="tiny">MIPI later: NV12 DMA-BUF -> MPP import -> H.264</text>
+  <rect x="615" y="540" width="250" height="34" rx="5" class="box external"/>
+  <text x="740" y="562" class="tiny">Preview path remains independent from recording path</text>
+</svg>

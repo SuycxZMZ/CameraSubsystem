@@ -1,6 +1,6 @@
 # CameraSubsystem 项目概览
 
-**最后更新:** 2026-04-26
+**最后更新:** 2026-04-27
 
 > **文档硬规范**
 >
@@ -29,19 +29,19 @@
 
 ## 项目简介
 
-CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基座。它作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源，当前已形成采集后端适配、BufferPool 生命周期治理、发布端/订阅端双进程示例和交叉编译链路；DMA-BUF Phase 1 已接入基础帧描述、lease 和 V4L2 export 尝试路径，生产级跨进程零拷贝数据面仍是下一阶段目标。
+CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基座。它作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源，当前已形成采集后端适配、BufferPool 生命周期治理、发布端/订阅端双进程示例和交叉编译链路；DMA-BUF DataPlaneV2 已完成 RK3576 阶段性冒烟验证，下一阶段开始设计独立 `camera_codec_server` 承载 H.264 编码录制。
 
 项目不把架构绑定到单一 SoC 或单一采集 API。当前实现以 Linux V4L2/MMAP 后端和 RK3576 / Debian 板端验证为基线，后续可继续扩展 Android Camera HAL、厂商媒体栈、USB/UVC、MIPI/CSI 多平面链路或其他平台私有后端。
 
-本文档只描述项目定位、能力边界、技术栈和快速开始。架构评审建议统一维护在 [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)，DMA-BUF 零拷贝主链路设计维护在 [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)，接口细节统一维护在 [../API_REFERENCE.md](../API_REFERENCE.md)。
+本文档只描述项目定位、能力边界、技术栈和快速开始。架构评审建议统一维护在 [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)，DMA-BUF 数据面阶段性记录维护在 [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)，H.264 编码录制架构维护在 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)，接口细节统一维护在 [../API_REFERENCE.md](../API_REFERENCE.md)。
 
 ## 核心特性
 
 ### 性能特性
 
 - **当前链路**: 已落地 Linux V4L2/MMAP 后端，默认采集后拷贝到 BufferPool，适合本机与板端初期联调。
-- **DMA-BUF Phase 1**: 已新增 `FrameDescriptor` / `FrameLease` / V4L2 `VIDIOC_EXPBUF` 尝试路径；驱动不支持时自动保留 copy fallback。
-- **生产目标**: 后续打通跨进程 DMA-BUF fd 传递或共享内存数据面，降低 CPU 拷贝成本。
+- **DMA-BUF 数据面**: 已新增 `FrameDescriptor` / `FrameLease` / V4L2 `VIDIOC_EXPBUF` / DataPlaneV2 + `SCM_RIGHTS` 路径；驱动不支持时自动保留 copy fallback。
+- **录制编码目标**: 下一阶段规划独立 `camera_codec_server` 订阅原始流，先以 USB 摄像头打通 JPEG/MJPEG 到 H.264 文件录制，后续扩展 MIPI/RKISP NV12 DMA-BUF 低拷贝编码。
 - **调度基础**: 已具备线程池分发、Buffer 复用和基础丢帧保护。
 - **指标口径**: 4K 高帧率、端到端延迟、内存占用等指标需要按具体平台和采集后端实测。
 
