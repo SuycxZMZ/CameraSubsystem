@@ -263,12 +263,12 @@ bool ReceiveCameraDataFrameDescriptorV2(int socket_fd,
     msg.msg_controllen = sizeof(control);
 
     const ssize_t received = recvmsg(socket_fd, &msg, 0);
-    if (received != static_cast<ssize_t>(sizeof(*descriptor)) ||
-        !IsCameraDataFrameDescriptorV2Valid(*descriptor))
+    if (received != static_cast<ssize_t>(sizeof(*descriptor)))
     {
         return false;
     }
 
+    uint32_t actual_fd_count = 0;
     for (struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
          cmsg != nullptr;
          cmsg = CMSG_NXTHDR(&msg, cmsg))
@@ -283,6 +283,7 @@ bool ReceiveCameraDataFrameDescriptorV2(int socket_fd,
         const uint32_t copy_count = std::min<uint32_t>(fd_count, max_fd_count);
         std::memcpy(fds, CMSG_DATA(cmsg), sizeof(int) * copy_count);
         *received_fd_count = copy_count;
+        actual_fd_count = fd_count;
 
         const int* received_fds = reinterpret_cast<const int*>(CMSG_DATA(cmsg));
         for (uint32_t i = copy_count; i < fd_count; ++i)
@@ -292,7 +293,24 @@ bool ReceiveCameraDataFrameDescriptorV2(int socket_fd,
         break;
     }
 
-    return *received_fd_count == descriptor->fd_count;
+    const bool valid = IsCameraDataFrameDescriptorV2Valid(*descriptor) &&
+                       actual_fd_count == descriptor->fd_count &&
+                       *received_fd_count == descriptor->fd_count;
+    if (!valid)
+    {
+        for (uint32_t i = 0; i < *received_fd_count; ++i)
+        {
+            if (fds[i] >= 0)
+            {
+                close(fds[i]);
+                fds[i] = -1;
+            }
+        }
+        *received_fd_count = 0;
+        return false;
+    }
+
+    return true;
 }
 
 bool SendCameraReleaseFrameV2(int socket_fd, const CameraReleaseFrameV2& release)
@@ -689,9 +707,16 @@ void CameraReleaseServer::ClientLoop(int client_fd)
     while (is_running_.load())
     {
         CameraReleaseFrameV2 release;
-        if (!ReceiveCameraReleaseFrameV2(client_fd, &release))
+        std::memset(&release, 0, sizeof(release));
+        if (!ReadFull(client_fd, &release, sizeof(release)))
         {
             break;
+        }
+        if (!IsCameraReleaseFrameV2Valid(release))
+        {
+            std::lock_guard<std::mutex> lock(stats_mutex_);
+            ++server_stats_.invalid_releases;
+            continue;
         }
 
         seen_consumers.insert(release.consumer_id);

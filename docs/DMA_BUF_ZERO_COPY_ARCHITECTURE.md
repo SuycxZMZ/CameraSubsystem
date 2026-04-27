@@ -619,17 +619,65 @@ Phase 1 代码已落地（提交 2cb8017），并已完成 RK3576 `/dev/video45`
 | P1 | 衡 DMA-BUF 统计 metrics：暴露 `dma_buf_export_failures`、`lease_exhausted_count`、`lease_timeout_count` 到 publisher stats | ✅ 已暴露 export_fail、lease_exhausted、dmabuf_frame_count、active_leases、lease_max、min_queued |
 | P1 | 衡 `DmaBufSyncHelper`：封装 CPU mmap 读路径的 `DMA_BUF_IOCTL_SYNC` | ✅ 已抽象 `core::DmaBufSyncHelper`，并由 `dmabuf_smoke_test` 在 RK3576 `/dev/video45` 复测通过 |
 | P1 | 验证 CPU mmap DMA-BUF cache 行为：消费者 mmap 后读帧数据，对比 MMAP copy 路径的帧内容 | ✅ smoke test CPU mmap 120 次成功，sync start/end 失败数为 0 |
-| P2 | 接入 MIPI 摄像头后验证 RKISP 节点 EXPBUF 和多平面 | `FrameDescriptor` 已有 per-plane `fd_index` 落点，MPLANE 采集实现依赖硬件接入 |
+| P2 | 接入 MIPI 摄像头后验证 RKISP 节点 EXPBUF 和多平面 | 已新增 `mplane_dmabuf_probe` 并在 RK3576 `/dev/video22`、`/dev/video23`、`/dev/video31`、`/dev/video32`、`/dev/video41` 完成 MPLANE `REQBUFS + QUERYBUF + EXPBUF` 探测；当前 STREAMON 失败，说明真实 MIPI/RKISP 出帧链路仍依赖 sensor/media pipeline 接入 |
 | P2 | 验证 RGA/NPU/编码器 import DMA-BUF fd | 依赖硬件模块接入 |
 | P2 | DataPlaneV2 设计与实现 | ✅ 已完成协议结构、SCM_RIGHTS helper、ReleaseFrame helper、release tracker、publisher release server、publisher/subscriber 示例接入与 RK3576 smoke |
-| P2 | DataPlaneV2 长稳与异常验证 | 下一步：覆盖慢消费者、多订阅者、subscriber 崩溃/断连、release 超时、fd 泄漏和 publisher 退出清理 |
+| P2 | DataPlaneV2 长稳与异常验证 | 进行中：已补本机异常单测，覆盖无效 descriptor fd 清理、无效 release 计数、部分 release 超时回收、重复/未知 release 统计和 publisher 退出前 pending lease 清理；已补 subscriber 慢消费参数和 RK3576 慢消费者/多订阅者 smoke 脚本，并完成 `/dev/video45` 板端双订阅者验证 |
 
 后续开发顺序固定如下：
 
-1. **DataPlaneV2 异常验证**：优先验证 subscriber 崩溃、release socket 断开、release 超时、fd 泄漏检查和 publisher 退出清理，确保显式 release 通道不会造成 V4L2 buffer 泄漏或过早 QBUF。
-2. **慢消费者与多订阅者验证**：在 1 个慢消费者、1 个正常消费者和多消费者组合下观察 `lease_in_flight_max`、pending release、QBUF 时序、帧率和丢帧策略。
-3. **板端 smoke 脚本固化**：把当前手工 RK3576 验证流程整理成脚本，自动完成上传、启动、停止、日志采集和 counters 校验。
-4. **MIPI/RKISP 多平面验证**：接入 MPLANE capture 节点，验证 per-plane fd / offset / stride 和后续 RGA/NPU/编码器 import 可行性。
+1. **DataPlaneV2 异常验证**：优先验证 subscriber 崩溃、release socket 断开、release 超时、fd 泄漏检查和 publisher 退出清理，确保显式 release 通道不会造成 V4L2 buffer 泄漏或过早 QBUF。当前已完成本机单测覆盖和 publisher 退出 pending lease 清理，仍需在 RK3576 上做真实进程崩溃/断连验证。
+2. **慢消费者与多订阅者验证**：在 1 个慢消费者、1 个正常消费者和多消费者组合下观察 `lease_in_flight_max`、pending release、QBUF 时序、帧率和丢帧策略。当前已新增 `camera_subscriber_example --process-delay-ms N --release-delay-ms N`，其中 `--release-delay-ms` 用于 DataPlaneV2 场景下延迟发送 `ReleaseFrame`，模拟消费者长时间持有帧。RK3576 `/dev/video45` 已完成双订阅者验证：`SLOW_RELEASE_DELAY_MS=200` 时两个订阅者均 `release_fail=0`，publisher `release_timeout=0`；`SLOW_RELEASE_DELAY_MS=700` 时会触发 `release_timeout` 和 `lease_exhausted`，用于压力观察。
+3. **板端 smoke 脚本固化**：把当前手工 RK3576 验证流程整理成脚本，自动完成上传、启动、停止、日志采集和 counters 校验。当前已新增 `scripts/rk3576-dataplane-v2-slow-consumer-smoke.sh`，默认使用 `luckfox` 用户，支持 `BOARD_PASSWORD` 自动密码输入（优先 `sshpass`，否则使用 `expect`），启动 1 个正常 subscriber 和 1 个慢 release subscriber，日志回收至 `logs/rk3576-dataplane-v2-smoke/`。脚本已修复 `pkill -f` 误匹配远端 shell 的问题，并增加 counters 自动 PASS/FAIL 判定。
+4. **MIPI/RKISP 多平面验证**：接入 MPLANE capture 节点，验证 per-plane fd / offset / stride 和后续 RGA/NPU/编码器 import 可行性。当前已新增 `mplane_dmabuf_probe`，可在不改 CameraSource 主链路的前提下验证 RKISP/RKVpss 节点的 MPLANE DMA-BUF export 能力；真实 STREAMON 出帧仍需 sensor/media pipeline 完整配置。
+
+慢消费者与多订阅者板端验证建议命令：
+
+```bash
+BOARD_HOST=192.168.31.9 \
+BOARD_USER=luckfox \
+DEVICE=/dev/video45 \
+DURATION_SEC=20 \
+SLOW_RELEASE_DELAY_MS=700 \
+./scripts/rk3576-dataplane-v2-slow-consumer-smoke.sh
+```
+
+重点观察 publisher 日志中的：
+
+1. `release_pending` 是否随慢消费者升高但最终回落。
+2. `lease_exhausted` 是否在慢消费者场景下可解释地增长，且 publisher 不崩溃。
+3. `release_timeout` 是否符合 `SLOW_RELEASE_DELAY_MS` 与 release timeout 的关系。
+4. 正常 subscriber 是否仍能持续收帧，避免慢消费者完全拖垮所有消费者。
+
+已验证结果：
+
+| 场景 | 结果 |
+|------|------|
+| `SLOW_RELEASE_DELAY_MS=200`，双订阅者运行约 12 秒 | publisher `dmabuf_enabled=1`、`export_fail=0`、`v2_send_fail=1`（停止阶段断连）、`release_timeout=0`；正常 subscriber `frames=86`、慢 subscriber `frames=85`，两者 `release_fail=0` |
+| `SLOW_RELEASE_DELAY_MS=200`，双订阅者运行约 60 秒 | 自动判定 PASS；publisher `dmabuf_enabled=1`、`export_fail=0`、`v2_sent=545`、`v2_send_fail=1`（停止阶段断连）、`release_pending=0`、`release_timeout=0`；正常 subscriber `frames=272`、慢 subscriber `frames=271`，两者 `save_fail=0`、`release_fail=0` |
+| `SLOW_RELEASE_DELAY_MS=700`，双订阅者运行约 20 秒 | publisher 持续运行，无崩溃；`release_timeout` 和 `lease_exhausted` 增长，符合慢消费者持有 lease 接近/超过 1s release timeout 的压力预期；两个 subscriber 均 `release_fail=0` |
+
+MPLANE DMA-BUF probe 验证命令：
+
+```bash
+./mplane_dmabuf_probe /dev/video22 800 600 NV12
+```
+
+已验证结果：
+
+| 节点 | 类型 | 结果 |
+|------|------|------|
+| `/dev/video22` | `rkisp-vir0` mainpath | `supports_mplane=1`，`plane_count=1`，4 个 buffer 全部 `VIDIOC_EXPBUF` 成功 |
+| `/dev/video23` | `rkisp-vir0` selfpath | `supports_mplane=1`，`plane_count=1`，4 个 buffer 全部 `VIDIOC_EXPBUF` 成功 |
+| `/dev/video31` | `rkisp-vir1` mainpath | `supports_mplane=1`，`plane_count=1`，4 个 buffer 全部 `VIDIOC_EXPBUF` 成功 |
+| `/dev/video32` | `rkisp-vir1` selfpath | `supports_mplane=1`，`plane_count=1`，4 个 buffer 全部 `VIDIOC_EXPBUF` 成功 |
+| `/dev/video41` | `rkvpss-vir0` scale0 | `supports_mplane=1`，`plane_count=1`，4 个 buffer 全部 `VIDIOC_EXPBUF` 成功 |
+
+当前限制：
+
+1. 这些节点当前 NV12 报告为 MPLANE API 下的单 plane buffer，Y/UV 通过同一个 DMA-BUF fd 和 offset/stride 表达，不是多 fd plane。
+2. `v4l2-ctl --stream-mmap --stream-count=5` 在 `/dev/video22`、`/dev/video31` 返回 `VIDIOC_STREAMON Invalid argument`，`/dev/video41` 返回 `Broken pipe`。这说明当前板端还没有可用的完整 MIPI/RKISP 出帧链路，或 media pipeline/sensor 未配置完成。
+3. 下一步如果接入真实 MIPI sensor，应先用 `media-ctl` 配好 pipeline，再用 `mplane_dmabuf_probe` 和 `v4l2-ctl --stream-mmap` 复测 STREAMON 与 bytesused。
 
 ### 12.3 主要风险
 

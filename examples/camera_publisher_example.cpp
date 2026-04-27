@@ -851,6 +851,11 @@ int main(int argc, char* argv[])
     data_v2_server.Stop();
 
     {
+        std::lock_guard<std::mutex> lock(lease_mutex);
+        pending_leases.clear();
+    }
+
+    {
         std::lock_guard<std::mutex> lock(camera_mutex);
         camera_source.Stop();
     }

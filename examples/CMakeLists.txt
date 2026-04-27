@@ -45,3 +45,11 @@ target_link_libraries(dmabuf_smoke_test
         camera_subsystem_platform
         camera_subsystem_core
 )
+
+add_executable(mplane_dmabuf_probe
+    mplane_dmabuf_probe.cpp
+)
+
+set_target_properties(mplane_dmabuf_probe PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
+)

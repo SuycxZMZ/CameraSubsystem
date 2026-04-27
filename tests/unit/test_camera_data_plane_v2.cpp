@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
+#include <dirent.h>
 #include <mutex>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -40,6 +41,50 @@ FrameDescriptor MakeTestDescriptor(int fd)
     descriptor.planes[0].bytes_used = 1024;
     descriptor.total_bytes_used = 1024;
     return descriptor;
+}
+
+size_t CountOpenFds()
+{
+    DIR* dir = opendir("/proc/self/fd");
+    if (dir == nullptr)
+    {
+        return 0;
+    }
+
+    size_t count = 0;
+    while (readdir(dir) != nullptr)
+    {
+        ++count;
+    }
+    closedir(dir);
+    return count;
+}
+
+bool SendRawDescriptorWithFd(int socket_fd,
+                             const CameraDataFrameDescriptorV2& descriptor,
+                             int fd)
+{
+    struct iovec iov;
+    iov.iov_base = const_cast<CameraDataFrameDescriptorV2*>(&descriptor);
+    iov.iov_len = sizeof(descriptor);
+
+    alignas(struct cmsghdr) char control[CMSG_SPACE(sizeof(int))];
+    std::memset(control, 0, sizeof(control));
+
+    struct msghdr msg;
+    std::memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control;
+    msg.msg_controllen = sizeof(control);
+
+    struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+    std::memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
+
+    return sendmsg(socket_fd, &msg, MSG_NOSIGNAL) == static_cast<ssize_t>(sizeof(descriptor));
 }
 
 } // namespace
@@ -171,6 +216,42 @@ TEST(CameraReleaseTrackerTest, ReclaimsOnConsumerDisconnect)
     EXPECT_EQ(stats.disconnect_reclaims, 1u);
 }
 
+TEST(CameraReleaseTrackerTest, TracksDuplicateAndUnknownReleases)
+{
+    CameraReleaseTracker tracker(std::chrono::milliseconds(100));
+    ASSERT_TRUE(tracker.RegisterFrame(1, 13, 5, {7}));
+
+    CameraReleaseFrameV2 unknown =
+        MakeCameraReleaseFrameV2(1, 13, 5, 8, CameraReleaseStatus::kOk, 0);
+    EXPECT_TRUE(tracker.MarkReleased(unknown).empty());
+
+    CameraReleaseFrameV2 release =
+        MakeCameraReleaseFrameV2(1, 13, 5, 7, CameraReleaseStatus::kOk, 0);
+    auto reclaims = tracker.MarkReleased(release);
+    ASSERT_EQ(reclaims.size(), 1u);
+
+    EXPECT_TRUE(tracker.MarkReleased(release).empty());
+
+    const CameraReleaseTrackerStats stats = tracker.GetStats();
+    EXPECT_EQ(stats.unknown_releases, 2u);
+    EXPECT_EQ(stats.duplicate_releases, 0u);
+}
+
+TEST(CameraReleaseTrackerTest, TracksDuplicateReleaseBeforeReclaim)
+{
+    CameraReleaseTracker tracker(std::chrono::milliseconds(100));
+    ASSERT_TRUE(tracker.RegisterFrame(1, 14, 5, {7, 8}));
+
+    CameraReleaseFrameV2 release =
+        MakeCameraReleaseFrameV2(1, 14, 5, 7, CameraReleaseStatus::kOk, 0);
+    EXPECT_TRUE(tracker.MarkReleased(release).empty());
+    EXPECT_TRUE(tracker.MarkReleased(release).empty());
+
+    const CameraReleaseTrackerStats stats = tracker.GetStats();
+    EXPECT_EQ(stats.duplicate_releases, 1u);
+    EXPECT_EQ(tracker.PendingFrameCount(), 1u);
+}
+
 TEST(CameraReleaseServerTest, ReceivesReleaseAndEmitsReclaim)
 {
     const char* socket_path = "/tmp/camera_release_server_test.sock";
@@ -259,6 +340,108 @@ TEST(CameraReleaseServerTest, EmitsTimeoutReclaim)
     unlink(socket_path);
 }
 
+TEST(CameraReleaseServerTest, CountsInvalidReleaseAndContinues)
+{
+    const char* socket_path = "/tmp/camera_release_server_invalid_test.sock";
+    unlink(socket_path);
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::vector<CameraReleaseReclaim> reclaims;
+
+    CameraReleaseServer server(std::chrono::milliseconds(100));
+    if (!server.Start(
+            socket_path,
+            [&](const CameraReleaseReclaim& reclaim)
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                reclaims.push_back(reclaim);
+                cv.notify_all();
+            }))
+    {
+        GTEST_SKIP() << "Skip because unix socket bind may be denied by environment: "
+                     << socket_path;
+    }
+    ASSERT_TRUE(server.RegisterFrame(1, 22, 8, {9}));
+
+    const int client_fd = ConnectUnixSocket(socket_path);
+    ASSERT_GE(client_fd, 0);
+
+    CameraReleaseFrameV2 invalid =
+        MakeCameraReleaseFrameV2(1, 22, 8, 9, CameraReleaseStatus::kOk, 0);
+    invalid.magic = 0;
+    ASSERT_EQ(write(client_fd, &invalid, sizeof(invalid)), static_cast<ssize_t>(sizeof(invalid)));
+
+    const CameraReleaseFrameV2 valid =
+        MakeCameraReleaseFrameV2(1, 22, 8, 9, CameraReleaseStatus::kOk, 0);
+    ASSERT_TRUE(SendCameraReleaseFrameV2(client_fd, valid));
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        ASSERT_TRUE(cv.wait_for(lock, std::chrono::seconds(1), [&]() {
+            return !reclaims.empty();
+        }));
+    }
+
+    EXPECT_EQ(reclaims.size(), 1u);
+    EXPECT_EQ(reclaims[0].status, CameraReleaseStatus::kOk);
+    EXPECT_EQ(server.GetServerStats().invalid_releases, 1u);
+    EXPECT_EQ(server.GetServerStats().received_releases, 1u);
+
+    close(client_fd);
+    server.Stop();
+    unlink(socket_path);
+}
+
+TEST(CameraReleaseServerTest, EmitsTimeoutAfterPartialRelease)
+{
+    const char* socket_path = "/tmp/camera_release_server_partial_timeout_test.sock";
+    unlink(socket_path);
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::vector<CameraReleaseReclaim> reclaims;
+
+    CameraReleaseServer server(std::chrono::milliseconds(20));
+    if (!server.Start(
+            socket_path,
+            [&](const CameraReleaseReclaim& reclaim)
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                reclaims.push_back(reclaim);
+                cv.notify_all();
+            }))
+    {
+        GTEST_SKIP() << "Skip because unix socket bind may be denied by environment: "
+                     << socket_path;
+    }
+    ASSERT_TRUE(server.RegisterFrame(1, 23, 8, {9, 10}));
+
+    const int client_fd = ConnectUnixSocket(socket_path);
+    ASSERT_GE(client_fd, 0);
+
+    const CameraReleaseFrameV2 release =
+        MakeCameraReleaseFrameV2(1, 23, 8, 9, CameraReleaseStatus::kOk, 0);
+    ASSERT_TRUE(SendCameraReleaseFrameV2(client_fd, release));
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        ASSERT_TRUE(cv.wait_for(lock, std::chrono::seconds(1), [&]() {
+            return !reclaims.empty();
+        }));
+    }
+
+    ASSERT_EQ(reclaims.size(), 1u);
+    EXPECT_EQ(reclaims[0].status, CameraReleaseStatus::kTimeout);
+    EXPECT_EQ(reclaims[0].expected_release_count, 2u);
+    EXPECT_EQ(reclaims[0].observed_release_count, 1u);
+    EXPECT_EQ(server.PendingFrameCount(), 0u);
+
+    close(client_fd);
+    server.Stop();
+    unlink(socket_path);
+}
+
 TEST(CameraDataPlaneV2Test, SendAndReceiveDescriptorWithScmRights)
 {
     int sockets[2] = {-1, -1};
@@ -285,6 +468,40 @@ TEST(CameraDataPlaneV2Test, SendAndReceiveDescriptorWithScmRights)
     EXPECT_EQ(received.planes[0].fd_index, 0u);
 
     close(received_fds[0]);
+    close(fd);
+    close(sockets[0]);
+    close(sockets[1]);
+}
+
+TEST(CameraDataPlaneV2Test, InvalidDescriptorWithScmRightsDoesNotLeakFd)
+{
+    int sockets[2] = {-1, -1};
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets), 0);
+
+    const int fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+    ASSERT_GE(fd, 0);
+
+    CameraDataFrameDescriptorV2 descriptor =
+        MakeCameraDataFrameDescriptorV2(MakeTestDescriptor(fd));
+    descriptor.magic = 0;
+
+    const size_t before_fd_count = CountOpenFds();
+    ASSERT_TRUE(SendRawDescriptorWithFd(sockets[0], descriptor, fd));
+
+    CameraDataFrameDescriptorV2 received;
+    int received_fds[kCameraDataV2MaxFds] = {-1, -1, -1};
+    uint32_t received_fd_count = 0;
+    EXPECT_FALSE(ReceiveCameraDataFrameDescriptorV2(
+        sockets[1], &received, received_fds, kCameraDataV2MaxFds, &received_fd_count));
+    EXPECT_EQ(received_fd_count, 0u);
+    EXPECT_EQ(received_fds[0], -1);
+
+    const size_t after_fd_count = CountOpenFds();
+    if (before_fd_count != 0 && after_fd_count != 0)
+    {
+        EXPECT_EQ(after_fd_count, before_fd_count);
+    }
+
     close(fd);
     close(sockets[0]);
     close(sockets[1]);

@@ -177,8 +177,8 @@ flowchart TB
 
 **待实现:**
 
-- ⏳ V4L2 多平面、RKISP/MIPI 节点 EXPBUF 与多 fd import 验证
-- ⏳ DataPlaneV2 长稳、慢消费者、多订阅者与异常断连压测
+- ⏳ V4L2 多平面 STREAMON、RKISP/MIPI sensor pipeline 与多 fd import 验证
+- ⏳ DataPlaneV2 板端长稳、真实 subscriber 崩溃/断连、慢消费者与多订阅者压测
 - ⏳ 高级 Buffer 管理机制与慢消费者隔离
 
 ### 5. 工具类 (Utils) 🚧
@@ -332,6 +332,8 @@ flowchart TB
 | P1 | 设计 CPU mmap 调试读路径和 sync helper | ✅ 已抽象 `DmaBufSyncHelper`，`dmabuf_smoke_test` 已验证 CPU mmap + `DMA_BUF_IOCTL_SYNC` |
 | P1 | 明确多平面扩展落点 | ✅ `FrameDescriptor` 已以 per-plane `fd_index` 表达多 fd / 多平面，并补单元测试；MPLANE 采集接入待有硬件后推进 |
 | P2 | 进入 `DataPlaneV2` / `SCM_RIGHTS` 设计实现 | ✅ 已完成协议结构、`FrameDescriptor` 映射、SCM_RIGHTS helper、独立 release channel、publisher/subscriber 示例接入与 RK3576 smoke |
+| P2 | DataPlaneV2 异常验证 | 进行中：本机单测已覆盖无效 descriptor fd 清理、无效 release 计数、部分 release 超时回收、重复/未知 release 统计；RK3576 真实进程崩溃/断连和长稳仍待验证 |
+| P2 | 慢消费者与多订阅者验证 | 进行中：subscriber 已支持 `--process-delay-ms` 和 `--release-delay-ms`，RK3576 slow-consumer smoke 脚本已支持自动密码和 counters 判定；`/dev/video45` 双订阅者 60 秒长稳 PASS |
 
 本阶段保持两个边界：
 
@@ -390,9 +392,15 @@ flowchart TB
 - [x] 实现 ReleaseFrame 消息 helper、release tracker、超时回收和断连回收策略基础设施 ✅ 2026-04-26
 - [x] 实现独立 ReleaseFrame UDS server 并接入 publisher 运行时 ✅ 2026-04-26
 - [x] 将跨进程 DataPlaneV2 接入 publisher/subscriber 示例，并在 RK3576 `/dev/video45` 完成 smoke ✅ 2026-04-26
-- [ ] 按顺序补 DataPlaneV2 异常验证：subscriber 崩溃、release socket 断开、release 超时、fd 泄漏检查和 publisher 退出清理
-- [ ] 补慢消费者与多订阅者验证：观察 `lease_in_flight_max`、pending release、QBUF 时序、帧率和丢帧策略
-- [ ] 固化 RK3576 板端 smoke 脚本：上传、运行、停止、日志采集和 counters 校验
+- [x] 补 DataPlaneV2 本机异常单测：release 超时、fd 泄漏防护、无效 release、重复/未知 release 和 publisher 退出 pending lease 清理 ✅ 2026-04-27
+- [ ] 在 RK3576 上验证 DataPlaneV2 真实异常：subscriber 崩溃、release socket 断开、release 超时和 publisher 退出清理
+- [x] 补 subscriber 慢消费者参数：`--process-delay-ms` / `--release-delay-ms` ✅ 2026-04-27
+- [x] 新增 RK3576 DataPlaneV2 慢消费者/多订阅者 smoke 脚本 ✅ 2026-04-27
+- [x] 在 RK3576 上运行慢消费者与多订阅者验证：`SLOW_RELEASE_DELAY_MS=200` 无 release timeout，`SLOW_RELEASE_DELAY_MS=700` 可触发 timeout 压力场景 ✅ 2026-04-27
+- [x] 完善 RK3576 板端 smoke 脚本 counters 自动判定与 SSH 密码自动输入体验 ✅ 2026-04-27
+- [x] 完成 RK3576 DataPlaneV2 慢消费者/双订阅者 60 秒长稳验证 ✅ 2026-04-27
+- [x] 新增 `mplane_dmabuf_probe` 并验证 RKISP/RKVpss MPLANE 节点 `REQBUFS + QUERYBUF + EXPBUF` ✅ 2026-04-27
+- [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane
 - [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
 - [ ] 背压策略参数化（延迟阈值/优先级规则）
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项

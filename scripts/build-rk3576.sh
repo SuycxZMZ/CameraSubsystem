@@ -20,4 +20,8 @@ cmake -S "${PROJECT_ROOT}" -B "${BUILD_DIR}" \
 cmake --build "${BUILD_DIR}" -j"$(nproc)"
 
 echo "RK3576 binaries:"
-file "${OUTPUT_DIR}/camera_publisher_example" "${OUTPUT_DIR}/camera_subscriber_example"
+file \
+    "${OUTPUT_DIR}/camera_publisher_example" \
+    "${OUTPUT_DIR}/camera_subscriber_example" \
+    "${OUTPUT_DIR}/dmabuf_smoke_test" \
+    "${OUTPUT_DIR}/mplane_dmabuf_probe"

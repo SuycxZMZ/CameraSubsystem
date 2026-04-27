@@ -230,9 +230,10 @@
 | ARCH-007 | 设备自动重连 | 计划中 | 增加会话状态机 |
 | ARCH-008 | 降级策略 | 计划中 | 支持降帧、降分辨率、暂停低优先级订阅 |
 | ARCH-009 | 统一 Metrics | 计划中 | 定义指标结构与导出接口 |
-| ARCH-010 | 数据面生产协议 | 进行中 | DMA-BUF Phase 2 最小跨进程链路已完成；后续补长稳、慢消费者、多订阅者、异常恢复和生产级背压 |
+| ARCH-010 | 数据面生产协议 | 进行中 | DMA-BUF Phase 2 最小跨进程链路已完成；已补慢消费者参数和 RK3576 slow-consumer smoke 脚本，`/dev/video45` 双订阅者 60 秒长稳与 counters 自动判定已通过；后续补更长时间长稳和生产级背压 |
 | ARCH-010A | DMA-BUF CPU sync helper | 已完成 | 已抽象 `core::DmaBufSyncHelper`，板端 CPU mmap/sync smoke 通过 |
-| ARCH-010B | DataPlaneV2 协议层 | 进行中 | 已新增 DataPlaneV2 descriptor、ReleaseFrame 消息结构、SCM_RIGHTS fd 传递 helper、release tracker、publisher release UDS server，并接入 publisher/subscriber 示例；RK3576 smoke 已通过 |
+| ARCH-010B | DataPlaneV2 协议层 | 进行中 | 已新增 DataPlaneV2 descriptor、ReleaseFrame 消息结构、SCM_RIGHTS fd 传递 helper、release tracker、publisher release UDS server，并接入 publisher/subscriber 示例；RK3576 smoke 已通过，本机异常单测已覆盖 fd 清理、无效 release、部分 release 超时和重复/未知 release |
+| ARCH-010C | MPLANE DMA-BUF 探测 | 进行中 | 已新增 `mplane_dmabuf_probe`，RKISP/RKVpss MPLANE 节点 `REQBUFS + QUERYBUF + EXPBUF` 成功；STREAMON 仍依赖真实 MIPI sensor/media pipeline |
 | ARCH-011 | 多路能力探测 | 计划中 | 接入启动流程与平台标定 |
 | ARCH-012 | 线程亲和性 | 计划中 | 采集/分发线程绑定策略 |
 | ARCH-018 | 发布端/订阅端解耦 | 基础落地 | 补生产级协议与异常恢复 |

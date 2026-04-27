@@ -6,6 +6,7 @@
  *
  * 用法：
  *   ./camera_subscriber_example [output_dir] [control_socket] [data_socket] [device_path]
+ *       [--data-plane v1|v2] [--process-delay-ms N] [--release-delay-ms N]
  *
  * 默认参数：
  * 1. output_dir    : ./subscriber_frames
@@ -16,7 +17,7 @@
  * 运行流程：
  * 1. 连接数据面 socket，接收核心发布端发送的帧头+帧数据。
  * 2. 通过控制面发送 Subscribe 请求（默认 CAMERA_SUBSYSTEM_DEFAULT_CAMERA）。
- * 3. 循环接收帧并 sleep 5ms 模拟上层业务处理耗时。
+ * 3. 循环接收帧并按 process-delay-ms 模拟上层业务处理耗时。
  * 4. 每秒打印一次统计信息，并保存一张图片到 output_dir。
  * 5. 图片最多保留 10 张，文件名按槽位 0~9 循环覆盖。
  * 6. 默认无限运行，收到 Ctrl+C（SIGINT/SIGTERM）后发送 Unsubscribe 并退出。
@@ -251,6 +252,8 @@ int main(int argc, char* argv[])
     std::string release_socket_path = camera_subsystem::ipc::kDefaultCameraReleaseV2SocketPath;
     std::string device_path = CAMERA_SUBSYSTEM_DEFAULT_CAMERA;
     DataPlaneMode data_plane_mode = DataPlaneMode::kV1Copy;
+    uint32_t process_delay_ms = 5;
+    uint32_t release_delay_ms = 0;
 
     int pos = 0;
     for (int i = 1; i < argc; ++i)
@@ -280,11 +283,22 @@ int main(int argc, char* argv[])
             ++i;
             release_socket_path = argv[i];
         }
+        else if (arg == "--process-delay-ms" && i + 1 < argc)
+        {
+            ++i;
+            process_delay_ms = static_cast<uint32_t>(std::stoul(argv[i]));
+        }
+        else if (arg == "--release-delay-ms" && i + 1 < argc)
+        {
+            ++i;
+            release_delay_ms = static_cast<uint32_t>(std::stoul(argv[i]));
+        }
         else if (arg == "--help" || arg == "-h")
         {
             PlatformLogger::Log(LogLevel::kInfo, "subscriber",
                                 "usage: %s [output_dir] [control_socket] [data_socket] "
-                                "[device_path] [--data-plane v1|v2] [--release-socket path]",
+                                "[device_path] [--data-plane v1|v2] [--release-socket path] "
+                                "[--process-delay-ms N] [--release-delay-ms N]",
                                 argv[0]);
             return 0;
         }
@@ -391,8 +405,11 @@ int main(int argc, char* argv[])
     }
 
     PlatformLogger::Log(LogLevel::kInfo, "subscriber",
-                        "subscriber started, client_id=%s, output_dir=%s, device=%s",
-                        client_id.c_str(), output_dir_path.c_str(), endpoint.device_path);
+                        "subscriber started, client_id=%s, output_dir=%s, device=%s, "
+                        "data_plane=%s, process_delay_ms=%u, release_delay_ms=%u",
+                        client_id.c_str(), output_dir_path.c_str(), endpoint.device_path,
+                        data_plane_mode == DataPlaneMode::kV2DmaBuf ? "v2" : "v1",
+                        process_delay_ms, release_delay_ms);
     PlatformLogger::Log(LogLevel::kInfo, "subscriber",
                         "sec | frames | fps | received_bytes | save_fail | image");
 
@@ -478,6 +495,11 @@ int main(int argc, char* argv[])
                     }
                 }
 
+                if (release_delay_ms > 0)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(release_delay_ms));
+                }
+
                 const CameraReleaseFrameV2 release = MakeCameraReleaseFrameV2(
                     descriptor.stream_id,
                     descriptor.frame_id,
@@ -554,7 +576,10 @@ int main(int argc, char* argv[])
                 total_bytes += header.frame_size;
             }
             // 模拟上层处理
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            if (process_delay_ms > 0)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(process_delay_ms));
+            }
         }
         else if (poll_ret < 0 && errno != EINTR)
         {
