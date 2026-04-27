@@ -14,6 +14,10 @@ option(CAMERA_SUBSYSTEM_USE_SYSTEM_DEPS
     "Use dependencies discovered from the host/system package paths"
     ${CAMERA_SUBSYSTEM_USE_SYSTEM_DEPS_DEFAULT}
 )
+option(CAMERA_SUBSYSTEM_BUILD_CODEC_SERVER
+    "Build camera_codec_server extension"
+    OFF
+)
 
 # 为 clangd 生成 compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -247,6 +251,11 @@ install(DIRECTORY include/camera_subsystem DESTINATION include)
 
 # 示例程序
 add_subdirectory(examples)
+
+# 可选扩展
+if (CAMERA_SUBSYSTEM_BUILD_CODEC_SERVER)
+    add_subdirectory(extensions/codec_server)
+endif ()
 
 # 启用测试 (优先系统安装,其次 third_party/googletest,否则跳过)
 include(CTest)
