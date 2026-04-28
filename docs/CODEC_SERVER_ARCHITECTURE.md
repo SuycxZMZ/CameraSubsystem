@@ -432,7 +432,21 @@ USB 第一阶段需要 JPEG/MJPEG 解码。候选：
 | MPP JPEG decode | 可能利用硬件能力 | 需要确认 API 和输入输出 buffer 管理 |
 | FFmpeg sw decode | 格式支持广 | 依赖重，交叉编译和部署成本较高 |
 
-第一阶段建议先评估 `libjpeg-turbo`，如果板端依赖缺失，再评估 MPP JPEG decode 或 FFmpeg。
+当前评估结论：
+
+1. **板端 Debian 运行环境可用 libjpeg-turbo 兼容库**。RK3576 板端存在 `/usr/include/jpeglib.h`、`/usr/lib/aarch64-linux-gnu/libjpeg.so` 和 `libjpeg.pc`，包形态接近 `libjpeg62-turbo-dev`。板端没有发现 `turbojpeg.h` 或 `libturbojpeg.so`。
+2. **现有交叉工具链 sysroot 不包含 libjpeg 头文件和库**。`cmake/toolchains/rk3576.cmake` 使用的 GCC sysroot 中未发现 `jpeglib.h`、`turbojpeg.h`、`libjpeg.so` 或 `libturbojpeg.so`，因此不能直接在当前交叉编译链路中 `find_package(JPEG)`。
+3. **SDK 中有 Rockit 侧 JPEG/TurboJPEG 运行库但缺头文件**。`external/rockit/lib/lib64/` 下存在 aarch64 `libjpeg.so` 和 `libturbojpeg.so`，符号中包含 `jpeg_*` 与 `tj*` API；但 SDK 当前未找到对应 public include，因此不能无风险直接接入。
+4. **MPP JPEG decode 有明确 SDK 参考路径**。SDK 中 `external/mpp/test/mpi_dec_test.c` 支持 `MPP_VIDEO_CodingMJPEG`，`external/gstreamer-rockchip/gst/rockchipmpp/gstmppjpegdec.c` 也使用 `MPP_VIDEO_CodingMJPEG` 并支持输出 NV12/RGBA 等格式。
+5. **FFmpeg 可作为后备但不适合作为第一选择**。板端存在 `libavcodec.so`、`libavformat.so`、`libswscale.so` 和开发头文件，但 SDK 交叉 sysroot未直接带 FFmpeg 头文件/库；引入 FFmpeg 会显著增加依赖和部署复杂度。
+
+第一阶段建议调整为：
+
+1. 保留当前 `JpegDecodeStage` stub 和 `jpeg_decoder_not_available` 错误返回。
+2. **MPP JPEG decode probe 已验证通过**。`mpp_jpeg_decode_probe` 已在 RK3576 上使用 `/home/luckfox/camera_v2_frames/frame_0.jpg` 验证 `MPP_VIDEO_CodingMJPEG` 可输出 NV12：输入 1920x1080 JPEG，输出 NV12，`hor_stride=1920`、`ver_stride=1088`、`errinfo=0`、`discard=0`。
+3. 下一步应把 probe 中的 MPP JPEG decode 流程封装进 `JpegDecodeStage`，输出统一 `DecodedImageFrame` 或后续 `EncoderInputFrame`。
+4. 如果 MPP JPEG decode 在 live 链路中遇到稳定性或延迟问题，再补 `libjpeg` sysroot 依赖并实现 CPU fallback。
+5. 暂不引入 FFmpeg decode 到主链路；FFmpeg 后续更适合承担 MP4/MKV mux 或离线验证工具。
 
 ### 12.3 色彩转换
 
@@ -645,7 +659,7 @@ stateDiagram-v2
 |------|------|------|
 | CameraSubsystem core/ipc | 订阅原始流、复用 IPC 协议 | 必需 |
 | Rockchip MPP | H.264 硬编码 | RK3576 构建必需 |
-| JPEG 解码库 | USB JPEG/MJPEG 解码 | 优先评估 libjpeg-turbo；缺失时先用 stub 阻塞编码并返回错误 |
+| JPEG 解码库 | USB JPEG/MJPEG 解码 | 当前优先评估 MPP JPEG decode；libjpeg 作为 CPU fallback 需要先补交叉 sysroot 依赖 |
 | RGA | 后续颜色转换/缩放 | 第一阶段可选 |
 
 为了尽快开工，建议第一版拆成两个构建层次：
@@ -695,7 +709,7 @@ stateDiagram-v2
 | 4 | 实现 `CodecControlServer` JSON line 控制面 | ✅ 可用 `nc -U` 发送 start/status/stop |
 | 5 | 实现 `RecordingSessionManager` 状态机 | ✅ 已录制重复 start 返回 `already_recording`，stop 后进入 idle |
 | 6 | 接入 `CameraStreamSubscriber` copy 数据面 | 🚧 已接入 v1 copy 数据面订阅模块；待板端 live publisher 联调验证 input frames |
-| 7 | 接入 JPEG decode stub / 真实解码库探测 | 缺依赖返回 `jpeg_decoder_not_available`，有依赖输出解码帧 |
+| 7 | 接入 JPEG decode stub / 真实解码库探测 | 🚧 stub 已落地；MPP JPEG decode probe 已在板端验证可输出 NV12，待封装进 `JpegDecodeStage` |
 | 8 | 接入 `H264MppEncoder` 最小编码 | 固定 NV12 输入可输出可播放 `.h264` |
 | 9 | 串联 USB live JPEG/MJPEG -> H.264 文件 | 板端点击或控制命令后生成 `.h264` 文件 |
 | 10 | 接入 `web_preview_gateway` 录制控制转发 | 前端按钮能启动/停止后台录制并显示状态 |
@@ -718,12 +732,14 @@ stateDiagram-v2
 | `CodecControlServer` | 已完成最小版 | 支持 Unix Domain Socket JSON line start/status/stop；本机 `nc -U` 已验证 |
 | `RecordingSessionManager` | 已完成最小版 | 支持 idle / starting / recording / stopping / error 状态裁决，重复 start、重复 stop 和 writer 错误映射已验证；start recording 已接入 `CameraStreamSubscriber` |
 | `CameraStreamSubscriber` | 已完成当前切片 | 已实现 v1 copy 数据面连接、控制面 Subscribe / Unsubscribe、帧头/帧 payload 读取和 `input_frames` / `input_bytes` 统计；RK3576 `/dev/video45` smoke 已验证 start/status/stop |
+| `JpegDecodeStage` | 已完成 stub | 已定义解码接口、输出帧结构和错误映射；MPP JPEG decode probe 已验证，待把 probe 流程封装进 stage |
 | 本机 writer/session 验证 | 已完成 | `recording_file_writer_test` 41/41 通过；`recording_session_manager_test` 7/7 通过 |
 
 当前尚未实现：
 
-1. JPEG/MJPEG 解码、NV12 转换和 MPP H.264 编码。
-2. Web Preview Gateway 录制控制转发。
+1. 将已验证的 MPP JPEG decode probe 封装进 `JpegDecodeStage`。
+2. MPP H.264 编码。
+3. Web Preview Gateway 录制控制转发。
 
 RK3576 v1 copy 数据面 smoke 结果：
 
@@ -792,8 +808,11 @@ RK3576 v1 copy 数据面 smoke 结果：
 ### 19.1 USB 第一阶段
 
 - TODO：确认当前 USB 摄像头实际输出是 JPEG、MJPEG 还是 YUYV。
-- TODO：确认第一阶段 JPEG 解码库选择，优先评估 `libjpeg-turbo`。
-- TODO：确认 JPEG 解码输出格式，是直接 NV12/YUV，还是 RGB/RGBA 后再转换。
+- 已确认：板端存在 `jpeglib.h` 和 `libjpeg.so`，但当前交叉工具链 sysroot 不包含 libjpeg 头文件/库；板端未发现 `turbojpeg.h` / `libturbojpeg.so`。
+- 已确认：SDK 的 MPP/GStreamer 路径存在 `MPP_VIDEO_CodingMJPEG` JPEG decode 参考。
+- 已验证：`mpp_jpeg_decode_probe` 可将板端 `/home/luckfox/camera_v2_frames/frame_0.jpg` 解码为 NV12，输出 1920x1080，`hor_stride=1920`，`ver_stride=1088`，`frame_errinfo=0`，`frame_discard=0`。
+- 已决策：优先把 MPP JPEG decode probe 封装进 `JpegDecodeStage`；如果 live 链路稳定性不足，再补 libjpeg sysroot 依赖并实现 CPU fallback。
+- TODO：确认 MPP JPEG decode 在连续 live MJPEG 帧下的延迟、内存复用和错误恢复策略。
 - TODO：确认 USB H.264 录制目标分辨率、帧率、码率和 GOP 默认值。
 
 ### 19.2 MPP 编码

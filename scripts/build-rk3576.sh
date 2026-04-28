@@ -37,4 +37,8 @@ if [[ -f "${OUTPUT_DIR}/mpp_dmabuf_import_probe" ]]; then
     BINARIES+=("${OUTPUT_DIR}/mpp_dmabuf_import_probe")
 fi
 
+if [[ -f "${OUTPUT_DIR}/mpp_jpeg_decode_probe" ]]; then
+    BINARIES+=("${OUTPUT_DIR}/mpp_jpeg_decode_probe")
+fi
+
 file "${BINARIES[@]}"

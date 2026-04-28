@@ -115,6 +115,24 @@ if (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"
         PRIVATE
             "${_CAMERA_SUBSYSTEM_MPP_LIBRARY}"
     )
+
+    add_executable(mpp_jpeg_decode_probe
+        mpp_jpeg_decode_probe.cpp
+    )
+
+    set_target_properties(mpp_jpeg_decode_probe PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
+    )
+
+    target_include_directories(mpp_jpeg_decode_probe
+        PRIVATE
+            "${_CAMERA_SUBSYSTEM_MPP_INCLUDE_DIR}"
+    )
+
+    target_link_libraries(mpp_jpeg_decode_probe
+        PRIVATE
+            "${_CAMERA_SUBSYSTEM_MPP_LIBRARY}"
+    )
 else ()
     message(STATUS "MPP DMA-BUF import probe disabled: RK3576 MPP SDK headers/libs not found")
 endif ()

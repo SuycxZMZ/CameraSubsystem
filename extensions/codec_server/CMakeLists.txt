@@ -24,6 +24,7 @@ add_executable(camera_codec_server
     src/codec_server_config.cpp
     src/codec_control_protocol.cpp
     src/codec_control_server.cpp
+    src/jpeg_decode_stage.cpp
     src/recording_file_writer.cpp
     src/recording_session_manager.cpp
     src/main.cpp
@@ -110,3 +111,26 @@ target_link_libraries(recording_session_manager_test PRIVATE Threads::Threads)
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(recording_session_manager_test PRIVATE pthread)
 endif ()
+
+# JpegDecodeStage verification tool
+add_executable(jpeg_decode_stage_test
+    src/jpeg_decode_stage.cpp
+    src/jpeg_decode_stage_test.cpp
+)
+
+set_target_properties(jpeg_decode_stage_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
+)
+
+target_include_directories(jpeg_decode_stage_test
+    PRIVATE
+        include
+        "${CAMERA_SUBSYSTEM_ROOT}/include"
+)
+
+target_compile_options(jpeg_decode_stage_test
+    PRIVATE
+        -Wall
+        -Wextra
+        -Werror
+)
