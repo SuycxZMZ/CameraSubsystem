@@ -32,7 +32,9 @@ mkdir -p "$OUTPUT_DIR"
 chmod +x "$PUBLISHER_BIN" "$CODEC_BIN"
 
 cat > "$CLIENT_PY" <<'PY'
+import json
 import socket
+import sys
 import time
 
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -46,14 +48,42 @@ def send(line):
         if not chunk:
             break
         data += chunk
-    print(data.decode().strip(), flush=True)
+    text = data.decode().strip()
+    print(text, flush=True)
+    return json.loads(text)
 
-send('{"type":"start_recording","request_id":"t1","stream_id":"usb_camera_0","output_dir":"/home/luckfox/codec_records"}')
+start = send('{"type":"start_recording","request_id":"t1","stream_id":"usb_camera_0","output_dir":"/home/luckfox/codec_records"}')
 time.sleep(3)
-send('{"type":"status","request_id":"t2","stream_id":"usb_camera_0"}')
+status = send('{"type":"status","request_id":"t2","stream_id":"usb_camera_0"}')
 time.sleep(1)
-send('{"type":"stop_recording","request_id":"t3","stream_id":"usb_camera_0"}')
+stop = send('{"type":"stop_recording","request_id":"t3","stream_id":"usb_camera_0"}')
 sock.close()
+
+failures = []
+if not start.get('recording') or start.get('state') != 'recording':
+    failures.append('start_recording did not enter recording state')
+if status.get('input_frames', 0) <= 0:
+    failures.append('status input_frames did not increase')
+if status.get('decoded_frames', 0) <= 0:
+    failures.append('status decoded_frames did not increase')
+if status.get('decode_failures', 0) != 0:
+    failures.append('status decode_failures is non-zero')
+if status.get('encoded_frames', 0) <= 0:
+    failures.append('status encoded_frames did not increase')
+if stop.get('decoded_frames', 0) <= 0:
+    failures.append('stop decoded_frames did not persist')
+if stop.get('decode_failures', 0) != 0:
+    failures.append('stop decode_failures is non-zero')
+if stop.get('encoded_frames', 0) <= 0:
+    failures.append('stop encoded_frames did not persist')
+
+if failures:
+    print('CODEC_SMOKE_RESULT=FAIL', flush=True)
+    for item in failures:
+        print('  - ' + item, flush=True)
+    sys.exit(1)
+
+print('CODEC_CONTROL_RESULT=PASS', flush=True)
 PY
 
 "$PUBLISHER_BIN" "$DEVICE" "$CONTROL_SOCKET" "$DATA_SOCKET" --io-method mmap \
@@ -85,3 +115,9 @@ echo "PUBLISHER_LOG"
 tail -80 "$PUBLISHER_LOG" || true
 echo "RECORD_FILES"
 ls -lh "$OUTPUT_DIR" | head -20 || true
+if ! find "$OUTPUT_DIR" -name '*.h264' -type f -size +0c | grep -q .; then
+    echo "CODEC_SMOKE_RESULT=FAIL"
+    echo "  - no non-empty h264 output file"
+    exit 1
+fi
+echo "CODEC_SMOKE_RESULT=PASS"

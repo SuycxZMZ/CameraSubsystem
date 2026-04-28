@@ -20,6 +20,8 @@ struct DecodedImageFrame
 {
     uint32_t width = 0;
     uint32_t height = 0;
+    uint32_t hor_stride = 0;
+    uint32_t ver_stride = 0;
     std::string pixel_format = "unknown";
     std::vector<uint8_t> payload;
 };

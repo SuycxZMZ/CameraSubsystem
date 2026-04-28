@@ -3,8 +3,12 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <thread>
+#include <vector>
+
+#include "camera_subsystem/ipc/camera_data_ipc.h"
 
 namespace camera_subsystem::extensions::codec_server {
 
@@ -16,6 +20,8 @@ struct CameraStreamSubscriberConfig
     std::string client_id = "camera_codec_server";
     uint32_t camera_id = 0;
     uint32_t max_frame_size = 64U * 1024U * 1024U;
+    std::function<void(const camera_subsystem::ipc::CameraDataFrameHeader&,
+                       const std::vector<uint8_t>&)> frame_callback;
 };
 
 struct CameraStreamSubscriberStats

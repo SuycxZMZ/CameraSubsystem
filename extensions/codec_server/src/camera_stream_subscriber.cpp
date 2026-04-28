@@ -223,6 +223,10 @@ void CameraStreamSubscriber::ReadLoop()
 
         input_frames_.fetch_add(1);
         input_bytes_.fetch_add(header.frame_size);
+        if (config_.frame_callback)
+        {
+            config_.frame_callback(header, payload);
+        }
     }
     is_running_.store(false);
 }

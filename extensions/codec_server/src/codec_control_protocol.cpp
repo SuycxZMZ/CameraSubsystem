@@ -216,8 +216,10 @@ std::string SerializeCodecControlStatus(const CodecControlStatus& status)
         << ",\"container\":\"" << JsonEscape(status.container) << "\""
         << ",\"file\":\"" << JsonEscape(status.file) << "\""
         << ",\"encoded_frames\":" << status.encoded_frames
+        << ",\"decoded_frames\":" << status.decoded_frames
         << ",\"dropped_frames\":" << status.dropped_frames
         << ",\"input_frames\":" << status.input_frames
+        << ",\"decode_failures\":" << status.decode_failures
         << ",\"write_failures\":" << status.write_failures;
     if (!status.error.empty())
     {

@@ -31,7 +31,8 @@ CodecServerApp::CodecServerApp(CodecServerConfig config)
               config_.device_path,
               "camera_codec_server",
               0,
-              64U * 1024U * 1024U},
+              64U * 1024U * 1024U,
+              nullptr},
           true})
 {
 }

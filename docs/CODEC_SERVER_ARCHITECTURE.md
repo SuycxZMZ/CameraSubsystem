@@ -1,7 +1,7 @@
 # Camera Codec Server 架构设计
 
-**最后更新:** 2026-04-27<br>
-**阶段定位:** 第一版代码已开工，当前完成最小进程骨架、文件写入、JSON line 控制面、录制状态机和 v1 copy 数据面订阅<br>
+**最后更新:** 2026-04-28<br>
+**阶段定位:** 第一版代码已开工，当前完成最小进程骨架、文件写入、JSON line 控制面、录制状态机、v1 copy 数据面订阅、MPP JPEG decode 和 MPP H.264 encode 主链路接入<br>
 **第一阶段目标:** USB 摄像头也支持录制 H.264，先打通端到端链路；MIPI/RKISP 按可扩展路径预留
 
 > **文档硬规范**
@@ -76,9 +76,9 @@ CameraSubsystem 当前已经具备核心发布端、订阅端、Web Preview 和 
 
 1. Web 录制按钮没有接入可用后台服务。
 2. `web_preview_gateway` 没有录制控制路由。
-3. 还没有 `camera_codec_server` 进程。
-4. 还没有 H.264 MPP encoder session 封装。
-5. 还没有 USB JPEG/MJPEG 到 NV12 的解码/转换链路。
+3. 编码参数还没有从前端请求或启动参数完整传入 encoder。
+4. 还没有长时间稳定性验证、播放兼容性验证和异常恢复策略。
+5. DataPlaneV2 / DMA-BUF / MIPI/RKISP NV12 还没有接入编码主链路。
 
 ## 3. 总体架构
 
@@ -442,9 +442,9 @@ USB 第一阶段需要 JPEG/MJPEG 解码。候选：
 
 第一阶段建议调整为：
 
-1. 保留当前 `JpegDecodeStage` stub 和 `jpeg_decoder_not_available` 错误返回。
+1. 保留主机无 MPP 构建下的 `JpegDecodeStage` stub 和 `jpeg_decoder_not_available` 错误返回。
 2. **MPP JPEG decode probe 已验证通过**。`mpp_jpeg_decode_probe` 已在 RK3576 上使用 `/home/luckfox/camera_v2_frames/frame_0.jpg` 验证 `MPP_VIDEO_CodingMJPEG` 可输出 NV12：输入 1920x1080 JPEG，输出 NV12，`hor_stride=1920`、`ver_stride=1088`、`errinfo=0`、`discard=0`。
-3. 下一步应把 probe 中的 MPP JPEG decode 流程封装进 `JpegDecodeStage`，输出统一 `DecodedImageFrame` 或后续 `EncoderInputFrame`。
+3. **live 录制 pipeline 已接入 MPP JPEG decode**。RK3576 `/dev/video45` smoke 已验证 `input_frames=95`、`decoded_frames=95`、`decode_failures=0`。
 4. 如果 MPP JPEG decode 在 live 链路中遇到稳定性或延迟问题，再补 `libjpeg` sysroot 依赖并实现 CPU fallback。
 5. 暂不引入 FFmpeg decode 到主链路；FFmpeg 后续更适合承担 MP4/MKV mux 或离线验证工具。
 
@@ -708,17 +708,17 @@ stateDiagram-v2
 | 3 | 实现 `RecordingFileWriter` | ✅ 本机验证工具能创建 `.h264` 文件并写入 bytes |
 | 4 | 实现 `CodecControlServer` JSON line 控制面 | ✅ 可用 `nc -U` 发送 start/status/stop |
 | 5 | 实现 `RecordingSessionManager` 状态机 | ✅ 已录制重复 start 返回 `already_recording`，stop 后进入 idle |
-| 6 | 接入 `CameraStreamSubscriber` copy 数据面 | 🚧 已接入 v1 copy 数据面订阅模块；待板端 live publisher 联调验证 input frames |
-| 7 | 接入 JPEG decode stub / 真实解码库探测 | 🚧 stub 已落地；MPP JPEG decode probe 已在板端验证可输出 NV12，待封装进 `JpegDecodeStage` |
-| 8 | 接入 `H264MppEncoder` 最小编码 | 固定 NV12 输入可输出可播放 `.h264` |
-| 9 | 串联 USB live JPEG/MJPEG -> H.264 文件 | 板端点击或控制命令后生成 `.h264` 文件 |
+| 6 | 接入 `CameraStreamSubscriber` copy 数据面 | ✅ RK3576 `/dev/video45` live publisher 联调已验证 `input_frames` 增长 |
+| 7 | 接入 JPEG decode stub / 真实解码库探测 | ✅ MPP JPEG decode 已封装进 `JpegDecodeStage` 并接入 live 录制 pipeline，主机无 MPP 时保留 stub fallback |
+| 8 | 接入 `H264MppEncoder` 最小编码 | ✅ RK3576 合成 NV12 输入可输出 H.264 packet |
+| 9 | 串联 USB live JPEG/MJPEG -> H.264 文件 | ✅ RK3576 `/dev/video45` live smoke 已生成非空 `.h264` 文件 |
 | 10 | 接入 `web_preview_gateway` 录制控制转发 | 前端按钮能启动/停止后台录制并显示状态 |
 
 第一阶段不要求 DataPlaneV2 立刻进入编码路径；在 USB JPEG/MJPEG 录制稳定后，再接 DataPlaneV2 和 MIPI/RKISP NV12。
 
 ### 16.1 当前实现进度
 
-截至 2026-04-28，当前已完成第一阶段前五步的最小闭环：
+截至 2026-04-28，当前已完成第一阶段前九步的最小闭环：
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
@@ -732,14 +732,15 @@ stateDiagram-v2
 | `CodecControlServer` | 已完成最小版 | 支持 Unix Domain Socket JSON line start/status/stop；本机 `nc -U` 已验证 |
 | `RecordingSessionManager` | 已完成最小版 | 支持 idle / starting / recording / stopping / error 状态裁决，重复 start、重复 stop 和 writer 错误映射已验证；start recording 已接入 `CameraStreamSubscriber` |
 | `CameraStreamSubscriber` | 已完成当前切片 | 已实现 v1 copy 数据面连接、控制面 Subscribe / Unsubscribe、帧头/帧 payload 读取和 `input_frames` / `input_bytes` 统计；RK3576 `/dev/video45` smoke 已验证 start/status/stop |
-| `JpegDecodeStage` | 已完成 stub | 已定义解码接口、输出帧结构和错误映射；MPP JPEG decode probe 已验证，待把 probe 流程封装进 stage |
+| `JpegDecodeStage` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingMJPEG` 解码，输出 NV12 `DecodedImageFrame`；主机无 MPP 时返回 `jpeg_decoder_not_available` |
+| `H264MppEncoder` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingAVC` 编码；合成 NV12 测试 5/5 通过；live 链路已写出裸 `.h264` 文件 |
 | 本机 writer/session 验证 | 已完成 | `recording_file_writer_test` 41/41 通过；`recording_session_manager_test` 7/7 通过 |
 
 当前尚未实现：
 
-1. 将已验证的 MPP JPEG decode probe 封装进 `JpegDecodeStage`。
-2. MPP H.264 编码。
-3. Web Preview Gateway 录制控制转发。
+1. Web Preview Gateway 录制控制转发。
+2. 更长时间编码稳定性验证。
+3. 编码参数从请求或启动参数传入 `H264MppEncoder`。
 
 RK3576 v1 copy 数据面 smoke 结果：
 
@@ -747,17 +748,17 @@ RK3576 v1 copy 数据面 smoke 结果：
 |------|------|
 | publisher | `/dev/video45`，MMAP copy 数据面，30fps 发送正常 |
 | codec start | 返回 `recording=true`，创建 `/home/luckfox/codec_records/*.h264` |
-| codec status | 3 秒后 `input_frames=84`，`write_failures=0` |
-| codec stop | 返回 `recording=false`、`state=idle`，最终 `input_frames=114` |
-| 输出文件 | 当前仍为空 `.h264`，符合“只统计输入帧、尚未编码写 packet”的阶段边界 |
+| codec status | 3 秒后 `input_frames=69`、`decoded_frames=69`、`encoded_frames=69`、`decode_failures=0`、`write_failures=0` |
+| codec stop | 返回 `recording=false`、`state=idle`，最终 `input_frames=94`、`decoded_frames=94`、`encoded_frames=94`、`decode_failures=0` |
+| 输出文件 | 已生成非空 `.h264` 文件，约 1.5MB |
 
-下一步建议进入 JPEG decode stub / 真实解码库探测：先把 USB MJPEG payload 转成明确的 `DecodedFrame` 语义；如果板端暂缺解码依赖，则 start recording 返回 `jpeg_decoder_not_available` 或 pipeline status 中明确阻塞原因。
+下一步建议进入 Web Preview Gateway 录制控制转发和长稳验证：前端点击录制后转发到 `camera_codec_server`，同时补充更长时间 smoke 观察编码延迟、丢帧和文件可播放性。
 
 当前实现边界：
 
-1. `CodecServerApp::Run()` 已变成长驻控制服务，start recording 会打开输出文件并尝试订阅 Camera v1 copy 数据面；当前只统计输入帧，尚未写入真实 H.264 packet。
-2. 当前 CMake 目标只依赖 C++ 标准库和 pthread，尚未链接 CameraSubsystem IPC、MPP、JPEG 或 RGA。
-3. 当前 RK3576 运行验证只证明二进制格式、动态链接、参数解析和后续可交叉构建；不代表编码链路已经可用。
+1. `CodecServerApp::Run()` 已变成长驻控制服务，start recording 会打开输出文件、订阅 Camera v1 copy 数据面、执行 MPP JPEG decode 和 MPP H.264 encode，并写入裸 `.h264` packet。
+2. RK3576 交叉构建中 `camera_codec_server` 会链接 MPP；主机构建仍只依赖 C++ 标准库和 pthread，并通过 stub 保持可测试。
+3. 当前 RK3576 运行验证证明 USB MJPEG live payload 可以进入 MPP JPEG decode 和 MPP H.264 encode；仍需更长时间稳定性与播放兼容性验证。
 4. `scripts/build-rk3576.sh` 已显式打开 `CAMERA_SUBSYSTEM_BUILD_CODEC_SERVER=ON`，用于保证板端产物持续构建；根 CMake 默认仍保持关闭，避免影响普通开发构建。
 
 ## 17. MVP 范围
@@ -811,15 +812,17 @@ RK3576 v1 copy 数据面 smoke 结果：
 - 已确认：板端存在 `jpeglib.h` 和 `libjpeg.so`，但当前交叉工具链 sysroot 不包含 libjpeg 头文件/库；板端未发现 `turbojpeg.h` / `libturbojpeg.so`。
 - 已确认：SDK 的 MPP/GStreamer 路径存在 `MPP_VIDEO_CodingMJPEG` JPEG decode 参考。
 - 已验证：`mpp_jpeg_decode_probe` 可将板端 `/home/luckfox/camera_v2_frames/frame_0.jpg` 解码为 NV12，输出 1920x1080，`hor_stride=1920`，`ver_stride=1088`，`frame_errinfo=0`，`frame_discard=0`。
-- 已决策：优先把 MPP JPEG decode probe 封装进 `JpegDecodeStage`；如果 live 链路稳定性不足，再补 libjpeg sysroot 依赖并实现 CPU fallback。
-- TODO：确认 MPP JPEG decode 在连续 live MJPEG 帧下的延迟、内存复用和错误恢复策略。
+- 已决策：MPP JPEG decode 已封装进 `JpegDecodeStage`；如果 live 链路稳定性不足，再补 libjpeg sysroot 依赖并实现 CPU fallback。
+- 已验证：MPP JPEG decode 已接入 v1 copy live 录制 pipeline，RK3576 smoke 结果为 `input_frames=95`、`decoded_frames=95`、`decode_failures=0`。
+- TODO：确认 MPP JPEG decode 在更长时间连续 live MJPEG 帧下的延迟、内存复用和错误恢复策略。
 - TODO：确认 USB H.264 录制目标分辨率、帧率、码率和 GOP 默认值。
 
 ### 19.2 MPP 编码
 
-- TODO：基于 `external/mpp/test/mpi_enc_test.c` 梳理最小 H.264 encoder 初始化参数。
-- TODO：确认 MPP encoder 输入支持的 `MppFrameFormat` 与 stride 对齐要求。
-- TODO：确认 MPP packet 是否包含 SPS/PPS，以及裸 H.264 文件开头是否需要显式写 header。
+- 已实现：`H264MppEncoder` 已基于 `external/mpp/test/mpi_enc_test.c` 的最小参数路径接入 `MPP_VIDEO_CodingAVC`。
+- 已验证：RK3576 合成 NV12 帧编码测试通过，live USB MJPEG -> NV12 -> H.264 smoke 通过。
+- 已实现：第一帧编码前通过 `MPP_ENC_GET_HDR_SYNC` 显式写入 SPS/PPS header。
+- TODO：确认 MPP encoder 输入支持的更多 `MppFrameFormat` 与 stride 对齐要求。
 - TODO：确认 MPP encoder drain/EOS 流程和停止录制时的 flush 语义。
 
 ### 19.3 camera_codec_server 控制面

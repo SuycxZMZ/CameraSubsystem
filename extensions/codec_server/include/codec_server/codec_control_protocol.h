@@ -44,8 +44,10 @@ struct CodecControlStatus
     std::string container = "raw_h264";
     std::string file;
     uint64_t encoded_frames = 0;
+    uint64_t decoded_frames = 0;
     uint64_t dropped_frames = 0;
     uint64_t input_frames = 0;
+    uint64_t decode_failures = 0;
     uint64_t write_failures = 0;
     std::string error;
 };

@@ -34,11 +34,22 @@ int main()
     JpegDecodeStage decoder;
     DecodedImageFrame frame;
     const uint8_t data[] = {0xff, 0xd8, 0xff, 0xd9};
+    const bool available = decoder.IsAvailable();
 
-    Report("StubUnavailable: decoder reports unavailable", !decoder.IsAvailable());
-    Report("StubUnavailable: valid-looking input returns decoder_not_available",
-           decoder.Decode(data, sizeof(data), &frame) ==
-               JpegDecodeResult::kDecoderNotAvailable);
+    Report("Availability: decoder availability is deterministic",
+           available == decoder.IsAvailable());
+    const JpegDecodeResult fake_result = decoder.Decode(data, sizeof(data), &frame);
+    if (available)
+    {
+        Report("AvailableDecoder: fake JPEG is rejected before decode",
+               fake_result == JpegDecodeResult::kInvalidInput ||
+                   fake_result == JpegDecodeResult::kDecodeFailed);
+    }
+    else
+    {
+        Report("StubUnavailable: valid-looking input returns decoder_not_available",
+               fake_result == JpegDecodeResult::kDecoderNotAvailable);
+    }
     Report("InvalidInput: null data returns invalid input",
            decoder.Decode(nullptr, sizeof(data), &frame) ==
                JpegDecodeResult::kInvalidInput);

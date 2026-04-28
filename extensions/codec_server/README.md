@@ -11,12 +11,13 @@
 - `CodecControlServer` Unix Domain Socket JSON line 控制面。
 - `RecordingSessionManager` 最小 start/status/stop 状态机。
 - `CameraStreamSubscriber` v1 copy 数据面订阅模块，支持读取 CameraSubsystem 帧头和 payload 并统计 `input_frames`。
-- `JpegDecodeStage` stub，已定义解码接口和 `jpeg_decoder_not_available` 错误映射。
+- `JpegDecodeStage` 已在 RK3576 交叉构建中接入 MPP MJPEG/JPEG 解码，输出 NV12 `DecodedImageFrame`；主机无 MPP 时仍保留 `jpeg_decoder_not_available` fallback。
+- `H264MppEncoder` 已在 RK3576 交叉构建中接入 MPP H.264 编码，支持将 NV12 `DecodedImageFrame` 编码为裸 H.264 packet。
 - `mpp_jpeg_decode_probe` 已在 RK3576 上验证单帧 JPEG 可通过 MPP 解码为 NV12。
 
-当前 start recording 会打开裸 `.h264` 输出文件并尝试订阅 CameraSubsystem v1 copy 数据面；当前只统计输入帧，尚未把 MPP JPEG decode 和 MPP H.264 encode 接入 live 录制主链路。
+当前 start recording 会打开裸 `.h264` 输出文件、订阅 CameraSubsystem v1 copy 数据面，并将 USB MJPEG/JPEG payload 送入 MPP JPEG decode，再将 NV12 帧送入 MPP H.264 encoder 写入文件。
 
-RK3576 `/dev/video45` smoke 已验证：`camera_codec_server` 通过控制面 start/status/stop 后，`input_frames` 能从 0 增长到 114；输出 `.h264` 文件当前为空符合阶段预期。
+RK3576 `/dev/video45` smoke 已验证：`camera_codec_server` 通过控制面 start/status/stop 后，`input_frames=94`、`decoded_frames=94`、`encoded_frames=94`、`decode_failures=0`、`write_failures=0`；输出 `.h264` 文件约 1.5MB。
 
 第一阶段目标：
 
@@ -29,7 +30,7 @@ RK3576 `/dev/video45` smoke 已验证：`camera_codec_server` 通过控制面 st
 ```bash
 cmake -S . -B build -DCAMERA_SUBSYSTEM_BUILD_CODEC_SERVER=ON
 cmake --build build --target camera_codec_server
-cmake --build build --target recording_file_writer_test recording_session_manager_test jpeg_decode_stage_test
+cmake --build build --target recording_file_writer_test recording_session_manager_test jpeg_decode_stage_test h264_mpp_encoder_test
 ```
 
 也可以在本目录作为独立 CMake 子工程构建。
