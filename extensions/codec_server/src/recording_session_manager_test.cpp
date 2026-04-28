@@ -50,7 +50,9 @@ static CodecControlRequest MakeRequest(CodecControlCommand command,
 static void TestStartStopStatus()
 {
     const std::string dir = MakeTempDir() + "/recordings";
-    RecordingSessionManager manager(RecordingSessionConfig{dir});
+    RecordingSessionConfig config;
+    config.default_output_dir = dir;
+    RecordingSessionManager manager(config);
 
     auto start = MakeRequest(CodecControlCommand::kStartRecording, "cam0", "");
     auto status = manager.StartRecording(start);
@@ -84,7 +86,9 @@ static void TestStartStopStatus()
 static void TestInvalidStreamId()
 {
     const std::string dir = MakeTempDir() + "/invalid";
-    RecordingSessionManager manager(RecordingSessionConfig{dir});
+    RecordingSessionConfig config;
+    config.default_output_dir = dir;
+    RecordingSessionManager manager(config);
     auto request = MakeRequest(CodecControlCommand::kStartRecording, "a/b", "");
     auto status = manager.StartRecording(request);
     Report("InvalidStreamId: returns invalid_stream_id",

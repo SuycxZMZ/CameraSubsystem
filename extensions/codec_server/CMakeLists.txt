@@ -19,6 +19,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif ()
 
 add_executable(camera_codec_server
+    src/camera_stream_subscriber.cpp
     src/codec_server_app.cpp
     src/codec_server_config.cpp
     src/codec_control_protocol.cpp
@@ -81,6 +82,7 @@ endif ()
 
 # RecordingSessionManager verification tool
 add_executable(recording_session_manager_test
+    src/camera_stream_subscriber.cpp
     src/codec_control_protocol.cpp
     src/recording_file_writer.cpp
     src/recording_session_manager.cpp

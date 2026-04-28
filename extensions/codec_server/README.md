@@ -10,8 +10,11 @@
 - `RecordingFileWriter` 文件命名、目录创建、写入、flush、close 和统计。
 - `CodecControlServer` Unix Domain Socket JSON line 控制面。
 - `RecordingSessionManager` 最小 start/status/stop 状态机。
+- `CameraStreamSubscriber` v1 copy 数据面订阅模块，支持读取 CameraSubsystem 帧头和 payload 并统计 `input_frames`。
 
-当前 start recording 只会打开裸 `.h264` 输出文件并维护状态，尚未接入 CameraSubsystem 订阅端、JPEG 解码和 MPP H.264 编码。
+当前 start recording 会打开裸 `.h264` 输出文件并尝试订阅 CameraSubsystem v1 copy 数据面；当前只统计输入帧，尚未接入 JPEG 解码和 MPP H.264 编码。
+
+RK3576 `/dev/video45` smoke 已验证：`camera_codec_server` 通过控制面 start/status/stop 后，`input_frames` 能从 0 增长到 114；输出 `.h264` 文件当前为空符合阶段预期。
 
 第一阶段目标：
 
@@ -41,4 +44,10 @@ printf '%s\n' \
   '{"type":"status","request_id":"t2","stream_id":"usb_camera_0"}' \
   '{"type":"stop_recording","request_id":"t3","stream_id":"usb_camera_0"}' \
   | nc -U /tmp/camera_subsystem_codec.sock
+```
+
+板端 v1 copy 数据面 smoke：
+
+```bash
+sh /home/luckfox/codec-v1-smoke-rk3576.sh
 ```

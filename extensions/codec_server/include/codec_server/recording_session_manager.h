@@ -2,6 +2,7 @@
 #define CODEC_SERVER_RECORDING_SESSION_MANAGER_H
 
 #include "codec_server/codec_control_protocol.h"
+#include "codec_server/camera_stream_subscriber.h"
 #include "codec_server/recording_file_writer.h"
 
 #include <mutex>
@@ -12,6 +13,8 @@ namespace camera_subsystem::extensions::codec_server {
 struct RecordingSessionConfig
 {
     std::string default_output_dir = "/home/luckfox/recordings";
+    CameraStreamSubscriberConfig subscriber;
+    bool enable_camera_subscriber = false;
 };
 
 class RecordingSessionManager
@@ -31,6 +34,7 @@ private:
     RecordingSessionConfig config_;
     mutable std::mutex mutex_;
     RecordingFileWriter writer_;
+    CameraStreamSubscriber subscriber_;
     std::string state_ = "idle";
     std::string stream_id_;
     std::string file_path_;

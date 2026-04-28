@@ -38,6 +38,19 @@ CodecControlStatus RecordingSessionManager::StartRecording(
     }
 
     file_path_ = writer_.GetFilePath();
+    if (config_.enable_camera_subscriber)
+    {
+        CameraStreamSubscriberConfig subscriber_config = config_.subscriber;
+        subscriber_config.client_id = "camera_codec_server_" + request.stream_id;
+        if (!subscriber_.Start(subscriber_config))
+        {
+            (void)writer_.Close();
+            state_ = "error";
+            last_error_ = "stream_not_found";
+            return BuildStatusLocked(request, last_error_);
+        }
+    }
+
     state_ = "recording";
     return BuildStatusLocked(request, std::string());
 }
@@ -58,6 +71,7 @@ CodecControlStatus RecordingSessionManager::StopRecording(
     }
 
     state_ = "stopping";
+    subscriber_.Stop();
     const WriterResult close_result = writer_.Close();
     if (close_result != WriterResult::kOk)
     {
@@ -82,6 +96,7 @@ CodecControlStatus RecordingSessionManager::BuildStatusLocked(
     const std::string& error) const
 {
     const WriterStats stats = writer_.GetStats();
+    const CameraStreamSubscriberStats subscriber_stats = subscriber_.GetStats();
     CodecControlStatus status;
     status.request_id = request.request_id;
     status.stream_id = stream_id_.empty() ? request.stream_id : stream_id_;
@@ -92,8 +107,10 @@ CodecControlStatus RecordingSessionManager::BuildStatusLocked(
     status.file = file_path_;
     status.encoded_frames = encoded_frames_;
     status.dropped_frames = dropped_frames_;
-    status.input_frames = input_frames_;
-    status.write_failures = stats.write_failures;
+    status.input_frames = config_.enable_camera_subscriber
+                              ? subscriber_stats.input_frames
+                              : input_frames_;
+    status.write_failures = stats.write_failures + subscriber_stats.read_failures;
     status.error = error;
     return status;
 }

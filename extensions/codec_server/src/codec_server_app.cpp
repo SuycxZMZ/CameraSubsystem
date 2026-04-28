@@ -23,7 +23,16 @@ void SignalHandler(int)
 
 CodecServerApp::CodecServerApp(CodecServerConfig config)
     : config_(std::move(config)),
-      session_manager_(RecordingSessionConfig{config_.output_dir})
+      session_manager_(RecordingSessionConfig{
+          config_.output_dir,
+          CameraStreamSubscriberConfig{
+              config_.control_socket,
+              config_.data_socket,
+              config_.device_path,
+              "camera_codec_server",
+              0,
+              64U * 1024U * 1024U},
+          true})
 {
 }
 
