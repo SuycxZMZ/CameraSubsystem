@@ -1,12 +1,29 @@
 #include "codec_server/codec_server_app.h"
 
+#include "codec_server/codec_control_server.h"
+
+#include <atomic>
+#include <csignal>
+#include <chrono>
 #include <iostream>
+#include <thread>
 #include <utility>
 
 namespace camera_subsystem::extensions::codec_server {
+namespace {
+
+std::atomic<bool> g_running(true);
+
+void SignalHandler(int)
+{
+    g_running.store(false);
+}
+
+} // namespace
 
 CodecServerApp::CodecServerApp(CodecServerConfig config)
-    : config_(std::move(config))
+    : config_(std::move(config)),
+      session_manager_(RecordingSessionConfig{config_.output_dir})
 {
 }
 
@@ -29,7 +46,26 @@ int CodecServerApp::Run()
               << "  bitrate=" << config_.bitrate << "\n"
               << "  gop=" << config_.gop << "\n";
 
-    std::cout << "camera_codec_server scaffold ready; control server is not implemented yet\n";
+    std::signal(SIGINT, SignalHandler);
+    std::signal(SIGTERM, SignalHandler);
+
+    CodecControlServer control_server(&session_manager_);
+    if (!control_server.Start(config_.codec_socket))
+    {
+        std::cerr << "failed to start codec control server: "
+                  << config_.codec_socket << "\n";
+        return 1;
+    }
+
+    std::cout << "camera_codec_server control server ready: "
+              << config_.codec_socket << "\n";
+    while (g_running.load())
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    control_server.Stop();
+    std::cout << "camera_codec_server stopped\n";
     return 0;
 }
 

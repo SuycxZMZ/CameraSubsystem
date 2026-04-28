@@ -2,6 +2,7 @@
 #define CODEC_SERVER_CODEC_SERVER_APP_H
 
 #include "codec_server/codec_server_config.h"
+#include "codec_server/recording_session_manager.h"
 
 namespace camera_subsystem::extensions::codec_server {
 
@@ -14,6 +15,7 @@ public:
 
 private:
     CodecServerConfig config_;
+    RecordingSessionManager session_manager_;
 };
 
 } // namespace camera_subsystem::extensions::codec_server

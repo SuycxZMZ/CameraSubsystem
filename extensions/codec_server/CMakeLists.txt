@@ -21,6 +21,10 @@ endif ()
 add_executable(camera_codec_server
     src/codec_server_app.cpp
     src/codec_server_config.cpp
+    src/codec_control_protocol.cpp
+    src/codec_control_server.cpp
+    src/recording_file_writer.cpp
+    src/recording_session_manager.cpp
     src/main.cpp
 )
 
@@ -45,4 +49,62 @@ find_package(Threads REQUIRED)
 target_link_libraries(camera_codec_server PRIVATE Threads::Threads)
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(camera_codec_server PRIVATE pthread)
+endif ()
+
+# RecordingFileWriter verification tool
+add_executable(recording_file_writer_test
+    src/recording_file_writer.cpp
+    src/recording_file_writer_test.cpp
+)
+
+set_target_properties(recording_file_writer_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
+)
+
+target_include_directories(recording_file_writer_test
+    PRIVATE
+        include
+        "${CAMERA_SUBSYSTEM_ROOT}/include"
+)
+
+target_compile_options(recording_file_writer_test
+    PRIVATE
+        -Wall
+        -Wextra
+        -Werror
+)
+
+target_link_libraries(recording_file_writer_test PRIVATE Threads::Threads)
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(recording_file_writer_test PRIVATE pthread)
+endif ()
+
+# RecordingSessionManager verification tool
+add_executable(recording_session_manager_test
+    src/codec_control_protocol.cpp
+    src/recording_file_writer.cpp
+    src/recording_session_manager.cpp
+    src/recording_session_manager_test.cpp
+)
+
+set_target_properties(recording_session_manager_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
+)
+
+target_include_directories(recording_session_manager_test
+    PRIVATE
+        include
+        "${CAMERA_SUBSYSTEM_ROOT}/include"
+)
+
+target_compile_options(recording_session_manager_test
+    PRIVATE
+        -Wall
+        -Wextra
+        -Werror
+)
+
+target_link_libraries(recording_session_manager_test PRIVATE Threads::Threads)
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(recording_session_manager_test PRIVATE pthread)
 endif ()

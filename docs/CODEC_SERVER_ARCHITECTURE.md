@@ -1,7 +1,7 @@
 # Camera Codec Server 架构设计
 
 **最后更新:** 2026-04-27<br>
-**阶段定位:** 第一版代码已开工，当前完成最小进程骨架与板端参数验证<br>
+**阶段定位:** 第一版代码已开工，当前完成最小进程骨架、文件写入、JSON line 控制面和录制状态机<br>
 **第一阶段目标:** USB 摄像头也支持录制 H.264，先打通端到端链路；MIPI/RKISP 按可扩展路径预留
 
 > **文档硬规范**
@@ -691,9 +691,9 @@ stateDiagram-v2
 |------|------|------|
 | 1 | 创建 `extensions/codec_server/` 目录和最小 CMake 目标 | RK3576 交叉编译生成 `camera_codec_server` 空进程 |
 | 2 | 实现 `CodecServerConfig` 和启动参数解析 | `--help` 可见关键参数，默认 socket/path 正确 |
-| 3 | 实现 `RecordingFileWriter` | 本机单测或小工具能创建 `.h264` 文件并写入 bytes |
-| 4 | 实现 `CodecControlServer` JSON line 控制面 | 可用 `nc -U` 或小客户端发送 start/stop/status |
-| 5 | 实现 `RecordingSessionManager` 状态机 | 已录制重复 start 返回 `already_recording`，stop 后进入 idle |
+| 3 | 实现 `RecordingFileWriter` | ✅ 本机验证工具能创建 `.h264` 文件并写入 bytes |
+| 4 | 实现 `CodecControlServer` JSON line 控制面 | ✅ 可用 `nc -U` 发送 start/status/stop |
+| 5 | 实现 `RecordingSessionManager` 状态机 | ✅ 已录制重复 start 返回 `already_recording`，stop 后进入 idle |
 | 6 | 接入 `CameraStreamSubscriber` copy 数据面 | 能订阅 `/dev/video45` 并统计 input frames |
 | 7 | 接入 JPEG decode stub / 真实解码库探测 | 缺依赖返回 `jpeg_decoder_not_available`，有依赖输出解码帧 |
 | 8 | 接入 `H264MppEncoder` 最小编码 | 固定 NV12 输入可输出可播放 `.h264` |
@@ -704,7 +704,7 @@ stateDiagram-v2
 
 ### 16.1 当前实现进度
 
-截至 2026-04-27，当前已完成第一步最小骨架：
+截至 2026-04-28，当前已完成第一阶段前五步的最小闭环：
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
@@ -714,22 +714,24 @@ stateDiagram-v2
 | 本机构建验证 | 已完成 | `cmake --build build-codec --target camera_codec_server` 通过 |
 | RK3576 交叉编译 | 已完成 | `scripts/build-rk3576.sh` 已生成 `bin/rk3576/camera_codec_server` |
 | RK3576 板端最小运行 | 已完成 | 已上传到 `/home/luckfox/camera_codec_server`，`--help` 和参数解析输出正常 |
+| `RecordingFileWriter` | 已完成 | 支持创建输出目录、生成 `<stream_id>_<YYYYMMDD_HHMMSS>.h264`、写入 packet、flush、close、统计和重复文件名避让 |
+| `CodecControlServer` | 已完成最小版 | 支持 Unix Domain Socket JSON line start/status/stop；本机 `nc -U` 已验证 |
+| `RecordingSessionManager` | 已完成最小版 | 支持 idle / starting / recording / stopping / error 状态裁决，重复 start、重复 stop 和 writer 错误映射已验证 |
+| 本机 writer/session 验证 | 已完成 | `recording_file_writer_test` 41/41 通过；`recording_session_manager_test` 7/7 通过 |
 
 当前尚未实现：
 
-1. `CodecControlServer`。
-2. `RecordingFileWriter`。
-3. `RecordingSessionManager`。
-4. CameraSubsystem 订阅端接入。
-5. JPEG/MJPEG 解码、NV12 转换和 MPP H.264 编码。
+1. CameraSubsystem 订阅端接入。
+2. JPEG/MJPEG 解码、NV12 转换和 MPP H.264 编码。
+3. Web Preview Gateway 录制控制转发。
 
-下一步建议先实现 `RecordingFileWriter`，用本机和板端都能验证的方式创建输出目录、生成 `.h264` 文件名、写入测试 bytes、flush/close。该步骤不依赖 Camera、MPP 或 Web，可以作为第二个稳定切片。
+下一步建议实现 `CameraStreamSubscriber` copy 数据面，先用 v1 copy payload 订阅 `/dev/video45` 原始帧并统计 `input_frames`。该步骤仍不依赖 JPEG/MPP 编码，可以作为控制面与真实 CameraSubsystem 数据流之间的稳定切片。
 
 当前实现边界：
 
-1. `CodecServerApp::Run()` 仍是一次性 scaffold 输出，当前会立即退出；接入 `CodecControlServer` 后才会变成长驻进程。
+1. `CodecServerApp::Run()` 已变成长驻控制服务，但 start recording 当前只打开文件并维护状态，尚未订阅 Camera 帧和写入真实 H.264 packet。
 2. 当前 CMake 目标只依赖 C++ 标准库和 pthread，尚未链接 CameraSubsystem IPC、MPP、JPEG 或 RGA。
-3. 当前 RK3576 运行验证只证明二进制格式、动态链接和参数解析可用，不代表编码链路已经可用。
+3. 当前 RK3576 运行验证只证明二进制格式、动态链接、参数解析和后续可交叉构建；不代表编码链路已经可用。
 4. `scripts/build-rk3576.sh` 已显式打开 `CAMERA_SUBSYSTEM_BUILD_CODEC_SERVER=ON`，用于保证板端产物持续构建；根 CMake 默认仍保持关闭，避免影响普通开发构建。
 
 ## 17. MVP 范围
