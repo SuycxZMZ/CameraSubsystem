@@ -197,6 +197,12 @@ http://192.168.31.9:8080
 /home/luckfox/CameraSubsystem/recordings
 ```
 
+预览链路画质验证点：
+
+1. Web 预览状态中 `format` 应为 `JPEG`，`resolution` 应与 publisher negotiated format 一致。
+2. 开启 Record 后，实时画面仍来自 `web_preview_gateway` 订阅的原始 JPEG 预览流，不来自 H.264 录制输出。
+3. 2026-04-29 板端短验证结果：`/status` 返回 `format=JPEG`、`width=1920`、`height=1080`、`input_frames>0`、`published_frames>0`，确认预览链路未进入编码降质路径。
+
 ## 7. 录制验证
 
 短 smoke：
@@ -239,10 +245,19 @@ STABILITY_TEST=PASS
 |------|----------|------|
 | 浏览器无法打开页面 | Gateway 未启动或端口未开放 | 检查 `logs/web_preview_gateway.log`，确认监听 `0.0.0.0:8080`。 |
 | 页面已打开但无画面 | Publisher 未启动或摄像头节点错误 | 检查 `logs/publisher.log`，确认 `/dev/video45` negotiated format 为 MJPG。 |
+| 预览画面明显模糊 | 前端 Canvas backing store 与 CSS 显示尺寸不一致，或浏览器在较小卡片中下采样 1080p 原始画面 | 先确认 Gateway `/status` 中 `format=JPEG`、`width/height` 为摄像头原始分辨率；预览链路不走 H.264 编码。前端应使用 DPR-aware Canvas 渲染，并保持 contain 等比显示。 |
 | 点击 Record 返回 `codec_server_not_available` | `camera_codec_server` 未启动或 socket 路径不一致 | 检查 `/tmp/camera_subsystem_codec.sock` 和 `logs/codec_server.log`。 |
 | 录制文件为空 | 编码服务未收到帧或 encoder 未成功输出 packet | 先运行 `codec-v1-smoke-rk3576.sh`，查看 decoded/encoded counters。 |
 | 前端还是旧页面 | `web_preview/dist` 未更新或浏览器缓存 | 重新运行 `build-web.sh` 和 `deploy-web.sh`，浏览器强制刷新。 |
 | 文件分散在 `/home/luckfox` | 使用了旧文档或旧脚本 | 统一改用 `/home/luckfox/CameraSubsystem` 和本文命令。 |
+
+预览画质排查顺序：
+
+1. 检查 publisher 日志，确认摄像头 negotiated format 是 MJPG，分辨率符合预期，例如 1920x1080。
+2. 打开 Gateway 状态接口或查看 Web 页面状态，确认 `format=JPEG`、`resolution` 与 publisher 一致。
+3. 确认 Record 按钮只影响后台 H.264 保存，不改变实时预览数据源。
+4. 如果源分辨率正确但画面仍发糊，优先检查前端 Canvas 渲染：Canvas backing store 应按 CSS 显示尺寸乘以 `devicePixelRatio` 设置，并使用等比 contain 绘制。
+5. 如果浏览器窗口或卡片宽度明显小于原始 1080p 画面，页面会进行下采样显示；这是显示尺寸限制，不代表原始预览流被压缩。
 
 ## 9. 维护要求
 

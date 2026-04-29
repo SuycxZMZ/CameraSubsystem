@@ -355,6 +355,15 @@ UI 风格说明：
 5. 预留 Start / Stop / Record / Detect / Snapshot 按钮。
 6. Record 当前接入 `camera_codec_server` 控制面，负责启动/停止后台 H.264 录制；Detect 第一版只做入口预留。
 
+预览渲染约束：
+
+1. 实时预览始终订阅 CameraSubsystem 原始预览流。Record 开启后，浏览器画面仍显示 `web_preview_gateway` 推送的原始 JPEG payload，不切换到 `camera_codec_server` 生成的 H.264 码流。
+2. USB MJPEG / JPEG 场景下，Gateway 不做二次编码、不降低 JPEG 质量、不主动缩放分辨率；Web 侧显示质量主要受浏览器解码、Canvas 绘制尺寸和 CSS 缩放影响。
+3. 前端 Canvas 必须按显示区域和 `devicePixelRatio` 设置 backing store 尺寸，避免先按原始分辨率绘制、再由 CSS 拉伸或压缩造成额外重采样模糊。
+4. Canvas 绘制必须保持图像宽高比，使用 contain 策略居中显示，禁止将 16:9 画面拉伸为非等比尺寸。
+5. Overlay、按钮、状态栏不能覆盖或改变 Canvas backing store 尺寸；快照应直接从当前 Canvas 内容导出。
+6. 如果 1920x1080 原始画面显示在较小卡片中，浏览器下采样带来的轻微锐度损失属于预期；但不应出现由 CSS 二次拉伸、DPR 未适配或错误分辨率元数据导致的明显模糊。
+
 自适应布局表：
 
 | 流数量 | 默认布局 |

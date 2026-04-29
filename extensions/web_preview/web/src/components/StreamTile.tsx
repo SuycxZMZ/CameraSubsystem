@@ -23,17 +23,13 @@ export function StreamTile({ streamId }: StreamTileProps) {
     <Card className="overflow-hidden border-zinc-800 bg-zinc-900">
       {/* Canvas + Overlay container */}
       <div className="relative">
-        <div ref={() => {
-          // Forward the canvas ref from FrameCanvas
-          // We use a callback approach since FrameCanvas manages its own canvas
-        }}>
-          <FrameCanvas
-            payload={stream.lastFramePayload}
-            pixelFormat={stream.pixelFormat}
-            width={stream.width}
-            height={stream.height}
-          />
-        </div>
+        <FrameCanvas
+          ref={canvasRef}
+          payload={stream.lastFramePayload}
+          pixelFormat={stream.pixelFormat}
+          width={stream.width}
+          height={stream.height}
+        />
         {isStreaming && (
           <StreamOverlay
             streamId={stream.streamId}
