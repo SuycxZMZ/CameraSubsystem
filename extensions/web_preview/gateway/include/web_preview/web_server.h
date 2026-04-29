@@ -42,6 +42,12 @@ private:
     void ClientReadLoop(std::shared_ptr<Client> client);
     void RemoveDeadClients();
 
+    // Codec server control
+    bool ConnectCodecServer();
+    void DisconnectCodecServer();
+    std::string SendCodecCommand(const std::string& json_line);
+    std::string HandleRecordCommand(const std::string& payload);
+
     std::string BuildFallbackIndex() const;
     std::string BuildStatusJson() const;
     std::string ResolvePath(const std::string& url_path) const;
@@ -61,6 +67,10 @@ private:
 
     mutable std::mutex stats_mutex_;
     StreamStats stats_;
+
+    // Codec server connection
+    std::mutex codec_mutex_;
+    int codec_fd_ = -1;
 };
 
 } // namespace web_preview

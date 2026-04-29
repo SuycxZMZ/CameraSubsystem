@@ -1,6 +1,6 @@
 # CameraSubsystem 文档索引
 
-**最后更新:** 2026-04-27
+**最后更新:** 2026-04-29
 
 > **文档硬规范**
 >
@@ -51,8 +51,9 @@
 1. [../README.md](../README.md)
 2. [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)
 3. [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)
-4. 参考当前已接入的 RK3576 示例：`../cmake/toolchains/rk3576.cmake`
-5. 参考当前已接入的 RK3576 示例：`../scripts/build-rk3576.sh`
+4. [BOARD_WEB_DEBUG_GUIDE.md](BOARD_WEB_DEBUG_GUIDE.md)
+5. 参考当前已接入的 RK3576 示例：`../cmake/toolchains/rk3576.cmake`
+6. 参考当前已接入的 RK3576 示例：`../scripts/build-rk3576.sh`
 
 ---
 
@@ -65,6 +66,7 @@
 | [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) | 系统/代码架构评审、风险、建议、ARCH-* 跟踪 | 基础使用教程、接口完整定义 |
 | [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md) | DMA-BUF 数据面阶段性设计与验证记录，包含 RK3576 验证、FrameLease、DataPlaneV2、RGA/MPP import 边界 | H.264 编码录制架构、当前完成度统计、接口全量参考 |
 | [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md) | H.264 编码录制服务架构，包含 `camera_codec_server`、Web 录制控制、USB 首阶段链路和 MIPI/RKISP 扩展路径 | DMA-BUF 底层协议细节、具体 C++ 实现 |
+| [BOARD_WEB_DEBUG_GUIDE.md](BOARD_WEB_DEBUG_GUIDE.md) | RK3576 板端 Web Preview、录制联调、统一部署目录和 smoke / stability 调试流程 | 架构取舍、API 全量说明、长期路线图 |
 | [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md) | 模块完成度、测试状态、下一步计划、技术债务执行状态 | 重复架构评审正文 |
 | [../API_REFERENCE.md](../API_REFERENCE.md) | 公开接口、数据结构、IPC 协议、示例调用 | 设计争议与风险讨论 |
 | [../NAMING_CONVENTION.md](../NAMING_CONVENTION.md) | 命名、目录、代码格式、跨平台约定 | 项目状态与路线图 |

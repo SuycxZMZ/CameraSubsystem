@@ -14,7 +14,7 @@ struct CodecServerConfig
     std::string codec_socket = "/tmp/camera_subsystem_codec.sock";
     std::string device_path = "/dev/video45";
     std::string camera_id = "default_camera";
-    std::string output_dir = "/home/luckfox/recordings";
+    std::string output_dir = "/home/luckfox/CameraSubsystem/recordings";
     std::string input_format = "auto";
     std::string codec = "h264";
     std::string data_plane = "v1";

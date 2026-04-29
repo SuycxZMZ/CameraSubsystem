@@ -22,4 +22,9 @@ export interface StreamState {
   lastFramePayload: Uint8Array | null;
   lastFrameTimestamp: number;
   isFormatSupported: boolean;
+  recording: boolean;
+  recordFile: string;
+  encodedFrames: number;
+  decodedFrames: number;
+  recordError: string;
 }

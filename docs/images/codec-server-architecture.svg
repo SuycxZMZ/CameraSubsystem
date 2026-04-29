@@ -113,7 +113,7 @@
   <rect x="865" y="400" width="150" height="80" rx="6" fill="#0f172a"/>
   <rect x="865" y="400" width="150" height="80" class="box storage"/>
   <text x="940" y="424" class="label">Recordings</text>
-  <text x="940" y="442" class="sub">/home/luckfox/recordings</text>
+  <text x="940" y="442" class="sub">/home/luckfox/CameraSubsystem/recordings</text>
   <text x="940" y="457" class="sub">stream_timestamp.h264</text>
 
   <rect x="55" y="540" width="210" height="34" rx="5" class="box external"/>

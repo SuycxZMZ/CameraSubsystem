@@ -53,9 +53,11 @@ void PrintUsage(const char* program_name)
         << "  --port <port>             HTTP/WebSocket port, default 8080\n"
         << "  --control-socket <path>   Camera control socket path\n"
         << "  --data-socket <path>      Camera data socket path\n"
+        << "  --codec-socket <path>     Codec server control socket path\n"
         << "  --device <path>           Camera device path requested via control IPC\n"
         << "  --static-root <path>      Frontend dist directory\n"
         << "  --client-id <id>          Control IPC client id\n"
+        << "  --output-dir <path>       Recording output directory\n"
         << "  --camera-id <id>          Camera id, default 0\n"
         << "  --max-fps <fps>           Preview max fps, default 15\n"
         << "  --help                    Show this help\n";
@@ -117,6 +119,13 @@ bool ParseGatewayConfig(int argc, char* argv[], GatewayConfig* config)
                 return false;
             }
         }
+        else if (arg == "--codec-socket")
+        {
+            if (!require_value(&config->codec_socket))
+            {
+                return false;
+            }
+        }
         else if (arg == "--device")
         {
             if (!require_value(&config->device_path))
@@ -134,6 +143,13 @@ bool ParseGatewayConfig(int argc, char* argv[], GatewayConfig* config)
         else if (arg == "--client-id")
         {
             if (!require_value(&config->client_id))
+            {
+                return false;
+            }
+        }
+        else if (arg == "--output-dir")
+        {
+            if (!require_value(&config->output_dir))
             {
                 return false;
             }

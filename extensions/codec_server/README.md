@@ -19,6 +19,8 @@
 
 RK3576 `/dev/video45` smoke 已验证：`camera_codec_server` 通过控制面 start/status/stop 后，`input_frames=94`、`decoded_frames=94`、`encoded_frames=94`、`decode_failures=0`、`write_failures=0`；输出 `.h264` 文件约 1.5MB。
 
+板端调试文件统一部署到 `/home/luckfox/CameraSubsystem`，录制文件默认写入 `/home/luckfox/CameraSubsystem/recordings`。Web 预览和录制联调方式见 [../../docs/BOARD_WEB_DEBUG_GUIDE.md](../../docs/BOARD_WEB_DEBUG_GUIDE.md)。
+
 第一阶段目标：
 
 - 先以 USB JPEG/MJPEG 摄像头打通 H.264 文件录制链路。
@@ -52,5 +54,5 @@ printf '%s\n' \
 板端 v1 copy 数据面 smoke：
 
 ```bash
-sh /home/luckfox/codec-v1-smoke-rk3576.sh
+sh /home/luckfox/CameraSubsystem/scripts/codec-v1-smoke-rk3576.sh
 ```

@@ -1,6 +1,6 @@
 # Camera Codec Server 架构设计
 
-**最后更新:** 2026-04-28<br>
+**最后更新:** 2026-04-29<br>
 **阶段定位:** 第一版代码已开工，当前完成最小进程骨架、文件写入、JSON line 控制面、录制状态机、v1 copy 数据面订阅、MPP JPEG decode 和 MPP H.264 encode 主链路接入<br>
 **第一阶段目标:** USB 摄像头也支持录制 H.264，先打通端到端链路；MIPI/RKISP 按可扩展路径预留
 
@@ -65,8 +65,8 @@ CameraSubsystem 当前已经具备核心发布端、订阅端、Web Preview 和 
 
 | 项目 | 当前状态 | 对 camera_codec_server 的影响 |
 |------|----------|------------------------|
-| Web Preview 前端 | 已有 `set_record_enabled` 命令类型和录制按钮占位，但按钮当前禁用 | UI 入口存在，后续需要启用并接入录制状态 |
-| `web_preview_gateway` | 当前作为原始预览订阅端，负责 HTTP + WebSocket | 应作为录制控制代理，不承担编码 |
+| Web Preview 前端 | 已接入 `set_record_enabled`，Record 按钮可启动/停止后台录制 | UI 入口已可用，预览仍显示原始流 |
+| `web_preview_gateway` | 当前作为原始预览订阅端，负责 HTTP + WebSocket，并转发录制控制到 `camera_codec_server` | 只做代理，不承担编码 |
 | DataPlaneV2 | 已支持 `SCM_RIGHTS` fd 传递和独立 ReleaseFrame 通道 | `camera_codec_server` 可作为高优先级订阅端接入 |
 | DMA-BUF import 探测 | RGA import 和 MPP buffer import 已在 RKISP/RKVpss 节点验证 | MIPI/RKISP 后续可走 MPP import 低拷贝路径 |
 | USB 摄像头 | 当前主要验证对象是 `/dev/video45`，输出 JPEG/MJPEG | USB H.264 录制需要 JPEG decode 到 NV12/YUV 后再编码 |
@@ -74,11 +74,10 @@ CameraSubsystem 当前已经具备核心发布端、订阅端、Web Preview 和 
 
 当前不支持的部分：
 
-1. Web 录制按钮没有接入可用后台服务。
-2. `web_preview_gateway` 没有录制控制路由。
-3. 编码参数还没有从前端请求或启动参数完整传入 encoder。
-4. 还没有长时间稳定性验证、播放兼容性验证和异常恢复策略。
-5. DataPlaneV2 / DMA-BUF / MIPI/RKISP NV12 还没有接入编码主链路。
+1. 编码参数还没有从前端请求或启动参数完整传入 encoder。
+2. 还没有长时间稳定性验证、播放兼容性验证和异常恢复策略。
+3. DataPlaneV2 / DMA-BUF / MIPI/RKISP NV12 还没有接入编码主链路。
+4. Web 录制状态展示仍是基础状态，尚未做录制时长、文件大小、错误提示组件。
 
 ## 3. 总体架构
 
@@ -280,7 +279,7 @@ flowchart TB
   "stream_id": "usb_camera_0",
   "codec": "h264",
   "container": "raw_h264",
-  "output_dir": "/home/luckfox/recordings",
+  "output_dir": "/home/luckfox/CameraSubsystem/recordings",
   "profile": {
     "width": 1920,
     "height": 1080,
@@ -311,7 +310,7 @@ flowchart TB
   "recording": true,
   "codec": "h264",
   "container": "raw_h264",
-  "file": "/home/luckfox/recordings/usb_camera_0_20260427_153000.h264",
+  "file": "/home/luckfox/CameraSubsystem/recordings/usb_camera_0_20260427_153000.h264",
   "encoded_frames": 0,
   "dropped_frames": 0
 }
@@ -365,7 +364,7 @@ RK3576 官方规格显示 VPU 支持 H.264/H.265 硬编码，SDK 中也存在 Ro
 第一阶段建议输出裸 H.264 elementary stream：
 
 ```text
-/home/luckfox/recordings/<stream_id>_<YYYYMMDD_HHMMSS>.h264
+/home/luckfox/CameraSubsystem/recordings/<stream_id>_<YYYYMMDD_HHMMSS>.h264
 ```
 
 原因：
@@ -471,7 +470,7 @@ JPEG 解码后的输出可能是 RGB/RGBA，也可能能直接解到 YUV。MPP H
 | CameraSubsystem 数据 socket | `/tmp/camera_subsystem_data.sock` |
 | DataPlaneV2 release socket | `/tmp/camera_subsystem_release_v2.sock` |
 | 编码服务控制 socket | `/tmp/camera_subsystem_codec.sock` |
-| 默认录制目录 | `/home/luckfox/recordings` |
+| 默认录制目录 | `/home/luckfox/CameraSubsystem/recordings` |
 | 默认客户端 ID | `camera_codec_server` |
 | 日志 tag | `camera_codec_server` |
 
@@ -524,7 +523,7 @@ extensions/codec_server/scripts/run-camera-codec-server-rk3576.sh
   --codec-socket /tmp/camera_subsystem_codec.sock \
   --device /dev/video45 \
   --camera-id default_camera \
-  --output-dir /home/luckfox/recordings \
+  --output-dir /home/luckfox/CameraSubsystem/recordings \
   --input-format mjpeg \
   --codec h264 \
   --width 1920 \
@@ -681,13 +680,14 @@ stateDiagram-v2
   --control-socket /tmp/camera_subsystem_control.sock \
   --data-socket /tmp/camera_subsystem_data.sock \
   --codec-socket /tmp/camera_subsystem_codec.sock \
-  --output-dir /home/luckfox/recordings
+  --output-dir /home/luckfox/CameraSubsystem/recordings
 
 ./web_preview_gateway \
   --device /dev/video45 \
   --port 8080 \
-  --static-root /home/luckfox/web_dist \
-  --codec-socket /tmp/camera_subsystem_codec.sock
+  --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
+  --codec-socket /tmp/camera_subsystem_codec.sock \
+  --output-dir /home/luckfox/CameraSubsystem/recordings
 ```
 
 说明：
@@ -727,7 +727,7 @@ stateDiagram-v2
 | 启动参数解析 | 已完成 | 已支持 `--control-socket`、`--data-socket`、`--release-socket`、`--codec-socket`、`--output-dir`、`--input-format`、`--data-plane`、`--width`、`--height`、`--fps`、`--bitrate`、`--gop` 等第一阶段参数 |
 | 本机构建验证 | 已完成 | `cmake --build build-codec --target camera_codec_server` 通过 |
 | RK3576 交叉编译 | 已完成 | `scripts/build-rk3576.sh` 已生成 `bin/rk3576/camera_codec_server` |
-| RK3576 板端最小运行 | 已完成 | 已上传到 `/home/luckfox/camera_codec_server`，`--help` 和参数解析输出正常 |
+| RK3576 板端最小运行 | 已完成 | 已按 `/home/luckfox/CameraSubsystem/bin/` 统一目录部署，`--help` 和参数解析输出正常 |
 | `RecordingFileWriter` | 已完成 | 支持创建输出目录、生成 `<stream_id>_<YYYYMMDD_HHMMSS>.h264`、写入 packet、flush、close、统计和重复文件名避让 |
 | `CodecControlServer` | 已完成最小版 | 支持 Unix Domain Socket JSON line start/status/stop；本机 `nc -U` 已验证 |
 | `RecordingSessionManager` | 已完成最小版 | 支持 idle / starting / recording / stopping / error 状态裁决，重复 start、重复 stop 和 writer 错误映射已验证；start recording 已接入 `CameraStreamSubscriber` |
@@ -738,16 +738,16 @@ stateDiagram-v2
 
 当前尚未实现：
 
-1. Web Preview Gateway 录制控制转发。
-2. 更长时间编码稳定性验证。
-3. 编码参数从请求或启动参数传入 `H264MppEncoder`。
+1. 更长时间编码稳定性验证。
+2. 编码参数从请求或启动参数传入 `H264MppEncoder`。
+3. Web 录制状态展示增强，例如录制时长、文件大小和错误提示组件。
 
 RK3576 v1 copy 数据面 smoke 结果：
 
 | 项目 | 结果 |
 |------|------|
 | publisher | `/dev/video45`，MMAP copy 数据面，30fps 发送正常 |
-| codec start | 返回 `recording=true`，创建 `/home/luckfox/codec_records/*.h264` |
+| codec start | 返回 `recording=true`，创建 `/home/luckfox/CameraSubsystem/recordings/*.h264` |
 | codec status | 3 秒后 `input_frames=69`、`decoded_frames=69`、`encoded_frames=69`、`decode_failures=0`、`write_failures=0` |
 | codec stop | 返回 `recording=false`、`state=idle`，最终 `input_frames=94`、`decoded_frames=94`、`encoded_frames=94`、`decode_failures=0` |
 | 输出文件 | 已生成非空 `.h264` 文件，约 1.5MB |
@@ -772,7 +772,7 @@ RK3576 v1 copy 数据面 smoke 结果：
 | Web Preview 控制接入 | 前端启用录制按钮，Gateway 转发命令和状态 |
 | USB JPEG/MJPEG 到 H.264 | 先打通 USB 摄像头录制链路 |
 | Rockchip MPP H.264 encoder | 板端优先硬件编码 |
-| 裸 H.264 文件输出 | 写入 `/home/luckfox/recordings/*.h264` |
+| 裸 H.264 文件输出 | 写入 `/home/luckfox/CameraSubsystem/recordings/*.h264` |
 | 基础状态回传 | recording、file、duration、encoded_frames、dropped_frames、error |
 | 编码背压 | 允许丢帧，优先保证预览和采集不被录制拖垮 |
 
@@ -835,7 +835,7 @@ RK3576 v1 copy 数据面 smoke 结果：
 
 ### 19.4 文件与磁盘
 
-- 已决策：默认录制目录使用 `/home/luckfox/recordings`。
+- 已决策：默认录制目录使用 `/home/luckfox/CameraSubsystem/recordings`。
 - 已决策：第一阶段文件命名规则为 `<stream_id>_<YYYYMMDD_HHMMSS>.h264`。
 - TODO：确认磁盘剩余空间阈值，低于阈值时拒绝开始录制或自动停止。
 - TODO：确认异常退出时 `.h264` 文件是否保留，以及是否写 sidecar metadata。

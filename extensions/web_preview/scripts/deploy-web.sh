@@ -3,7 +3,7 @@ set -euo pipefail
 
 BOARD_IP="${1:-192.168.31.9}"
 BOARD_USER="${2:-luckfox}"
-REMOTE_DIR="${3:-/home/luckfox/web_preview/web/dist}"
+REMOTE_DIR="${3:-/home/luckfox/CameraSubsystem/web_preview/dist}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WEB_DIR="$(dirname "$SCRIPT_DIR")/web"
@@ -17,6 +17,7 @@ if [ ! -d "$DIST_DIR" ]; then
 fi
 
 echo "Deploying to ${BOARD_USER}@${BOARD_IP}:${REMOTE_DIR}"
+ssh "${BOARD_USER}@${BOARD_IP}" "mkdir -p '${REMOTE_DIR}' && rm -rf '${REMOTE_DIR}'/*"
 scp -r "$DIST_DIR"/* "${BOARD_USER}@${BOARD_IP}:${REMOTE_DIR}/"
 
 echo "=== Deploy complete ==="

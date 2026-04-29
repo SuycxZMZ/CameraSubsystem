@@ -18,7 +18,7 @@ namespace camera_subsystem::extensions::codec_server {
 
 struct RecordingSessionConfig
 {
-    std::string default_output_dir = "/home/luckfox/recordings";
+    std::string default_output_dir = "/home/luckfox/CameraSubsystem/recordings";
     CameraStreamSubscriberConfig subscriber;
     bool enable_camera_subscriber = false;
 };

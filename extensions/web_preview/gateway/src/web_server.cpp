@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -15,6 +16,7 @@
 #include <sstream>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 namespace web_preview {
@@ -244,6 +246,173 @@ void WebServer::Stop()
         }
     }
     clients_.clear();
+
+    DisconnectCodecServer();
+}
+
+// ---------------------------------------------------------------------------
+// Codec server control
+// ---------------------------------------------------------------------------
+
+bool WebServer::ConnectCodecServer()
+{
+    std::lock_guard<std::mutex> lock(codec_mutex_);
+    if (codec_fd_ >= 0)
+    {
+        return true;
+    }
+
+    codec_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (codec_fd_ < 0)
+    {
+        return false;
+    }
+
+    struct sockaddr_un addr;
+    std::memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    std::strncpy(addr.sun_path, config_.codec_socket.c_str(), sizeof(addr.sun_path) - 1);
+
+    if (connect(codec_fd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
+    {
+        close(codec_fd_);
+        codec_fd_ = -1;
+        return false;
+    }
+
+    return true;
+}
+
+void WebServer::DisconnectCodecServer()
+{
+    std::lock_guard<std::mutex> lock(codec_mutex_);
+    if (codec_fd_ >= 0)
+    {
+        close(codec_fd_);
+        codec_fd_ = -1;
+    }
+}
+
+std::string WebServer::SendCodecCommand(const std::string& json_line)
+{
+    if (!ConnectCodecServer())
+    {
+        return "{\"type\":\"record_status\",\"error\":\"codec_server_not_available\"}";
+    }
+
+    std::lock_guard<std::mutex> lock(codec_mutex_);
+    if (codec_fd_ < 0)
+    {
+        return "{\"type\":\"record_status\",\"error\":\"codec_server_not_available\"}";
+    }
+
+    std::string line = json_line + "\n";
+    if (!WriteFull(codec_fd_, line.data(), line.size()))
+    {
+        close(codec_fd_);
+        codec_fd_ = -1;
+        return "{\"type\":\"record_status\",\"error\":\"codec_server_write_failed\"}";
+    }
+
+    // Read response line
+    std::string response;
+    char buf[4096];
+    while (true)
+    {
+        ssize_t n = recv(codec_fd_, buf, sizeof(buf), 0);
+        if (n <= 0)
+        {
+            close(codec_fd_);
+            codec_fd_ = -1;
+            return "{\"type\":\"record_status\",\"error\":\"codec_server_read_failed\"}";
+        }
+        response.append(buf, static_cast<size_t>(n));
+        if (response.find('\n') != std::string::npos)
+        {
+            // Trim newline
+            while (!response.empty() && (response.back() == '\n' || response.back() == '\r'))
+            {
+                response.pop_back();
+            }
+            break;
+        }
+    }
+
+    return response;
+}
+
+std::string WebServer::HandleRecordCommand(const std::string& payload)
+{
+    // Parse JSON payload to extract stream_id and enabled
+    // Simple JSON parsing (no external library)
+    auto find_string = [&](const std::string& key) -> std::string
+    {
+        std::string search = "\"" + key + "\"";
+        size_t pos = payload.find(search);
+        if (pos == std::string::npos)
+        {
+            return "";
+        }
+        pos = payload.find(':', pos);
+        if (pos == std::string::npos)
+        {
+            return "";
+        }
+        // Skip whitespace
+        while (pos < payload.size() && (payload[pos] == ':' || payload[pos] == ' ' ||
+               payload[pos] == '\t'))
+        {
+            ++pos;
+        }
+        if (pos >= payload.size())
+        {
+            return "";
+        }
+        if (payload[pos] == '"')
+        {
+            ++pos;
+            size_t end = payload.find('"', pos);
+            if (end == std::string::npos)
+            {
+                return "";
+            }
+            return payload.substr(pos, end - pos);
+        }
+        // Boolean or number
+        size_t end = pos;
+        while (end < payload.size() && payload[end] != ',' && payload[end] != '}' &&
+               payload[end] != ' ' && payload[end] != '\t')
+        {
+            ++end;
+        }
+        return payload.substr(pos, end - pos);
+    };
+
+    std::string stream_id = find_string("stream_id");
+    std::string enabled_str = find_string("enabled");
+    bool enabled = (enabled_str == "true" || enabled_str == "1");
+
+    if (stream_id.empty())
+    {
+        stream_id = "usb_camera_0";
+    }
+
+    std::string codec_cmd;
+    if (enabled)
+    {
+        codec_cmd = "{\"type\":\"start_recording\",\"request_id\":\"web-"
+                  + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())
+                  + "\",\"stream_id\":\"" + stream_id
+                  + "\",\"output_dir\":\"" + config_.output_dir + "\"}";
+    }
+    else
+    {
+        codec_cmd = "{\"type\":\"stop_recording\",\"request_id\":\"web-"
+                  + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())
+                  + "\",\"stream_id\":\"" + stream_id + "\"}";
+    }
+
+    return SendCodecCommand(codec_cmd);
 }
 
 void WebServer::BroadcastBinary(const std::vector<uint8_t>& packet)
@@ -522,8 +691,21 @@ void WebServer::ClientReadLoop(std::shared_ptr<Client> client)
         }
         else if (opcode == 0x1)
         {
-            const std::string result =
-                "{\"type\":\"command_result\",\"status\":\"not_supported\"}";
+            // Text message - handle commands
+            std::string text_payload(payload.begin(), payload.end());
+            std::string result;
+
+            // Check for set_record_enabled command
+            if (text_payload.find("\"type\":\"set_record_enabled\"") != std::string::npos ||
+                text_payload.find("\"type\": \"set_record_enabled\"") != std::string::npos)
+            {
+                result = HandleRecordCommand(text_payload);
+            }
+            else
+            {
+                result = "{\"type\":\"command_result\",\"status\":\"not_supported\"}";
+            }
+
             std::lock_guard<std::mutex> send_lock(client->send_mutex);
             (void)SendWebSocketFrame(client->fd, 0x1,
                                      reinterpret_cast<const uint8_t*>(result.data()),

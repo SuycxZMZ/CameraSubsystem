@@ -4,7 +4,7 @@ import { StreamGrid } from '@/components/StreamGrid';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useFrameReceiver } from '@/hooks/useFrameReceiver';
 import { useStreamStore } from '@/stores/useStreamStore';
-import type { CommandResult, GatewayStatus } from '@/types/gateway-command';
+import type { CommandResult, GatewayStatus, RecordStatus } from '@/types/gateway-command';
 
 function App() {
   const { onBinaryMessage } = useFrameReceiver();
@@ -18,6 +18,8 @@ function App() {
 
       if (json.type === 'status') {
         useStreamStore.getState().handleGatewayStatus(json as GatewayStatus);
+      } else if (json.type === 'record_status') {
+        useStreamStore.getState().handleRecordStatus(json as RecordStatus);
       } else if (json.type === 'command_result') {
         useStreamStore.getState().handleCommandResult(json as CommandResult);
       } else {

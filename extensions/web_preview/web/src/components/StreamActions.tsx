@@ -24,8 +24,13 @@ export function StreamActions({
   canvasRef,
 }: StreamActionsProps) {
   const sendCommand = useStreamStore((s) => s.sendCommand);
+  const stream = useStreamStore((s) => s.streams[streamId]);
   const isConnected = connectionState === 'connected';
   const isStreaming = status === 'streaming' || status === 'subscribed';
+  const isRecording = Boolean(stream?.recording);
+  const recordButtonClass = isRecording
+    ? 'h-8 w-8 border-red-500 bg-red-950 text-red-200 hover:bg-red-900'
+    : 'h-8 w-8';
 
   const handleSubscribe = () => {
     sendCommand({ type: 'subscribe_stream', stream_id: streamId });
@@ -36,7 +41,7 @@ export function StreamActions({
   };
 
   const handleRecord = () => {
-    sendCommand({ type: 'set_record_enabled', stream_id: streamId, enabled: true });
+    sendCommand({ type: 'set_record_enabled', stream_id: streamId, enabled: !isRecording });
   };
 
   const handleDetect = () => {
@@ -100,20 +105,22 @@ export function StreamActions({
           </Tooltip>
         )}
 
-        {/* Record (disabled - not supported) */}
+        {/* Record */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="outline"
               size="icon"
-              className="h-8 w-8"
-              disabled
+              className={recordButtonClass}
+              disabled={!isConnected}
               onClick={handleRecord}
             >
-              <Circle className="h-4 w-4" />
+              {isRecording ? <Square className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>录制功能暂未实现</TooltipContent>
+          <TooltipContent>
+            {!isConnected ? '连接断开' : isRecording ? '停止录制' : '开始录制'}
+          </TooltipContent>
         </Tooltip>
 
         {/* Detect (disabled - not supported) */}

@@ -1,19 +1,20 @@
 #!/bin/sh
 set -eu
 
-PUBLISHER_BIN="${PUBLISHER_BIN:-/home/luckfox/camera_publisher_example}"
-CODEC_BIN="${CODEC_BIN:-/home/luckfox/camera_codec_server}"
+REMOTE_ROOT="${REMOTE_ROOT:-/home/luckfox/CameraSubsystem}"
+PUBLISHER_BIN="${PUBLISHER_BIN:-${REMOTE_ROOT}/bin/camera_publisher_example}"
+CODEC_BIN="${CODEC_BIN:-${REMOTE_ROOT}/bin/camera_codec_server}"
 DEVICE="${DEVICE:-/dev/video45}"
 CONTROL_SOCKET="${CONTROL_SOCKET:-/tmp/camera_subsystem_control.sock}"
 DATA_SOCKET="${DATA_SOCKET:-/tmp/camera_subsystem_data.sock}"
 CODEC_SOCKET="${CODEC_SOCKET:-/tmp/camera_subsystem_codec.sock}"
-OUTPUT_DIR="${OUTPUT_DIR:-/home/luckfox/codec_records}"
+OUTPUT_DIR="${OUTPUT_DIR:-${REMOTE_ROOT}/recordings/smoke}"
 
-PUBLISHER_LOG="${PUBLISHER_LOG:-/home/luckfox/publisher_codec.log}"
-CODEC_LOG="${CODEC_LOG:-/home/luckfox/codec_server.log}"
-PUBLISHER_PID_FILE="${PUBLISHER_PID_FILE:-/home/luckfox/publisher_codec.pid}"
-CODEC_PID_FILE="${CODEC_PID_FILE:-/home/luckfox/codec_server.pid}"
-CLIENT_PY="${CLIENT_PY:-/tmp/codec_v1_smoke_client.py}"
+PUBLISHER_LOG="${PUBLISHER_LOG:-${REMOTE_ROOT}/logs/publisher_codec.log}"
+CODEC_LOG="${CODEC_LOG:-${REMOTE_ROOT}/logs/codec_server.log}"
+PUBLISHER_PID_FILE="${PUBLISHER_PID_FILE:-${REMOTE_ROOT}/run/publisher_codec.pid}"
+CODEC_PID_FILE="${CODEC_PID_FILE:-${REMOTE_ROOT}/run/codec_server.pid}"
+CLIENT_PY="${CLIENT_PY:-${REMOTE_ROOT}/tmp/codec_v1_smoke_client.py}"
 
 cleanup()
 {
@@ -28,7 +29,7 @@ trap cleanup EXIT INT TERM
 
 rm -f "$CONTROL_SOCKET" "$DATA_SOCKET" "$CODEC_SOCKET"
 rm -rf "$OUTPUT_DIR" "$PUBLISHER_LOG" "$CODEC_LOG" "$PUBLISHER_PID_FILE" "$CODEC_PID_FILE"
-mkdir -p "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR" "$(dirname "$PUBLISHER_LOG")" "$(dirname "$PUBLISHER_PID_FILE")" "$(dirname "$CLIENT_PY")"
 chmod +x "$PUBLISHER_BIN" "$CODEC_BIN"
 
 cat > "$CLIENT_PY" <<'PY'
@@ -36,7 +37,9 @@ import json
 import socket
 import sys
 import time
+import os
 
+output_dir = os.environ.get('OUTPUT_DIR', '/home/luckfox/CameraSubsystem/recordings/smoke')
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 sock.connect('/tmp/camera_subsystem_codec.sock')
 
@@ -52,7 +55,12 @@ def send(line):
     print(text, flush=True)
     return json.loads(text)
 
-start = send('{"type":"start_recording","request_id":"t1","stream_id":"usb_camera_0","output_dir":"/home/luckfox/codec_records"}')
+start = send(json.dumps({
+    "type": "start_recording",
+    "request_id": "t1",
+    "stream_id": "usb_camera_0",
+    "output_dir": output_dir,
+}))
 time.sleep(3)
 status = send('{"type":"status","request_id":"t2","stream_id":"usb_camera_0"}')
 time.sleep(1)
@@ -102,6 +110,7 @@ echo "$!" > "$CODEC_PID_FILE"
 sleep 1
 
 echo "CODEC_CONTROL"
+export OUTPUT_DIR
 python3 "$CLIENT_PY"
 sleep 1
 

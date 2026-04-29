@@ -11,6 +11,22 @@ export interface CommandResult {
   reason?: string;
 }
 
+export interface RecordStatus {
+  type: 'record_status';
+  request_id?: string;
+  stream_id: string;
+  recording?: boolean;
+  state?: string;
+  file?: string;
+  encoded_frames?: number;
+  decoded_frames?: number;
+  dropped_frames?: number;
+  input_frames?: number;
+  decode_failures?: number;
+  write_failures?: number;
+  error?: string;
+}
+
 export interface GatewayStatus {
   type: 'status';
   stream_id: string;

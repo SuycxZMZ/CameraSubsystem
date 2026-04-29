@@ -28,6 +28,8 @@
 - 开发板 IP：`192.168.31.9`（默认，可按实际修改）
 - USB 摄像头已连接，设备节点为 `/dev/video45`（按实际修改）
 
+板端文件统一部署到 `/home/luckfox/CameraSubsystem`。完整调试方式见 [../../docs/BOARD_WEB_DEBUG_GUIDE.md](../../docs/BOARD_WEB_DEBUG_GUIDE.md)。
+
 ### 方式一：本机开发模式（推荐调试使用）
 
 本机开发模式下，Vite dev server 在本机运行，通过代理转发 WebSocket 到开发板上的 Gateway。前端热更新即时生效，适合开发调试。
@@ -39,8 +41,9 @@
 cd CameraSubsystem/extensions/web_preview
 ./scripts/build-gateway-rk3576.sh
 
-# 拷贝 Gateway 到开发板
-scp gateway/build-rk3576/web_preview_gateway luckfox@192.168.31.9:/home/luckfox/
+# 拷贝 Gateway 到开发板统一目录
+ssh luckfox@192.168.31.9 "mkdir -p /home/luckfox/CameraSubsystem/bin"
+scp gateway/build-rk3576/web_preview_gateway luckfox@192.168.31.9:/home/luckfox/CameraSubsystem/bin/
 ```
 
 **步骤 2：在开发板上启动核心发布端和 Gateway**
@@ -51,10 +54,20 @@ ssh luckfox@192.168.31.9
 
 # 启动 CameraSubsystem 核心发布端（如果尚未启动）
 # 注意：camera_publisher_example 使用位置参数，不是 --device
-./camera_publisher_example /dev/video45 &
+cd /home/luckfox/CameraSubsystem
+./bin/camera_publisher_example /dev/video45 &
+
+# 启动编码录制服务（Record 按钮需要）
+./bin/camera_codec_server \
+  --device /dev/video45 \
+  --output-dir /home/luckfox/CameraSubsystem/recordings &
 
 # 启动 Gateway（绑定 0.0.0.0:8080，允许局域网访问）
-./web_preview_gateway --device /dev/video45 --port 8080 --static-root /home/luckfox/web_dist
+./bin/web_preview_gateway \
+  --device /dev/video45 \
+  --port 8080 \
+  --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
+  --output-dir /home/luckfox/CameraSubsystem/recordings
 ```
 
 > **重要**：必须先启动 camera_publisher_example，再启动 web_preview_gateway。Gateway 启动时会立即连接发布端的控制面和数据面 IPC，如果发布端未就绪，Gateway 会因连接失败而退出。
@@ -112,10 +125,10 @@ cd CameraSubsystem/extensions/web_preview
 # 交叉编译 Gateway
 ./scripts/build-gateway-rk3576.sh
 
-# 拷贝 Gateway 和前端到开发板
-scp gateway/build-rk3576/web_preview_gateway luckfox@192.168.31.9:/home/luckfox/
-ssh luckfox@192.168.31.9 "mkdir -p /home/luckfox/web_dist"
-scp -r web/dist/* luckfox@192.168.31.9:/home/luckfox/web_dist/
+# 拷贝 Gateway 和前端到开发板统一目录
+ssh luckfox@192.168.31.9 "mkdir -p /home/luckfox/CameraSubsystem/bin /home/luckfox/CameraSubsystem/web_preview/dist"
+scp gateway/build-rk3576/web_preview_gateway luckfox@192.168.31.9:/home/luckfox/CameraSubsystem/bin/
+scp -r web/dist/* luckfox@192.168.31.9:/home/luckfox/CameraSubsystem/web_preview/dist/
 ```
 
 或使用一键部署脚本：
@@ -130,10 +143,20 @@ scp -r web/dist/* luckfox@192.168.31.9:/home/luckfox/web_dist/
 ssh luckfox@192.168.31.9
 
 # 启动核心发布端
-./camera_publisher_example /dev/video45 &
+cd /home/luckfox/CameraSubsystem
+./bin/camera_publisher_example /dev/video45 &
+
+# 启动编码录制服务
+./bin/camera_codec_server \
+  --device /dev/video45 \
+  --output-dir /home/luckfox/CameraSubsystem/recordings &
 
 # 启动 Gateway，指定前端静态文件目录
-./web_preview_gateway --device /dev/video45 --port 8080 --static-root /home/luckfox/web_dist
+./bin/web_preview_gateway \
+  --device /dev/video45 \
+  --port 8080 \
+  --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
+  --output-dir /home/luckfox/CameraSubsystem/recordings
 ```
 
 **步骤 4：在局域网浏览器访问**
@@ -152,7 +175,6 @@ http://192.168.31.9:8080
 ```
 
 > **重要**：必须先启动 camera_publisher_example，再启动 web_preview_gateway。
-```
 
 浏览器访问 `http://192.168.31.9:8080` 即可看到 Fallback 页面。
 
@@ -164,9 +186,11 @@ http://192.168.31.9:8080
 | `--port <port>` | `8080` | HTTP/WebSocket 端口 |
 | `--control-socket <path>` | `/tmp/camera_subsystem_control.sock` | 控制面 IPC socket 路径 |
 | `--data-socket <path>` | `/tmp/camera_subsystem_data.sock` | 数据面 IPC socket 路径 |
+| `--codec-socket <path>` | `/tmp/camera_subsystem_codec.sock` | 编码服务控制 socket 路径 |
 | `--device <path>` | `/dev/video0` | 摄像头设备节点 |
 | `--static-root <path>` | `../web/dist` | 前端静态文件目录 |
 | `--client-id <id>` | `web_preview_gateway` | 控制面 IPC 客户端 ID |
+| `--output-dir <path>` | `/home/luckfox/CameraSubsystem/recordings` | 录制文件输出目录 |
 | `--camera-id <id>` | `0` | Camera ID |
 | `--max-fps <fps>` | `15` | 预览最大帧率 |
 | `--help` | - | 显示帮助 |
@@ -185,7 +209,7 @@ http://192.168.31.9:8080
 |------|------|------|
 | Play (▶) | 订阅流，开始预览 | 已实现 |
 | Stop (■) | 退订流，停止预览 | 已实现 |
-| Record (●) | 录制 | 暂未实现（UI 预留） |
+| Record (● / ■) | 启动 / 停止后台 H.264 录制 | 已实现，转发给 `camera_codec_server` |
 | Detect (🔍) | AI 检测 | 暂未实现（UI 预留） |
 | Camera (📷) | 保存当前画面快照为 PNG | 已实现 |
 

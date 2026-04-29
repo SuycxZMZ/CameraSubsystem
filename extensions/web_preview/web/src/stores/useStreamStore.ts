@@ -4,6 +4,7 @@ import type {
   GatewayCommand,
   CommandResult,
   GatewayStatus,
+  RecordStatus,
   ConnectionState,
 } from '@/types/gateway-command';
 import {
@@ -27,6 +28,7 @@ interface StreamStore {
   sendCommand: (command: GatewayCommand) => void;
   handleCommandResult: (result: CommandResult) => void;
   handleGatewayStatus: (status: GatewayStatus) => void;
+  handleRecordStatus: (status: RecordStatus) => void;
   setSendTextFn: (fn: ((data: string) => void) | null) => void;
 }
 
@@ -67,6 +69,11 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
         lastFramePayload: null,
         lastFrameTimestamp: 0,
         isFormatSupported: false,
+        recording: false,
+        recordFile: '',
+        encodedFrames: 0,
+        decodedFrames: 0,
+        recordError: '',
       };
       return {
         streams: { ...state.streams, [streamId]: newStream },
@@ -93,8 +100,8 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
 
   handleCommandResult: (result) => {
     set({ lastCommandResult: result });
-    // If the result indicates not_supported for record/detect, we just log it
-    // The UI components will check lastCommandResult for display
+    // Unsupported extension commands are logged here; feature-specific status
+    // such as recording state is handled through dedicated status messages.
     if (result.status === 'not_supported') {
       console.info(`[stream-store] Command not supported: ${result.reason ?? 'unknown'}`);
     }
@@ -142,6 +149,24 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
       pixelFormatName: pixelFormatToName(pixelFormat),
       isFormatSupported: isFormatSupported(pixelFormat),
       dropCount: status.dropped_frames,
+    });
+  },
+
+  handleRecordStatus: (status) => {
+    const streamId = status.stream_id || 'usb_camera_0';
+    const store = get();
+
+    if (!store.streams[streamId]) {
+      store.addStream(streamId);
+    }
+
+    store.updateStream(streamId, {
+      recording: Boolean(status.recording),
+      recordFile: status.file ?? '',
+      encodedFrames: status.encoded_frames ?? 0,
+      decodedFrames: status.decoded_frames ?? 0,
+      recordError: status.error ?? '',
+      dropCount: status.dropped_frames ?? store.streams[streamId]?.dropCount ?? 0,
     });
   },
 
