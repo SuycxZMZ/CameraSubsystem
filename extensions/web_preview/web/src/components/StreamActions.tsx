@@ -28,6 +28,7 @@ export function StreamActions({
   const isConnected = connectionState === 'connected';
   const isStreaming = status === 'streaming' || status === 'subscribed';
   const isRecording = Boolean(stream?.recording);
+  const isRecordPending = Boolean(stream?.recordPending);
   const recordButtonClass = isRecording
     ? 'h-8 w-8 border-red-500 bg-red-950 text-red-200 hover:bg-red-900'
     : 'h-8 w-8';
@@ -112,14 +113,20 @@ export function StreamActions({
               variant="outline"
               size="icon"
               className={recordButtonClass}
-              disabled={!isConnected}
+              disabled={!isConnected || isRecordPending}
               onClick={handleRecord}
             >
               {isRecording ? <Square className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {!isConnected ? '连接断开' : isRecording ? '停止录制' : '开始录制'}
+            {!isConnected
+              ? '连接断开'
+              : isRecordPending
+                ? '录制状态切换中'
+                : isRecording
+                  ? '停止录制'
+                  : '开始录制'}
           </TooltipContent>
         </Tooltip>
 

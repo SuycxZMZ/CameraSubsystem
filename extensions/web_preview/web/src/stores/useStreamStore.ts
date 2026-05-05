@@ -70,6 +70,7 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
         lastFrameTimestamp: 0,
         isFormatSupported: false,
         recording: false,
+        recordPending: false,
         recordFile: '',
         encodedFrames: 0,
         decodedFrames: 0,
@@ -91,9 +92,26 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
   setGatewayUrl: (gatewayUrl) => set({ gatewayUrl }),
 
   sendCommand: (command) => {
+    if (command.type === 'set_record_enabled') {
+      const state = get();
+      if (!state.streams[command.stream_id]) {
+        state.addStream(command.stream_id);
+      }
+      state.updateStream(command.stream_id, {
+        recordPending: true,
+        recordError: '',
+      });
+    }
+
     if (sendTextFn) {
       sendTextFn(JSON.stringify(command));
     } else {
+      if (command.type === 'set_record_enabled') {
+        get().updateStream(command.stream_id, {
+          recordPending: false,
+          recordError: 'websocket_not_connected',
+        });
+      }
       console.warn('[stream-store] Cannot send command: WebSocket not connected');
     }
   },
@@ -162,6 +180,7 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
 
     store.updateStream(streamId, {
       recording: Boolean(status.recording),
+      recordPending: false,
       recordFile: status.file ?? '',
       encodedFrames: status.encoded_frames ?? 0,
       decodedFrames: status.decoded_frames ?? 0,

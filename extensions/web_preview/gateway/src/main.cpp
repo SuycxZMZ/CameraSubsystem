@@ -4,6 +4,7 @@
 #include "web_preview/web_server.h"
 
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <iostream>
 #include <thread>
@@ -23,6 +24,7 @@ int main(int argc, char* argv[])
 {
     signal(SIGINT, HandleSignal);
     signal(SIGTERM, HandleSignal);
+    signal(SIGPIPE, SIG_IGN);
 
     web_preview::GatewayConfig config;
     if (!web_preview::ParseGatewayConfig(argc, argv, &config))
@@ -46,14 +48,14 @@ int main(int argc, char* argv[])
     });
 
     web_preview::CameraSubscriberClient camera_client;
-    if (!camera_client.Start(
-            config,
-            [&pipeline](web_preview::CameraFrame&& frame) {
-                pipeline.SubmitFrame(std::move(frame));
-            },
-            [](const std::string& status) {
-                std::cerr << "camera status: " << status << "\n";
-            }))
+    auto frame_callback = [&pipeline](web_preview::CameraFrame&& frame) {
+        pipeline.SubmitFrame(std::move(frame));
+    };
+    auto status_callback = [](const std::string& status) {
+        std::cerr << "camera status: " << status << "\n";
+    };
+
+    if (!camera_client.Start(config, frame_callback, status_callback))
     {
         web_server.Stop();
         return 1;
@@ -64,8 +66,24 @@ int main(int argc, char* argv[])
     std::cout << "device=" << config.device_path
               << " static_root=" << config.static_root << "\n";
 
-    while (g_running.load() && camera_client.IsRunning())
+    while (g_running.load())
     {
+        if (!camera_client.IsRunning())
+        {
+            std::cerr << "camera status: reconnecting\n";
+            camera_client.Stop();
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            if (!g_running.load())
+            {
+                break;
+            }
+            if (!camera_client.Start(config, frame_callback, status_callback))
+            {
+                std::cerr << "camera status: reconnect_failed\n";
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+            continue;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 

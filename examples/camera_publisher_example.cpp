@@ -452,6 +452,7 @@ int main(int argc, char* argv[])
 {
     signal(SIGINT, SignalHandler);
     signal(SIGTERM, SignalHandler);
+    signal(SIGPIPE, SIG_IGN);
 
     std::string device_path = CAMERA_SUBSYSTEM_DEFAULT_CAMERA;
     std::string control_socket_path = camera_subsystem::ipc::kDefaultCameraControlSocketPath;

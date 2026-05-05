@@ -23,6 +23,7 @@ export interface StreamState {
   lastFrameTimestamp: number;
   isFormatSupported: boolean;
   recording: boolean;
+  recordPending: boolean;
   recordFile: string;
   encodedFrames: number;
   decodedFrames: number;

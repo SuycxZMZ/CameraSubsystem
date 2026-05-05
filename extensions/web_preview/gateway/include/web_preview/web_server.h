@@ -43,9 +43,9 @@ private:
     void RemoveDeadClients();
 
     // Codec server control
-    bool ConnectCodecServer();
-    void DisconnectCodecServer();
-    std::string SendCodecCommand(const std::string& json_line);
+    int ConnectCodecServer();
+    std::string SendCodecCommand(const std::string& json_line,
+                                 const std::string& stream_id);
     std::string HandleRecordCommand(const std::string& payload);
 
     std::string BuildFallbackIndex() const;
@@ -68,9 +68,8 @@ private:
     mutable std::mutex stats_mutex_;
     StreamStats stats_;
 
-    // Codec server connection
+    // Codec server command serialization.
     std::mutex codec_mutex_;
-    int codec_fd_ = -1;
 };
 
 } // namespace web_preview

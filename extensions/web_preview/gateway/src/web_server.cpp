@@ -17,6 +17,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <poll.h>
 #include <unistd.h>
 
 namespace web_preview {
@@ -25,6 +26,7 @@ namespace {
 constexpr const char* kWebSocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 constexpr size_t kMaxHttpRequestSize = 16U * 1024U;
 constexpr size_t kMaxControlPayloadSize = 64U * 1024U;
+constexpr int kCodecCommandTimeoutMs = 3000;
 
 void CloseFd(int* fd)
 {
@@ -155,6 +157,12 @@ std::string PixelFormatToString(WebPixelFormat format)
     }
 }
 
+std::string BuildRecordErrorJson(const std::string& stream_id, const std::string& error)
+{
+    return "{\"type\":\"record_status\",\"stream_id\":\"" + stream_id +
+           "\",\"recording\":false,\"error\":\"" + error + "\"}";
+}
+
 } // namespace
 
 WebServer::WebServer()
@@ -247,25 +255,18 @@ void WebServer::Stop()
     }
     clients_.clear();
 
-    DisconnectCodecServer();
 }
 
 // ---------------------------------------------------------------------------
 // Codec server control
 // ---------------------------------------------------------------------------
 
-bool WebServer::ConnectCodecServer()
+int WebServer::ConnectCodecServer()
 {
-    std::lock_guard<std::mutex> lock(codec_mutex_);
-    if (codec_fd_ >= 0)
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0)
     {
-        return true;
-    }
-
-    codec_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (codec_fd_ < 0)
-    {
-        return false;
+        return -1;
     }
 
     struct sockaddr_un addr;
@@ -273,45 +274,31 @@ bool WebServer::ConnectCodecServer()
     addr.sun_family = AF_UNIX;
     std::strncpy(addr.sun_path, config_.codec_socket.c_str(), sizeof(addr.sun_path) - 1);
 
-    if (connect(codec_fd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
+    if (connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
     {
-        close(codec_fd_);
-        codec_fd_ = -1;
-        return false;
+        close(fd);
+        return -1;
     }
 
-    return true;
+    return fd;
 }
 
-void WebServer::DisconnectCodecServer()
+std::string WebServer::SendCodecCommand(const std::string& json_line,
+                                        const std::string& stream_id)
 {
     std::lock_guard<std::mutex> lock(codec_mutex_);
-    if (codec_fd_ >= 0)
-    {
-        close(codec_fd_);
-        codec_fd_ = -1;
-    }
-}
 
-std::string WebServer::SendCodecCommand(const std::string& json_line)
-{
-    if (!ConnectCodecServer())
+    int codec_fd = ConnectCodecServer();
+    if (codec_fd < 0)
     {
-        return "{\"type\":\"record_status\",\"error\":\"codec_server_not_available\"}";
-    }
-
-    std::lock_guard<std::mutex> lock(codec_mutex_);
-    if (codec_fd_ < 0)
-    {
-        return "{\"type\":\"record_status\",\"error\":\"codec_server_not_available\"}";
+        return BuildRecordErrorJson(stream_id, "codec_server_not_available");
     }
 
     std::string line = json_line + "\n";
-    if (!WriteFull(codec_fd_, line.data(), line.size()))
+    if (!WriteFull(codec_fd, line.data(), line.size()))
     {
-        close(codec_fd_);
-        codec_fd_ = -1;
-        return "{\"type\":\"record_status\",\"error\":\"codec_server_write_failed\"}";
+        close(codec_fd);
+        return BuildRecordErrorJson(stream_id, "codec_server_write_failed");
     }
 
     // Read response line
@@ -319,12 +306,31 @@ std::string WebServer::SendCodecCommand(const std::string& json_line)
     char buf[4096];
     while (true)
     {
-        ssize_t n = recv(codec_fd_, buf, sizeof(buf), 0);
+        pollfd pfd;
+        pfd.fd = codec_fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        const int poll_ret = poll(&pfd, 1, kCodecCommandTimeoutMs);
+        if (poll_ret == 0)
+        {
+            close(codec_fd);
+            return BuildRecordErrorJson(stream_id, "codec_server_timeout");
+        }
+        if (poll_ret < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            close(codec_fd);
+            return BuildRecordErrorJson(stream_id, "codec_server_read_failed");
+        }
+
+        ssize_t n = recv(codec_fd, buf, sizeof(buf), 0);
         if (n <= 0)
         {
-            close(codec_fd_);
-            codec_fd_ = -1;
-            return "{\"type\":\"record_status\",\"error\":\"codec_server_read_failed\"}";
+            close(codec_fd);
+            return BuildRecordErrorJson(stream_id, "codec_server_read_failed");
         }
         response.append(buf, static_cast<size_t>(n));
         if (response.find('\n') != std::string::npos)
@@ -338,6 +344,7 @@ std::string WebServer::SendCodecCommand(const std::string& json_line)
         }
     }
 
+    close(codec_fd);
     return response;
 }
 
@@ -412,7 +419,7 @@ std::string WebServer::HandleRecordCommand(const std::string& payload)
                   + "\",\"stream_id\":\"" + stream_id + "\"}";
     }
 
-    return SendCodecCommand(codec_cmd);
+    return SendCodecCommand(codec_cmd, stream_id);
 }
 
 void WebServer::BroadcastBinary(const std::vector<uint8_t>& packet)
