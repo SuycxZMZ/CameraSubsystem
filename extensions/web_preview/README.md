@@ -8,7 +8,20 @@
 - 在开发板上提供 HTTP 静态页面服务和 WebSocket 数据通道。
 - 支持局域网内 PC 或其他节点通过浏览器访问 `http://<board_ip>:8080` 查看实时画面。
 - 第一阶段优先支持 USB 摄像头 JPEG 输出的原始透传预览。
+- 支持通过 Record 按钮触发 `camera_codec_server` 后台 H.264 录制，停止录制后预览链路继续出帧。
 - 后续扩展支持 MIPI、NV12、YUYV、UYVY、RGB/RGBA、硬件格式转换、AI 检测结果叠加等能力。
+
+## 当前进度
+
+截至 2026-05-05，Web Preview 已完成 RK3576 正式目录联调：
+
+| 能力 | 状态 | 验证 |
+|------|------|------|
+| HTTP + WebSocket 预览 | 已完成 | `/status` 返回 `format=JPEG`、`width=1920`、`height=1080`，浏览器实时预览可用。 |
+| React 前端渲染 | 已完成 | Canvas 按 DPR-aware backing store 渲染，单路预览可持续显示。 |
+| Web Record 控制 | 已完成 | Record start/stop 转发到 `camera_codec_server`，前端处理 `record_status` 并维护 pending 状态。 |
+| 停止录制后预览保持 | 已验证 | RK3576 正式目录验证 `LIVE_WS_COUNTS before=15 during=25 after=25`，8080 保持监听。 |
+| 板端 smoke | 已补充 | `scripts/web-record-freeze-smoke-rk3576.sh` 默认使用 `/home/luckfox/CameraSubsystem`。 |
 
 ## 目录结构
 
@@ -309,7 +322,16 @@ Gateway → 浏览器：
 | Fallback 页面而非 React UI | 前端 dist 未部署 | 运行 `build-web.sh` 并部署到开发板 |
 | 本机开发无法连接 WebSocket | Vite proxy 配置错误 | 检查 `vite.config.ts` 中的开发板 IP |
 | 显示"不支持的格式" | 摄像头输出非 JPEG 格式 | 当前仅支持 JPEG/MJPEG 透传 |
+| 停止录制后页面刷新 `ERR_CONNECTION_REFUSED` | 板端仍在运行旧 gateway/publisher，或正式目录二进制未更新 | 重新部署 `/home/luckfox/CameraSubsystem/bin/` 下的 `camera_publisher_example`、`web_preview_gateway`，并确认 `ss -lntp | grep 8080`。 |
 
 ## 文档
 
 - [WEB_PREVIEW_ARCHITECTURE.md](docs/WEB_PREVIEW_ARCHITECTURE.md)
+- [../../docs/BOARD_WEB_DEBUG_GUIDE.md](../../docs/BOARD_WEB_DEBUG_GUIDE.md)
+
+## 下一步计划
+
+1. 把 Web 录制 smoke 纳入统一部署流程，保证正式目录脚本和二进制同步更新。
+2. 增加 Web 录制长稳验证：重复 start/stop、浏览器刷新、WebSocket 断开重连、codec server 重启。
+3. 增强录制状态 UI：显示录制时长、文件大小、最近一次错误和输出文件路径。
+4. 为非 JPEG 输入预留前端格式提示和 Gateway transform pipeline 的板端验证入口。

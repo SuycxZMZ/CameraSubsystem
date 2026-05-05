@@ -1,6 +1,6 @@
 # CameraSubsystem 实现状态
 
-**更新日期:** 2026-04-26
+**更新日期:** 2026-05-05
 
 > **文档硬规范**
 >
@@ -174,6 +174,7 @@ flowchart TB
 - ✅ 跨进程 `DataPlaneV2` / `SCM_RIGHTS` fd 传递与独立 `ReleaseFrame` 回收通道
 - ✅ 基础背压：池耗尽时丢帧
 - ✅ `camera_session_manager.h/cpp` - 会话管理（按订阅启停）
+- ✅ Web Preview + Codec Server 录制联调：Record start/stop 后预览数据面保持可用，publisher 对断开的 codec data fd 走 send_fail 清理而非进程退出
 
 **待实现:**
 
@@ -231,6 +232,8 @@ flowchart TB
 - ✅ CameraSessionManager 单元测试
 - ✅ 控制面 IPC 单元测试（含沙箱受限跳过策略）
 - ✅ FrameDescriptor / FrameLease 单元测试
+- ✅ Codec Server writer/session 本机验证
+- ✅ RK3576 Web 录制 start/stop smoke：停止录制后 WebSocket 仍持续出帧，8080 服务保持监听
 
 **待添加测试:**
 
@@ -239,6 +242,7 @@ flowchart TB
 - ⏳ CameraSource 单元测试
 - ⏳ 集成测试
 - ⏳ 性能测试
+- ⏳ Web 录制长稳与 H.264 播放兼容性测试
 
 ## 文档状态
 
@@ -273,6 +277,11 @@ flowchart TB
 3. **提升进程模型健壮性**
    - 控制面心跳与断链恢复
    - 订阅抖动场景下的会话防抖策略
+
+4. **Web 录制长稳验证**
+   - 重复 start/stop、浏览器刷新、WebSocket 断开重连
+   - 确认停止录制后 `web_preview_gateway` 继续监听 8080
+   - 校验 `.h264` 输出文件可被常用工具解析/播放
 
 ### 中期目标（3-4周）
 
@@ -318,6 +327,7 @@ flowchart TB
 2. 发布端/订阅端解耦、按订阅启停、控制面/数据面协议已形成双进程可运行原型。
 3. DMA-BUF Phase 2 已完成最小跨进程闭环：`FrameDescriptor` / `FrameLease` / V4L2 `VIDIOC_EXPBUF`、DataPlaneV2 descriptor、`SCM_RIGHTS` fd 传递、独立 release channel、publisher/subscriber 示例接入，并已在 RK3576 `/dev/video45` 冒烟通过。
 4. 长稳压测、慢消费者隔离、多订阅者、设备恢复、统一 metrics、通用板端自检流程仍是下一阶段重点。
+5. Web Preview 录制控制闭环已在 RK3576 正式目录验证通过，后续重点从“能跑通”转为“长稳、可播放、可运维”。
 
 ## DMA-BUF Phase 1 后续修改入口
 
@@ -400,8 +410,11 @@ flowchart TB
 - [x] 完善 RK3576 板端 smoke 脚本 counters 自动判定与 SSH 密码自动输入体验 ✅ 2026-04-27
 - [x] 完成 RK3576 DataPlaneV2 慢消费者/双订阅者 60 秒长稳验证 ✅ 2026-04-27
 - [x] 新增 `mplane_dmabuf_probe` 并验证 RKISP/RKVpss MPLANE 节点 `REQBUFS + QUERYBUF + EXPBUF` ✅ 2026-04-27
+- [x] 完成 Web Preview + Codec Server 录制 start/stop 正式目录 smoke，验证停止录制后 WebSocket 继续出帧且 8080 保持监听 ✅ 2026-05-05
+- [x] 修正 Web 录制 smoke 默认路径，统一使用 `/home/luckfox/CameraSubsystem` 规范目录 ✅ 2026-05-05
 - [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane
 - [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
+- [ ] 增加 Web 录制长稳、重复 start/stop 和 H.264 文件播放兼容验证
 - [ ] 背压策略参数化（延迟阈值/优先级规则）
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 

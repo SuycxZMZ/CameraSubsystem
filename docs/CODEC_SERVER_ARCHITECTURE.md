@@ -712,13 +712,13 @@ stateDiagram-v2
 | 7 | 接入 JPEG decode stub / 真实解码库探测 | ✅ MPP JPEG decode 已封装进 `JpegDecodeStage` 并接入 live 录制 pipeline，主机无 MPP 时保留 stub fallback |
 | 8 | 接入 `H264MppEncoder` 最小编码 | ✅ RK3576 合成 NV12 输入可输出 H.264 packet |
 | 9 | 串联 USB live JPEG/MJPEG -> H.264 文件 | ✅ RK3576 `/dev/video45` live smoke 已生成非空 `.h264` 文件 |
-| 10 | 接入 `web_preview_gateway` 录制控制转发 | 前端按钮能启动/停止后台录制并显示状态 |
+| 10 | 接入 `web_preview_gateway` 录制控制转发 | ✅ 前端按钮能启动/停止后台录制并显示状态，停止录制后预览链路持续出帧 |
 
 第一阶段不要求 DataPlaneV2 立刻进入编码路径；在 USB JPEG/MJPEG 录制稳定后，再接 DataPlaneV2 和 MIPI/RKISP NV12。
 
 ### 16.1 当前实现进度
 
-截至 2026-04-28，当前已完成第一阶段前九步的最小闭环：
+截至 2026-05-05，当前已完成第一阶段 Web 控制闭环：
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
@@ -734,6 +734,8 @@ stateDiagram-v2
 | `CameraStreamSubscriber` | 已完成当前切片 | 已实现 v1 copy 数据面连接、控制面 Subscribe / Unsubscribe、帧头/帧 payload 读取和 `input_frames` / `input_bytes` 统计；RK3576 `/dev/video45` smoke 已验证 start/status/stop |
 | `JpegDecodeStage` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingMJPEG` 解码，输出 NV12 `DecodedImageFrame`；主机无 MPP 时返回 `jpeg_decoder_not_available` |
 | `H264MppEncoder` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingAVC` 编码；合成 NV12 测试 5/5 通过；live 链路已写出裸 `.h264` 文件 |
+| Web 录制控制闭环 | 已完成 | `web_preview_gateway` 转发 start/stop 到 `camera_codec_server`，前端接收 `record_status`；停止录制后 Web 预览继续显示 |
+| Web 录制卡死防护 | 已完成 | publisher / gateway 忽略 `SIGPIPE`，gateway codec 控制链路按命令短连接并设置超时，前端增加 recording pending |
 | 本机 writer/session 验证 | 已完成 | `recording_file_writer_test` 41/41 通过；`recording_session_manager_test` 7/7 通过 |
 
 当前尚未实现：
@@ -741,6 +743,7 @@ stateDiagram-v2
 1. 更长时间编码稳定性验证。
 2. 编码参数从请求或启动参数传入 `H264MppEncoder`。
 3. Web 录制状态展示增强，例如录制时长、文件大小和错误提示组件。
+4. 裸 H.264 文件播放兼容性验证和后续容器封装策略。
 
 RK3576 v1 copy 数据面 smoke 结果：
 
@@ -752,7 +755,18 @@ RK3576 v1 copy 数据面 smoke 结果：
 | codec stop | 返回 `recording=false`、`state=idle`，最终 `input_frames=94`、`decoded_frames=94`、`encoded_frames=94`、`decode_failures=0` |
 | 输出文件 | 已生成非空 `.h264` 文件，约 1.5MB |
 
-下一步建议进入 Web Preview Gateway 录制控制转发和长稳验证：前端点击录制后转发到 `camera_codec_server`，同时补充更长时间 smoke 观察编码延迟、丢帧和文件可播放性。
+RK3576 Web 录制 start/stop smoke 结果：
+
+| 项目 | 结果 |
+|------|------|
+| 正式部署目录 | `/home/luckfox/CameraSubsystem` |
+| Web 服务 | `0.0.0.0:8080` 保持监听 |
+| WebSocket 预览计数 | `LIVE_WS_COUNTS before=15 during=25 after=25` |
+| record start | 返回 `recording=true`，创建 `/home/luckfox/CameraSubsystem/recordings/*.h264` |
+| record stop | 返回 `recording=false`、`state=idle`，最终 `encoded_frames=50`、`decoded_frames=50`、`decode_failures=0` |
+| 停止后预览 | `/status` 仍返回 `streaming`，WebSocket after 计数大于 0 |
+
+下一步建议进入 Web 录制长稳和文件可播放性验证：覆盖连续录制、重复 start/stop、浏览器刷新、WebSocket 断开重连、codec server 重启，以及裸 H.264 在常用播放器/分析工具中的兼容性。
 
 当前实现边界：
 
@@ -796,7 +810,7 @@ RK3576 v1 copy 数据面 smoke 结果：
 
 2. **MVP-1：USB live 录制**：`camera_codec_server` 订阅 `/dev/video45` 原始 JPEG/MJPEG 帧，后台编码保存 H.264。
 
-3. **MVP-2：Web 控制闭环**：前端录制按钮启用，Gateway 转发控制命令，状态回传 UI。
+3. **MVP-2：Web 控制闭环**：前端录制按钮启用，Gateway 转发控制命令，状态回传 UI。当前已完成短 smoke 验证，下一步进入长稳。
 
 4. **MVP-3：DataPlaneV2 接入**：`camera_codec_server` 支持 DataPlaneV2，明确 copy path 和 fd path 的选择。
 
@@ -831,7 +845,8 @@ RK3576 v1 copy 数据面 smoke 结果：
 - 已决策：第一阶段默认编码服务控制 socket 使用 `/tmp/camera_subsystem_codec.sock`。
 - 已决策：第一阶段控制协议优先使用 JSON line，便于手工调试；后续稳定后再评估二进制 POD。
 - 已决策：同一路重复 start 返回 `already_recording`。
-- TODO：确认 Gateway 与 `camera_codec_server` 断连后的 UI 状态和重连策略。
+- 已验证：Gateway 与 `camera_codec_server` 采用短连接控制命令；codec 连接异常时会返回带 `stream_id` 的 `record_status` 错误，前端清理 pending 状态。
+- TODO：确认 `camera_codec_server` 进程重启后的 UI 状态刷新和录制按钮可用性策略。
 
 ### 19.4 文件与磁盘
 

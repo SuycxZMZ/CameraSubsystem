@@ -1,24 +1,24 @@
 #!/bin/sh
 set -eu
 
-REMOTE_ROOT="${REMOTE_ROOT:-/home/luckfox}"
-PUBLISHER_BIN="${PUBLISHER_BIN:-${REMOTE_ROOT}/camera_publisher_example}"
-CODEC_BIN="${CODEC_BIN:-${REMOTE_ROOT}/camera_codec_server}"
-GATEWAY_BIN="${GATEWAY_BIN:-${REMOTE_ROOT}/web_preview_gateway}"
+REMOTE_ROOT="${REMOTE_ROOT:-/home/luckfox/CameraSubsystem}"
+PUBLISHER_BIN="${PUBLISHER_BIN:-${REMOTE_ROOT}/bin/camera_publisher_example}"
+CODEC_BIN="${CODEC_BIN:-${REMOTE_ROOT}/bin/camera_codec_server}"
+GATEWAY_BIN="${GATEWAY_BIN:-${REMOTE_ROOT}/bin/web_preview_gateway}"
 DEVICE="${DEVICE:-/dev/video45}"
 CONTROL_SOCKET="${CONTROL_SOCKET:-/tmp/camera_subsystem_control.sock}"
 DATA_SOCKET="${DATA_SOCKET:-/tmp/camera_subsystem_data.sock}"
 CODEC_SOCKET="${CODEC_SOCKET:-/tmp/camera_subsystem_codec.sock}"
-OUTPUT_DIR="${OUTPUT_DIR:-${REMOTE_ROOT}/web_freeze_records}"
-STATIC_ROOT="${STATIC_ROOT:-${REMOTE_ROOT}/web_dist}"
+OUTPUT_DIR="${OUTPUT_DIR:-${REMOTE_ROOT}/recordings/web_freeze_records}"
+STATIC_ROOT="${STATIC_ROOT:-${REMOTE_ROOT}/web_preview/dist}"
 PORT="${PORT:-8080}"
 
-PUBLISHER_LOG="${PUBLISHER_LOG:-${REMOTE_ROOT}/publisher_web_freeze.log}"
-CODEC_LOG="${CODEC_LOG:-${REMOTE_ROOT}/codec_web_freeze.log}"
-GATEWAY_LOG="${GATEWAY_LOG:-${REMOTE_ROOT}/gateway_web_freeze.log}"
-PUBLISHER_PID_FILE="${PUBLISHER_PID_FILE:-${REMOTE_ROOT}/publisher_web_freeze.pid}"
-CODEC_PID_FILE="${CODEC_PID_FILE:-${REMOTE_ROOT}/codec_web_freeze.pid}"
-GATEWAY_PID_FILE="${GATEWAY_PID_FILE:-${REMOTE_ROOT}/gateway_web_freeze.pid}"
+PUBLISHER_LOG="${PUBLISHER_LOG:-${REMOTE_ROOT}/logs/publisher_web_freeze.log}"
+CODEC_LOG="${CODEC_LOG:-${REMOTE_ROOT}/logs/codec_web_freeze.log}"
+GATEWAY_LOG="${GATEWAY_LOG:-${REMOTE_ROOT}/logs/gateway_web_freeze.log}"
+PUBLISHER_PID_FILE="${PUBLISHER_PID_FILE:-${REMOTE_ROOT}/run/publisher_web_freeze.pid}"
+CODEC_PID_FILE="${CODEC_PID_FILE:-${REMOTE_ROOT}/run/codec_web_freeze.pid}"
+GATEWAY_PID_FILE="${GATEWAY_PID_FILE:-${REMOTE_ROOT}/run/gateway_web_freeze.pid}"
 CLIENT_PY="${CLIENT_PY:-/tmp/web_record_freeze_smoke.py}"
 
 cleanup()

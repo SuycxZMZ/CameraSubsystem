@@ -1,6 +1,6 @@
 # CameraSubsystem 文档索引
 
-**最后更新:** 2026-04-29
+**最后更新:** 2026-05-05
 
 > **文档硬规范**
 >
@@ -54,6 +54,13 @@
 4. [BOARD_WEB_DEBUG_GUIDE.md](BOARD_WEB_DEBUG_GUIDE.md)
 5. 参考当前已接入的 RK3576 示例：`../cmake/toolchains/rk3576.cmake`
 6. 参考当前已接入的 RK3576 示例：`../scripts/build-rk3576.sh`
+
+### 做 Web 预览与录制联调
+
+1. [BOARD_WEB_DEBUG_GUIDE.md](BOARD_WEB_DEBUG_GUIDE.md)
+2. [../extensions/web_preview/README.md](../extensions/web_preview/README.md)
+3. [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)
+4. [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)
 
 ---
 
