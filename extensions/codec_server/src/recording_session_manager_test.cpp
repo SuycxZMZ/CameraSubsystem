@@ -8,8 +8,11 @@
 namespace fs = std::filesystem;
 using camera_subsystem::extensions::codec_server::CodecControlCommand;
 using camera_subsystem::extensions::codec_server::CodecControlRequest;
+using camera_subsystem::extensions::codec_server::CodecControlStatus;
+using camera_subsystem::extensions::codec_server::ParseCodecControlRequestLine;
 using camera_subsystem::extensions::codec_server::RecordingSessionConfig;
 using camera_subsystem::extensions::codec_server::RecordingSessionManager;
+using camera_subsystem::extensions::codec_server::SerializeCodecControlStatus;
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -96,6 +99,68 @@ static void TestInvalidStreamId()
     fs::remove_all(dir);
 }
 
+static void TestProfilePriority()
+{
+    const std::string dir = MakeTempDir() + "/profile";
+    RecordingSessionConfig config;
+    config.default_output_dir = dir;
+    config.fps = 25;
+    config.bitrate = 2000000;
+    config.gop = 50;
+    RecordingSessionManager manager(config);
+
+    auto request = MakeRequest(CodecControlCommand::kStartRecording, "cam_profile", "");
+    request.profile.bitrate = 3000000;
+    auto status = manager.StartRecording(request);
+    Report("ProfilePriority: request bitrate overrides config",
+           status.profile.bitrate == 3000000);
+    Report("ProfilePriority: fps falls back to config",
+           status.profile.fps == 25);
+    Report("ProfilePriority: gop falls back to config",
+           status.profile.gop == 50);
+    Report("ProfilePriority: width override is not applied without scaling",
+           status.profile.width == 0 && status.profile.height == 0);
+
+    auto query = MakeRequest(CodecControlCommand::kStatus, "cam_profile", "");
+    status = manager.GetStatus(query);
+    Report("ProfilePriority: status keeps effective profile",
+           status.profile.fps == 25 &&
+               status.profile.bitrate == 3000000 &&
+               status.profile.gop == 50);
+
+    auto stop = MakeRequest(CodecControlCommand::kStopRecording, "cam_profile", "");
+    (void)manager.StopRecording(stop);
+    fs::remove_all(dir);
+}
+
+static void TestCodecControlProfileProtocol()
+{
+    CodecControlRequest request;
+    std::string error;
+    const bool parsed = ParseCodecControlRequestLine(
+        "{\"type\":\"start_recording\",\"request_id\":\"p1\","
+        "\"stream_id\":\"cam0\",\"profile\":{\"fps\":15,"
+        "\"bitrate\":1500000,\"gop\":30}}",
+        &request,
+        &error);
+    Report("CodecControlProfileProtocol: parse nested profile",
+           parsed && error.empty() &&
+               request.profile.fps == 15 &&
+               request.profile.bitrate == 1500000 &&
+               request.profile.gop == 30);
+
+    CodecControlStatus status;
+    status.request_id = "p1";
+    status.stream_id = "cam0";
+    status.profile.fps = 15;
+    status.profile.bitrate = 1500000;
+    status.profile.gop = 30;
+    const std::string json = SerializeCodecControlStatus(status);
+    Report("CodecControlProfileProtocol: serialize profile",
+           json.find("\"profile\":{\"fps\":15,\"bitrate\":1500000,\"gop\":30}") !=
+               std::string::npos);
+}
+
 int main()
 {
     std::cout << "RecordingSessionManager verification\n";
@@ -103,6 +168,8 @@ int main()
 
     TestStartStopStatus();
     TestInvalidStreamId();
+    TestProfilePriority();
+    TestCodecControlProfileProtocol();
 
     std::cout << "\n====================================\n";
     std::cout << "Total: " << (g_pass + g_fail)

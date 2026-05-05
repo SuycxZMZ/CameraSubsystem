@@ -21,6 +21,11 @@ CodecControlStatus RecordingSessionManager::StartRecording(
 
     state_ = "starting";
     stream_id_ = request.stream_id;
+    active_profile_ = {};
+    active_profile_.fps = request.profile.fps > 0 ? request.profile.fps : config_.fps;
+    active_profile_.bitrate =
+        request.profile.bitrate > 0 ? request.profile.bitrate : config_.bitrate;
+    active_profile_.gop = request.profile.gop > 0 ? request.profile.gop : config_.gop;
     encoded_frames_.store(0);
     dropped_frames_.store(0);
     input_frames_ = 0;
@@ -126,6 +131,7 @@ CodecControlStatus RecordingSessionManager::BuildStatusLocked(
     status.decode_failures = decode_failures_.load();
     status.write_failures = stats.write_failures + subscriber_stats.read_failures;
     status.error = error;
+    status.profile = active_profile_;
     return status;
 }
 
@@ -190,9 +196,9 @@ H264EncoderConfig RecordingSessionManager::BuildEncoderConfig(
     config.height = frame.height;
     config.hor_stride = frame.hor_stride;
     config.ver_stride = frame.ver_stride;
-    config.fps = 30;
-    config.bitrate = 4000000;
-    config.gop = 60;
+    config.fps = active_profile_.fps > 0 ? active_profile_.fps : config_.fps;
+    config.bitrate = active_profile_.bitrate > 0 ? active_profile_.bitrate : config_.bitrate;
+    config.gop = active_profile_.gop > 0 ? active_profile_.gop : config_.gop;
     return config;
 }
 

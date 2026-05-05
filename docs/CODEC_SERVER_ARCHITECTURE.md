@@ -281,14 +281,14 @@ flowchart TB
   "container": "raw_h264",
   "output_dir": "/home/luckfox/CameraSubsystem/recordings",
   "profile": {
-    "width": 1920,
-    "height": 1080,
     "fps": 30,
     "bitrate": 4000000,
     "gop": 60
   }
 }
 ```
+
+第一版参数化范围只覆盖 `fps` / `bitrate` / `gop`。`width` / `height` 属于后续缩放或裁剪能力的预留字段；在当前 `USB JPEG -> MPP MJPEG decode -> NV12 -> MPP H.264 encode` 链路中，编码尺寸必须来自实际解码帧，不能通过控制请求强行覆盖，否则会造成 encoder 配置与输入 buffer 布局不一致。
 
 停止录制：
 
@@ -312,7 +312,12 @@ flowchart TB
   "container": "raw_h264",
   "file": "/home/luckfox/CameraSubsystem/recordings/usb_camera_0_20260427_153000.h264",
   "encoded_frames": 0,
-  "dropped_frames": 0
+  "dropped_frames": 0,
+  "profile": {
+    "fps": 30,
+    "bitrate": 4000000,
+    "gop": 60
+  }
 }
 ```
 
@@ -697,6 +702,103 @@ stateDiagram-v2
 3. Gateway 启动时如果 `camera_codec_server` 不存在，应把录制按钮置为不可用或返回明确错误。
 4. 后续可由部署脚本或 systemd 管理三个进程。
 
+### 15.3 板端 Web 预览 + 录制全功能测试步骤
+
+以下步骤在开发机上执行，通过 SSH 在 RK3576 板端启动三个服务，然后通过本机浏览器访问板端 Web 页面进行预览和录制验证。
+
+#### 前置条件
+
+- 开发机与 RK3576 在同一局域网，板端 IP 默认 `192.168.31.9`
+- 已完成交叉编译：`scripts/build-rk3576.sh`
+- 已完成 Web 前端构建：`extensions/web_preview/scripts/build-web.sh`
+- 已完成 Gateway 交叉编译：`extensions/web_preview/scripts/build-gateway-rk3576.sh`
+- 开发机 SSH 可连接板端（用户 `luckfox`，密码 `luckfox`）
+
+#### 一键部署
+
+```bash
+# 部署所有二进制和前端资源到板端
+./scripts/deploy-rk3576-web-debug.sh
+```
+
+#### 手动启动三服务
+
+在板端 SSH 会话中依次启动：
+
+```bash
+# 1. 启动 publisher（Camera 原始流发布）
+/home/luckfox/CameraSubsystem/bin/camera_publisher_example \
+  /dev/video45 \
+  /tmp/camera_subsystem_control.sock \
+  /tmp/camera_subsystem_data.sock \
+  --io-method mmap &
+
+sleep 1
+
+# 2. 启动 codec_server（H.264 编码录制）
+/home/luckfox/CameraSubsystem/bin/camera_codec_server \
+  --control-socket /tmp/camera_subsystem_control.sock \
+  --data-socket /tmp/camera_subsystem_data.sock \
+  --codec-socket /tmp/camera_subsystem_codec.sock \
+  --output-dir /home/luckfox/CameraSubsystem/recordings \
+  --device /dev/video45 &
+
+sleep 1
+
+# 3. 启动 web_preview_gateway（Web 预览 + 录制控制转发）
+/home/luckfox/CameraSubsystem/bin/web_preview_gateway \
+  --port 8080 \
+  --control-socket /tmp/camera_subsystem_control.sock \
+  --data-socket /tmp/camera_subsystem_data.sock \
+  --codec-socket /tmp/camera_subsystem_codec.sock \
+  --output-dir /home/luckfox/CameraSubsystem/recordings \
+  --device /dev/video45 \
+  --static-root /home/luckfox/CameraSubsystem/web_preview/dist &
+```
+
+#### 本机浏览器验证
+
+1. **打开预览页面**：在开发机浏览器中访问 `http://192.168.31.9:8080`
+2. **开始预览**：点击 Play 按钮（▶），确认画面实时显示
+3. **开始录制**：点击 Record 按钮（●），确认按钮状态变化
+4. **等待录制**：录制数秒至数十秒
+5. **停止录制**：再次点击 Record 按钮，确认录制停止
+6. **确认预览持续**：停止录制后，预览画面应继续实时显示，8080 端口保持监听
+7. **查看录制文件**：在板端检查 `/home/luckfox/CameraSubsystem/recordings/*.h264`
+
+#### 验证录制文件
+
+```bash
+# 在板端查看录制文件
+ls -lh /home/luckfox/CameraSubsystem/recordings/*.h264
+
+# 下载到开发机验证
+scp luckfox@192.168.31.9:/home/luckfox/CameraSubsystem/recordings/*.h264 /tmp/
+
+# 用 ffprobe 检查文件格式
+ffprobe /tmp/usb_camera_0_*.h264
+
+# 用 ffplay 播放
+ffplay /tmp/usb_camera_0_*.h264
+```
+
+#### 自动化全功能测试
+
+```bash
+# 运行全功能测试脚本（自动启动三服务、验证预览和录制）
+./scripts/rk3576-fullstack-web-test.sh
+
+# 自定义录制时长（默认 10 秒）
+RECORD_SECONDS=30 ./scripts/rk3576-fullstack-web-test.sh
+```
+
+#### 长时间录制稳定性测试
+
+```bash
+# 60 秒录制稳定性测试（仅 codec_server，不含 Web）
+DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
+```
+
 ## 16. 第一阶段实现顺序
 
 建议按以下顺序写代码，避免一开始同时处理 Web、JPEG、MPP、DataPlaneV2：
@@ -718,7 +820,7 @@ stateDiagram-v2
 
 ### 16.1 当前实现进度
 
-截至 2026-05-05，当前已完成第一阶段 Web 控制闭环：
+截至 2026-05-05，当前已完成第一阶段全部 10 步，Web 控制闭环已验证：
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
@@ -736,14 +838,20 @@ stateDiagram-v2
 | `H264MppEncoder` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingAVC` 编码；合成 NV12 测试 5/5 通过；live 链路已写出裸 `.h264` 文件 |
 | Web 录制控制闭环 | 已完成 | `web_preview_gateway` 转发 start/stop 到 `camera_codec_server`，前端接收 `record_status`；停止录制后 Web 预览继续显示 |
 | Web 录制卡死防护 | 已完成 | publisher / gateway 忽略 `SIGPIPE`，gateway codec 控制链路按命令短连接并设置超时，前端增加 recording pending |
+| 60 秒录制稳定性 | 已完成 | 1490 帧输入/解码/编码，0 decode_failures，0 write_failures，输出 24MB H.264 文件 |
+| H.264 文件播放兼容性 | 已验证 | `ffprobe` 确认 H.264 High profile 1920x1080 yuv420p，avg_frame_rate=25/1 |
 | 本机 writer/session 验证 | 已完成 | `recording_file_writer_test` 41/41 通过；`recording_session_manager_test` 7/7 通过 |
+| 5 分钟录制长稳 | 已完成 | 5676 帧输入，5674 帧解码/编码（99.96%），2 decode_failures，0 write_failures，91MB 输出 |
+| 重复 start/stop 循环 | 已完成 | 10 次 x 5 秒循环，995 帧编码，0 失败，10 个独立 .h264 文件 |
+| H.264 多工具兼容性 | 已验证 | ffprobe + ffmpeg 全帧解码 5674 帧成功，cycle 文件 100 帧全解码成功 |
+| 编码参数化 | 已完成 | 请求级 `fps` / `bitrate` / `gop` 覆盖 + 启动参数默认值 + status 响应返回有效 profile；`width` / `height` 仅预留，当前不做缩放覆盖 |
 
 当前尚未实现：
 
-1. 更长时间编码稳定性验证。
-2. 编码参数从请求或启动参数传入 `H264MppEncoder`。
-3. Web 录制状态展示增强，例如录制时长、文件大小和错误提示组件。
-4. 裸 H.264 文件播放兼容性验证和后续容器封装策略。
+1. Web 录制长稳验证（浏览器刷新/断线重连、codec server 重启恢复）。
+2. Web 录制状态展示增强，例如录制时长、文件大小和错误提示组件。
+3. 容器封装：MP4/MKV muxer 集成。
+4. DataPlaneV2 -> MPP 低拷贝录制路径。
 
 RK3576 v1 copy 数据面 smoke 结果：
 
@@ -766,7 +874,24 @@ RK3576 Web 录制 start/stop smoke 结果：
 | record stop | 返回 `recording=false`、`state=idle`，最终 `encoded_frames=50`、`decoded_frames=50`、`decode_failures=0` |
 | 停止后预览 | `/status` 仍返回 `streaming`，WebSocket after 计数大于 0 |
 
-下一步建议进入 Web 录制长稳和文件可播放性验证：覆盖连续录制、重复 start/stop、浏览器刷新、WebSocket 断开重连、codec server 重启，以及裸 H.264 在常用播放器/分析工具中的兼容性。
+RK3576 60 秒录制稳定性结果：
+
+| 项目 | 结果 |
+|------|------|
+| 录制时长 | 60 秒 |
+| 输入帧 | 1490（约 24.8 fps） |
+| 解码帧 | 1490（100% 成功） |
+| 编码帧 | 1490（100% 成功） |
+| decode_failures | 0 |
+| write_failures | 0 |
+| 输出文件 | 24 MB，H.264 High profile 1920x1080 |
+
+下一步推进容器封装和 DataPlaneV2 低拷贝录制路径：
+
+1. **容器封装**：优先引入 MP4 muxer，明确时间基、SPS/PPS 写入、异常停止后的文件可恢复性；MKV 作为后续备选。
+2. **Web 录制状态增强**：把录制时长、文件大小、有效编码 profile、decode/write 错误提示展示到前端。
+3. **Web 长稳补充**：覆盖浏览器刷新、WebSocket 断线重连、codec server 重启恢复。
+4. **DataPlaneV2 低拷贝**：`camera_codec_server` 接入 DataPlaneV2 + MPP buffer import，减少 copy path 压力。
 
 当前实现边界：
 
@@ -810,7 +935,7 @@ RK3576 Web 录制 start/stop smoke 结果：
 
 2. **MVP-1：USB live 录制**：`camera_codec_server` 订阅 `/dev/video45` 原始 JPEG/MJPEG 帧，后台编码保存 H.264。
 
-3. **MVP-2：Web 控制闭环**：前端录制按钮启用，Gateway 转发控制命令，状态回传 UI。当前已完成短 smoke 验证，下一步进入长稳。
+3. **MVP-2：Web 控制闭环**：前端录制按钮启用，Gateway 转发控制命令，状态回传 UI。已完成短 smoke 和 60 秒稳定性验证，停止录制后预览持续出帧。
 
 4. **MVP-3：DataPlaneV2 接入**：`camera_codec_server` 支持 DataPlaneV2，明确 copy path 和 fd path 的选择。
 

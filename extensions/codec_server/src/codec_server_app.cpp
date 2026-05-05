@@ -33,7 +33,10 @@ CodecServerApp::CodecServerApp(CodecServerConfig config)
               0,
               64U * 1024U * 1024U,
               nullptr},
-          true})
+          true,
+          config_.fps,
+          config_.bitrate,
+          config_.gop})
 {
 }
 

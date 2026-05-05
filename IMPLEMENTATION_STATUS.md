@@ -234,6 +234,8 @@ flowchart TB
 - ✅ FrameDescriptor / FrameLease 单元测试
 - ✅ Codec Server writer/session 本机验证
 - ✅ RK3576 Web 录制 start/stop smoke：停止录制后 WebSocket 仍持续出帧，8080 服务保持监听
+- ✅ RK3576 60 秒录制稳定性：1490 帧输入/解码/编码，0 failures，24MB H.264 文件
+- ✅ H.264 文件播放兼容性：ffprobe 确认 H.264 High profile 1920x1080
 
 **待添加测试:**
 
@@ -279,9 +281,17 @@ flowchart TB
    - 订阅抖动场景下的会话防抖策略
 
 4. **Web 录制长稳验证**
-   - 重复 start/stop、浏览器刷新、WebSocket 断开重连
-   - 确认停止录制后 `web_preview_gateway` 继续监听 8080
-   - 校验 `.h264` 输出文件可被常用工具解析/播放
+   - 已完成连续录制 5 分钟+、重复 start/stop 循环和 `.h264` 多工具解码验证
+   - 待补充浏览器刷新 / WebSocket 断线重连 / codec server 重启恢复
+   - 确认异常恢复后 `web_preview_gateway` 继续监听 8080，录制按钮状态可重新收敛
+
+5. **编码参数化与容器封装**
+   - 已完成请求级 `fps` / `bitrate` / `gop` 覆盖、启动参数默认值和 status profile 返回
+   - `width` / `height` 仅作为后续缩放或裁剪预留，当前不覆盖实际解码帧尺寸
+   - 下一步集成 MP4 muxer，MKV 作为后续备选
+
+6. **DataPlaneV2 低拷贝录制路径**
+   - `camera_codec_server` 接入 DataPlaneV2 + MPP buffer import
 
 ### 中期目标（3-4周）
 
@@ -412,9 +422,15 @@ flowchart TB
 - [x] 新增 `mplane_dmabuf_probe` 并验证 RKISP/RKVpss MPLANE 节点 `REQBUFS + QUERYBUF + EXPBUF` ✅ 2026-04-27
 - [x] 完成 Web Preview + Codec Server 录制 start/stop 正式目录 smoke，验证停止录制后 WebSocket 继续出帧且 8080 保持监听 ✅ 2026-05-05
 - [x] 修正 Web 录制 smoke 默认路径，统一使用 `/home/luckfox/CameraSubsystem` 规范目录 ✅ 2026-05-05
+- [x] 完成 RK3576 60 秒录制稳定性验证：1490 帧输入/解码/编码，0 failures ✅ 2026-05-05
+- [x] 完成 H.264 文件播放兼容性验证：ffprobe 确认 H.264 High profile 1920x1080 ✅ 2026-05-05
+- [x] 完成 RK3576 5 分钟录制长稳：5676 帧输入，5674 帧解码/编码，2 decode failures，0 write failures，91MB 输出 ✅ 2026-05-05
+- [x] 完成重复 start/stop 循环验证：10 次 x 5 秒，995 帧编码，0 失败，10 个独立 `.h264` 文件 ✅ 2026-05-05
+- [x] 完成 H.264 多工具兼容性验证：ffprobe + ffmpeg 全帧解码通过 ✅ 2026-05-05
+- [x] 完成编码参数化：请求级 `fps` / `bitrate` / `gop` 覆盖、启动默认值和 status profile 返回 ✅ 2026-05-05
 - [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane
 - [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
-- [ ] 增加 Web 录制长稳、重复 start/stop 和 H.264 文件播放兼容验证
+- [ ] 补充 Web 异常恢复长稳：浏览器刷新、WebSocket 断线重连、codec server 重启恢复
 - [ ] 背压策略参数化（延迟阈值/优先级规则）
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 

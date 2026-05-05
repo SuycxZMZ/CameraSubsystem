@@ -225,6 +225,42 @@ std::string SerializeCodecControlStatus(const CodecControlStatus& status)
     {
         oss << ",\"error\":\"" << JsonEscape(status.error) << "\"";
     }
+    if (status.profile.width > 0 || status.profile.height > 0
+        || status.profile.fps > 0 || status.profile.bitrate > 0 || status.profile.gop > 0)
+    {
+        oss << ",\"profile\":{";
+        bool first = true;
+        if (status.profile.width > 0)
+        {
+            oss << "\"width\":" << status.profile.width;
+            first = false;
+        }
+        if (status.profile.height > 0)
+        {
+            if (!first) oss << ",";
+            oss << "\"height\":" << status.profile.height;
+            first = false;
+        }
+        if (status.profile.fps > 0)
+        {
+            if (!first) oss << ",";
+            oss << "\"fps\":" << status.profile.fps;
+            first = false;
+        }
+        if (status.profile.bitrate > 0)
+        {
+            if (!first) oss << ",";
+            oss << "\"bitrate\":" << status.profile.bitrate;
+            first = false;
+        }
+        if (status.profile.gop > 0)
+        {
+            if (!first) oss << ",";
+            oss << "\"gop\":" << status.profile.gop;
+            first = false;
+        }
+        oss << "}";
+    }
     oss << "}";
     return oss.str();
 }

@@ -50,6 +50,7 @@ struct CodecControlStatus
     uint64_t decode_failures = 0;
     uint64_t write_failures = 0;
     std::string error;
+    CodecControlProfile profile;
 };
 
 bool ParseCodecControlRequestLine(const std::string& line,

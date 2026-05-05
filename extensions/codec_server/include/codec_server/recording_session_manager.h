@@ -21,6 +21,9 @@ struct RecordingSessionConfig
     std::string default_output_dir = "/home/luckfox/CameraSubsystem/recordings";
     CameraStreamSubscriberConfig subscriber;
     bool enable_camera_subscriber = false;
+    uint32_t fps = 30;
+    uint32_t bitrate = 4000000;
+    uint32_t gop = 60;
 };
 
 class RecordingSessionManager
@@ -50,6 +53,7 @@ private:
     std::string state_ = "idle";
     std::string stream_id_;
     std::string file_path_;
+    CodecControlProfile active_profile_;
     std::atomic<uint64_t> encoded_frames_{0};
     std::atomic<uint64_t> dropped_frames_{0};
     uint64_t input_frames_ = 0;
