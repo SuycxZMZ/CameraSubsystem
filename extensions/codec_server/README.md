@@ -14,13 +14,14 @@
 - `JpegDecodeStage` 已在 RK3576 交叉构建中接入 MPP MJPEG/JPEG 解码，输出 NV12 `DecodedImageFrame`；主机无 MPP 时仍保留 `jpeg_decoder_not_available` fallback。
 - `H264MppEncoder` 已在 RK3576 交叉构建中接入 MPP H.264 编码，支持将 NV12 `DecodedImageFrame` 编码为裸 H.264 packet。
 - `H264AnnexBParser` 已支持 Annex-B H.264 NAL 解析、SPS/PPS 提取和 slice 分类，为 MP4 muxer 接入做准备。
+- `Mp4FileWriter` 已支持最小 MP4 写入，基于 SPS/PPS 生成 `avcC`，将 Annex-B NAL 转为 length-prefixed sample，正常 close 后输出可被 `ffprobe` 识别的 `.mp4`。
 - `mpp_jpeg_decode_probe` 已在 RK3576 上验证单帧 JPEG 可通过 MPP 解码为 NV12。
 
 当前 start recording 会打开裸 `.h264` 输出文件、订阅 CameraSubsystem v1 copy 数据面，并将 USB MJPEG/JPEG payload 送入 MPP JPEG decode，再将 NV12 帧送入 MPP H.264 encoder 写入文件。
 
 容器封装前置工作已完成：writer 已支持可配置输出扩展名，当前 session 仍显式使用 `.h264`；后续 MP4 muxer 接入时复用同一输出路径、文件冲突避让和写入统计接口。
 
-MP4 muxer 的输入解析边界已完成：编码器当前输出 Annex-B H.264 packet，后续 muxer 需要基于 `H264AnnexBParser` 提取 SPS/PPS 生成 `avcC`，并把 NAL payload 转为 MP4 所需的 length-prefixed sample。
+MP4 muxer 的最小文件写入边界已完成：编码器当前输出 Annex-B H.264 packet，`Mp4FileWriter` 基于 `H264AnnexBParser` 提取 SPS/PPS 生成 `avcC`，并把 NAL payload 转为 MP4 所需的 length-prefixed sample。下一步是把 `container=mp4` 接入 `RecordingSessionManager` 和 Web 控制入口。
 
 RK3576 `/dev/video45` smoke 已验证：`camera_codec_server` 通过控制面 start/status/stop 后，`input_frames=94`、`decoded_frames=94`、`encoded_frames=94`、`decode_failures=0`、`write_failures=0`；输出 `.h264` 文件约 1.5MB。
 

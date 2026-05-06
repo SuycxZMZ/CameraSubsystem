@@ -290,7 +290,8 @@ flowchart TB
    - `width` / `height` 仅作为后续缩放或裁剪预留，当前不覆盖实际解码帧尺寸
    - 已完成 writer 输出扩展名前置抽象，支持后续 `.mp4` 路径、冲突避让和统计接口复用
    - 已完成 Annex-B H.264 NAL parser，支持 SPS/PPS 提取，为 MP4 `avcC` 和 sample 转换做准备
-   - 下一步集成 MP4 muxer，MKV 作为后续备选
+   - 已完成 MP4 最小写入器，正常 close 后生成可被 `ffprobe` 识别的 `.mp4`
+   - 下一步把 `container=mp4` 接入录制主链路和 Web 控制入口，MKV 作为后续备选
 
 6. **DataPlaneV2 低拷贝录制路径**
    - `camera_codec_server` 接入 DataPlaneV2 + MPP buffer import

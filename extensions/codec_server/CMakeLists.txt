@@ -27,6 +27,7 @@ add_executable(camera_codec_server
     src/h264_annexb_parser.cpp
     src/h264_mpp_encoder.cpp
     src/jpeg_decode_stage.cpp
+    src/mp4_file_writer.cpp
     src/recording_file_writer.cpp
     src/recording_session_manager.cpp
     src/main.cpp
@@ -102,6 +103,36 @@ target_compile_options(h264_annexb_parser_test
         -Wextra
         -Werror
 )
+
+# MP4 writer verification tool
+add_executable(mp4_file_writer_test
+    src/h264_annexb_parser.cpp
+    src/mp4_file_writer.cpp
+    src/recording_file_writer.cpp
+    src/mp4_file_writer_test.cpp
+)
+
+set_target_properties(mp4_file_writer_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
+)
+
+target_include_directories(mp4_file_writer_test
+    PRIVATE
+        include
+        "${CAMERA_SUBSYSTEM_ROOT}/include"
+)
+
+target_compile_options(mp4_file_writer_test
+    PRIVATE
+        -Wall
+        -Wextra
+        -Werror
+)
+
+target_link_libraries(mp4_file_writer_test PRIVATE Threads::Threads)
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(mp4_file_writer_test PRIVATE pthread)
+endif ()
 
 # RecordingFileWriter verification tool
 add_executable(recording_file_writer_test

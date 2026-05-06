@@ -846,6 +846,7 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | `JpegDecodeStage` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingMJPEG` 解码，输出 NV12 `DecodedImageFrame`；主机无 MPP 时返回 `jpeg_decoder_not_available` |
 | `H264MppEncoder` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingAVC` 编码；合成 NV12 测试 5/5 通过；live 链路已写出裸 `.h264` 文件 |
 | `H264AnnexBParser` | 已完成当前切片 | 支持 3/4 字节 start code、NAL type 识别、SPS/PPS 提取和 slice 分类；为 MP4 `avcC` 与 length-prefixed sample 转换做准备 |
+| `Mp4FileWriter` | 已完成最小写入器 | 基于 SPS/PPS 生成 `avcC`，将 Annex-B NAL 转为 length-prefixed sample，正常 close 后输出可被 `ffprobe` 识别的 `.mp4` |
 | Web 录制控制闭环 | 已完成 | `web_preview_gateway` 转发 start/stop 到 `camera_codec_server`，前端接收 `record_status`；停止录制后 Web 预览继续显示 |
 | Web 录制卡死防护 | 已完成 | publisher / gateway 忽略 `SIGPIPE`，gateway codec 控制链路按命令短连接并设置超时，前端增加 recording pending |
 | Web 录制状态增强 | 已完成当前切片 | `record_status` 增加 `duration_ms`、`bytes_written`、`packets_written` 和有效 `profile`；前端状态面板展示时长、文件统计、输入/编码/解码计数和错误 |
@@ -858,11 +859,12 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | 编码参数化 | 已完成 | 请求级 `fps` / `bitrate` / `gop` 覆盖 + 启动参数默认值 + status 响应返回有效 profile；`width` / `height` 仅预留，当前不做缩放覆盖 |
 | 容器 writer 前置抽象 | 已完成当前切片 | `RecordingFileWriter` 支持可配置文件扩展名、扩展名校验和冲突避让复用，后续 MP4 muxer 可复用同一输出路径与统计接口 |
 | MP4 muxer 输入解析 | 已完成当前切片 | 新增 Annex-B H.264 NAL parser，后续 muxer 可基于 SPS/PPS 生成 `avcC`，并把编码 packet 转为 MP4 sample |
+| MP4 最小文件写入 | 已完成当前切片 | 新增 `Mp4FileWriter`，支持 `ftyp` / `mdat` / `moov`、`avc1` / `avcC`、`stts` / `stss` / `stsc` / `stsz` / `stco` 基础表，`mp4_file_writer_test` 通过 `ffprobe` 验证 |
 
 当前尚未实现：
 
 1. Web 录制异常恢复验证（浏览器刷新/断线重连、codec server 重启恢复）。
-2. 容器封装：MP4/MKV muxer 集成。
+2. 容器封装接入录制主链路：`container=mp4` 控制协议、Web 参数入口和 RK3576 live 录制验证。
 3. DataPlaneV2 -> MPP 低拷贝录制路径。
 
 RK3576 v1 copy 数据面 smoke 结果：
@@ -900,7 +902,7 @@ RK3576 60 秒录制稳定性结果：
 
 下一步推进容器封装、Web 异常恢复和 DataPlaneV2 低拷贝录制路径：
 
-1. **容器封装**：优先引入 MP4 muxer，明确时间基、SPS/PPS 写入、异常停止后的文件可恢复性；MKV 作为后续备选。
+1. **容器封装主链路接入**：把 `Mp4FileWriter` 接入 `RecordingSessionManager` 的 `container=mp4` 分支，补齐控制协议、状态回传和 RK3576 live 录制验证；MKV 作为后续备选。
 2. **Web 异常恢复补充**：覆盖浏览器刷新、WebSocket 断线重连、codec server 重启恢复，并把错误提示统一回传到录制状态面板。
 3. **DataPlaneV2 低拷贝**：`camera_codec_server` 接入 DataPlaneV2 + MPP buffer import，减少 copy path 压力。
 
