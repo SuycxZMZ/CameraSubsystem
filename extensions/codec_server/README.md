@@ -23,6 +23,8 @@
 
 MP4 muxer 的最小文件写入边界已完成：编码器当前输出 Annex-B H.264 packet，`Mp4FileWriter` 基于 `H264AnnexBParser` 提取 SPS/PPS 生成 `avcC`，并把 NAL payload 转为 MP4 所需的 length-prefixed sample。下一步是把 `container=mp4` 接入 `RecordingSessionManager` 和 Web 控制入口。
 
+`container=mp4` 已接入 `RecordingSessionManager` 控制分支，可通过 `codec-mp4-smoke-rk3576.sh` 在 RK3576 上直接验证 live `.mp4` 录制。当前 Web 页面和 Gateway 尚未暴露 MP4 选择入口，默认 Web Record 仍使用 `raw_h264`。
+
 RK3576 `/dev/video45` smoke 已验证：`camera_codec_server` 通过控制面 start/status/stop 后，`input_frames=94`、`decoded_frames=94`、`encoded_frames=94`、`decode_failures=0`、`write_failures=0`；输出 `.h264` 文件约 1.5MB。
 
 板端调试文件统一部署到 `/home/luckfox/CameraSubsystem`，录制文件默认写入 `/home/luckfox/CameraSubsystem/recordings`。Web 预览和录制联调方式见 [../../docs/BOARD_WEB_DEBUG_GUIDE.md](../../docs/BOARD_WEB_DEBUG_GUIDE.md)。

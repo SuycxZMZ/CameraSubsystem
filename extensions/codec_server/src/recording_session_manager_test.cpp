@@ -96,6 +96,13 @@ static void TestInvalidStreamId()
     auto status = manager.StartRecording(request);
     Report("InvalidStreamId: returns invalid_stream_id",
            status.state == "error" && status.error == "invalid_stream_id");
+
+    RecordingSessionManager mp4_manager(config);
+    auto mp4_request = MakeRequest(CodecControlCommand::kStartRecording, "a/b", "");
+    mp4_request.container = "mp4";
+    auto mp4_status = mp4_manager.StartRecording(mp4_request);
+    Report("InvalidStreamId: mp4 returns invalid_stream_id",
+           mp4_status.state == "error" && mp4_status.error == "invalid_stream_id");
     fs::remove_all(dir);
 }
 
@@ -133,6 +140,32 @@ static void TestProfilePriority()
     fs::remove_all(dir);
 }
 
+static void TestMp4ContainerStartStop()
+{
+    const std::string dir = MakeTempDir() + "/mp4";
+    RecordingSessionConfig config;
+    config.default_output_dir = dir;
+    RecordingSessionManager manager(config);
+
+    auto start = MakeRequest(CodecControlCommand::kStartRecording, "cam_mp4", "");
+    start.container = "mp4";
+    auto status = manager.StartRecording(start);
+    Report("Mp4ContainerStartStop: start enters recording",
+           status.recording && status.state == "recording");
+    Report("Mp4ContainerStartStop: status container is mp4",
+           status.container == "mp4");
+    Report("Mp4ContainerStartStop: file deferred before first frame",
+           status.file.empty());
+
+    auto stop = MakeRequest(CodecControlCommand::kStopRecording, "cam_mp4", "");
+    stop.container = "mp4";
+    status = manager.StopRecording(stop);
+    Report("Mp4ContainerStartStop: stop without frames enters idle",
+           !status.recording && status.state == "idle" && status.error.empty());
+
+    fs::remove_all(dir);
+}
+
 static void TestCodecControlProfileProtocol()
 {
     CodecControlRequest request;
@@ -166,6 +199,15 @@ static void TestCodecControlProfileProtocol()
            json.find("\"duration_ms\":1234") != std::string::npos &&
                json.find("\"bytes_written\":4096") != std::string::npos &&
                json.find("\"packets_written\":7") != std::string::npos);
+
+    CodecControlRequest mp4_request;
+    const bool parsed_mp4 = ParseCodecControlRequestLine(
+        "{\"type\":\"start_recording\",\"request_id\":\"m1\","
+        "\"stream_id\":\"cam0\",\"container\":\"mp4\"}",
+        &mp4_request,
+        &error);
+    Report("CodecControlProfileProtocol: parse mp4 container",
+           parsed_mp4 && error.empty() && mp4_request.container == "mp4");
 }
 
 int main()
@@ -176,6 +218,7 @@ int main()
     TestStartStopStatus();
     TestInvalidStreamId();
     TestProfilePriority();
+    TestMp4ContainerStartStop();
     TestCodecControlProfileProtocol();
 
     std::cout << "\n====================================\n";

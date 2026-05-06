@@ -860,11 +860,12 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | 容器 writer 前置抽象 | 已完成当前切片 | `RecordingFileWriter` 支持可配置文件扩展名、扩展名校验和冲突避让复用，后续 MP4 muxer 可复用同一输出路径与统计接口 |
 | MP4 muxer 输入解析 | 已完成当前切片 | 新增 Annex-B H.264 NAL parser，后续 muxer 可基于 SPS/PPS 生成 `avcC`，并把编码 packet 转为 MP4 sample |
 | MP4 最小文件写入 | 已完成当前切片 | 新增 `Mp4FileWriter`，支持 `ftyp` / `mdat` / `moov`、`avc1` / `avcC`、`stts` / `stss` / `stsc` / `stsz` / `stco` 基础表，`mp4_file_writer_test` 通过 `ffprobe` 验证 |
+| MP4 录制主链路接入 | 已完成当前切片 | `RecordingSessionManager` 支持 `container=mp4` 分支；RK3576 `/dev/video45` live 录制 95 帧，生成 `.mp4` 可被 `ffprobe` 识别并可被 `ffmpeg` 解码 |
 
 当前尚未实现：
 
 1. Web 录制异常恢复验证（浏览器刷新/断线重连、codec server 重启恢复）。
-2. 容器封装接入录制主链路：`container=mp4` 控制协议、Web 参数入口和 RK3576 live 录制验证。
+2. Web MP4 参数入口：前端/Gateway 暂未暴露 `container=mp4` 选择，当前通过 codec control smoke 验证。
 3. DataPlaneV2 -> MPP 低拷贝录制路径。
 
 RK3576 v1 copy 数据面 smoke 结果：

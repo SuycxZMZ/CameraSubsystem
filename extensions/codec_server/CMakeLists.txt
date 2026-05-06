@@ -166,8 +166,10 @@ endif ()
 add_executable(recording_session_manager_test
     src/camera_stream_subscriber.cpp
     src/codec_control_protocol.cpp
+    src/h264_annexb_parser.cpp
     src/h264_mpp_encoder.cpp
     src/jpeg_decode_stage.cpp
+    src/mp4_file_writer.cpp
     src/recording_file_writer.cpp
     src/recording_session_manager.cpp
     src/recording_session_manager_test.cpp

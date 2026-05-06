@@ -5,6 +5,7 @@
 #include "codec_server/camera_stream_subscriber.h"
 #include "codec_server/h264_mpp_encoder.h"
 #include "codec_server/jpeg_decode_stage.h"
+#include "codec_server/mp4_file_writer.h"
 #include "codec_server/recording_file_writer.h"
 
 #include <atomic>
@@ -37,24 +38,38 @@ public:
     CodecControlStatus GetStatus(const CodecControlRequest& request) const;
 
 private:
+    enum class ActiveContainer
+    {
+        kRawH264,
+        kMp4,
+    };
+
     CodecControlStatus BuildStatusLocked(const CodecControlRequest& request,
                                          const std::string& error) const;
     void HandleInputFrame(const camera_subsystem::ipc::CameraDataFrameHeader& header,
                           const std::vector<uint8_t>& payload);
     H264EncoderConfig BuildEncoderConfig(const DecodedImageFrame& frame) const;
+    WriterStats GetActiveWriterStatsLocked() const;
+    std::string GetActiveContainerName() const;
+    bool EnsureMp4WriterOpenLocked(const DecodedImageFrame& frame);
+    bool WritePacketLocked(const EncodedPacket& packet);
     uint64_t GetDurationMsLocked() const;
     static std::string MapWriterError(WriterResult result);
+    static std::string MapMp4WriterError(Mp4WriterResult result);
 
     RecordingSessionConfig config_;
     mutable std::mutex mutex_;
     mutable std::mutex pipeline_mutex_;
     RecordingFileWriter writer_;
+    Mp4FileWriter mp4_writer_;
     CameraStreamSubscriber subscriber_;
     JpegDecodeStage jpeg_decoder_;
     H264MppEncoder h264_encoder_;
     std::string state_ = "idle";
     std::string stream_id_;
     std::string file_path_;
+    std::string output_dir_;
+    ActiveContainer active_container_ = ActiveContainer::kRawH264;
     CodecControlProfile active_profile_;
     std::chrono::steady_clock::time_point started_at_{};
     uint64_t last_duration_ms_ = 0;

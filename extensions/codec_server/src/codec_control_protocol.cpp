@@ -191,7 +191,7 @@ bool ParseCodecControlRequestLine(const std::string& line,
         }
         return false;
     }
-    if (parsed.container != "raw_h264")
+    if (parsed.container != "raw_h264" && parsed.container != "mp4")
     {
         if (error)
         {

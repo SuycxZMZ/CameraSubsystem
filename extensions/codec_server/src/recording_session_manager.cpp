@@ -3,6 +3,25 @@
 #include <utility>
 
 namespace camera_subsystem::extensions::codec_server {
+namespace {
+
+bool IsValidStreamId(const std::string& stream_id)
+{
+    if (stream_id.empty() || stream_id.size() > 128)
+    {
+        return false;
+    }
+    for (char c : stream_id)
+    {
+        if (c == '/' || c == '\\' || c == '\0')
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
 
 RecordingSessionManager::RecordingSessionManager(RecordingSessionConfig config)
     : config_(std::move(config))
@@ -17,6 +36,14 @@ CodecControlStatus RecordingSessionManager::StartRecording(
     if (state_ == "recording" || state_ == "starting" || state_ == "stopping")
     {
         return BuildStatusLocked(request, "already_recording");
+    }
+
+    if (!IsValidStreamId(request.stream_id))
+    {
+        state_ = "error";
+        stream_id_ = request.stream_id;
+        last_error_ = "invalid_stream_id";
+        return BuildStatusLocked(request, last_error_);
     }
 
     state_ = "starting";
@@ -34,21 +61,28 @@ CodecControlStatus RecordingSessionManager::StartRecording(
     decoded_frames_.store(0);
     decode_failures_.store(0);
     last_error_.clear();
+    active_container_ = request.container == "mp4" ? ActiveContainer::kMp4 : ActiveContainer::kRawH264;
 
-    const std::string output_dir =
+    output_dir_ =
         request.output_dir.empty() ? config_.default_output_dir : request.output_dir;
-    RecordingFileWriterOptions writer_options;
-    writer_options.file_extension = ".h264";
-    const WriterResult result = writer_.Open(request.stream_id, output_dir, writer_options);
-    if (result != WriterResult::kOk)
+    if (active_container_ == ActiveContainer::kRawH264)
     {
-        state_ = "error";
-        last_error_ = MapWriterError(result);
-        file_path_.clear();
-        return BuildStatusLocked(request, last_error_);
+        RecordingFileWriterOptions writer_options;
+        writer_options.file_extension = ".h264";
+        const WriterResult result = writer_.Open(request.stream_id, output_dir_, writer_options);
+        if (result != WriterResult::kOk)
+        {
+            state_ = "error";
+            last_error_ = MapWriterError(result);
+            file_path_.clear();
+            return BuildStatusLocked(request, last_error_);
+        }
+        file_path_ = writer_.GetFilePath();
     }
-
-    file_path_ = writer_.GetFilePath();
+    else
+    {
+        file_path_.clear();
+    }
     if (config_.enable_camera_subscriber)
     {
         CameraStreamSubscriberConfig subscriber_config = config_.subscriber;
@@ -61,6 +95,7 @@ CodecControlStatus RecordingSessionManager::StartRecording(
         if (!subscriber_.Start(subscriber_config))
         {
             (void)writer_.Close();
+            (void)mp4_writer_.Close();
             state_ = "error";
             last_error_ = "stream_not_found";
             return BuildStatusLocked(request, last_error_);
@@ -93,12 +128,25 @@ CodecControlStatus RecordingSessionManager::StopRecording(
         std::lock_guard<std::mutex> pipeline_lock(pipeline_mutex_);
         h264_encoder_.Close();
     }
-    const WriterResult close_result = writer_.Close();
-    if (close_result != WriterResult::kOk)
+    if (active_container_ == ActiveContainer::kMp4)
     {
-        state_ = "error";
-        last_error_ = MapWriterError(close_result);
-        return BuildStatusLocked(request, last_error_);
+        const Mp4WriterResult close_result = mp4_writer_.Close();
+        if (close_result != Mp4WriterResult::kOk)
+        {
+            state_ = "error";
+            last_error_ = MapMp4WriterError(close_result);
+            return BuildStatusLocked(request, last_error_);
+        }
+    }
+    else
+    {
+        const WriterResult close_result = writer_.Close();
+        if (close_result != WriterResult::kOk)
+        {
+            state_ = "error";
+            last_error_ = MapWriterError(close_result);
+            return BuildStatusLocked(request, last_error_);
+        }
     }
 
     state_ = "idle";
@@ -118,14 +166,14 @@ CodecControlStatus RecordingSessionManager::BuildStatusLocked(
 {
     const CameraStreamSubscriberStats subscriber_stats = subscriber_.GetStats();
     std::lock_guard<std::mutex> pipeline_lock(pipeline_mutex_);
-    const WriterStats stats = writer_.GetStats();
+    const WriterStats stats = GetActiveWriterStatsLocked();
     CodecControlStatus status;
     status.request_id = request.request_id;
     status.stream_id = stream_id_.empty() ? request.stream_id : stream_id_;
     status.recording = state_ == "recording";
     status.state = state_;
     status.codec = request.codec.empty() ? "h264" : request.codec;
-    status.container = request.container.empty() ? "raw_h264" : request.container;
+    status.container = GetActiveContainerName();
     status.file = file_path_;
     status.encoded_frames = encoded_frames_.load();
     status.decoded_frames = decoded_frames_.load();
@@ -185,9 +233,13 @@ void RecordingSessionManager::HandleInputFrame(
 
     for (const EncodedPacket& packet : packets)
     {
-        const WriterResult write_result =
-            writer_.Write(packet.payload.data(), packet.payload.size());
-        if (write_result != WriterResult::kOk)
+        if (active_container_ == ActiveContainer::kMp4 &&
+            !EnsureMp4WriterOpenLocked(decoded))
+        {
+            dropped_frames_.fetch_add(1);
+            return;
+        }
+        if (!WritePacketLocked(packet))
         {
             dropped_frames_.fetch_add(1);
             return;
@@ -208,6 +260,65 @@ H264EncoderConfig RecordingSessionManager::BuildEncoderConfig(
     config.bitrate = active_profile_.bitrate > 0 ? active_profile_.bitrate : config_.bitrate;
     config.gop = active_profile_.gop > 0 ? active_profile_.gop : config_.gop;
     return config;
+}
+
+WriterStats RecordingSessionManager::GetActiveWriterStatsLocked() const
+{
+    if (active_container_ == ActiveContainer::kMp4)
+    {
+        return mp4_writer_.GetStats();
+    }
+    return writer_.GetStats();
+}
+
+std::string RecordingSessionManager::GetActiveContainerName() const
+{
+    return active_container_ == ActiveContainer::kMp4 ? "mp4" : "raw_h264";
+}
+
+bool RecordingSessionManager::EnsureMp4WriterOpenLocked(const DecodedImageFrame& frame)
+{
+    if (!file_path_.empty())
+    {
+        return true;
+    }
+
+    Mp4WriterConfig mp4_config;
+    mp4_config.width = frame.width;
+    mp4_config.height = frame.height;
+    mp4_config.fps = active_profile_.fps > 0 ? active_profile_.fps : config_.fps;
+    const Mp4WriterResult result = mp4_writer_.Open(stream_id_, output_dir_, mp4_config);
+    if (result != Mp4WriterResult::kOk)
+    {
+        last_error_ = MapMp4WriterError(result);
+        return false;
+    }
+    file_path_ = mp4_writer_.GetFilePath();
+    return true;
+}
+
+bool RecordingSessionManager::WritePacketLocked(const EncodedPacket& packet)
+{
+    if (active_container_ == ActiveContainer::kMp4)
+    {
+        const Mp4WriterResult write_result =
+            mp4_writer_.WriteAnnexBPacket(packet.payload.data(), packet.payload.size());
+        if (write_result != Mp4WriterResult::kOk)
+        {
+            last_error_ = MapMp4WriterError(write_result);
+            return false;
+        }
+        return true;
+    }
+
+    const WriterResult write_result =
+        writer_.Write(packet.payload.data(), packet.payload.size());
+    if (write_result != WriterResult::kOk)
+    {
+        last_error_ = MapWriterError(write_result);
+        return false;
+    }
+    return true;
 }
 
 uint64_t RecordingSessionManager::GetDurationMsLocked() const
@@ -239,6 +350,29 @@ std::string RecordingSessionManager::MapWriterError(WriterResult result)
         return "recording_file_create_failed";
     case WriterResult::kFileNotOpen:
     case WriterResult::kRecordingIoError:
+        return "recording_io_error";
+    }
+    return "recording_io_error";
+}
+
+std::string RecordingSessionManager::MapMp4WriterError(Mp4WriterResult result)
+{
+    switch (result)
+    {
+    case Mp4WriterResult::kOk:
+        return std::string();
+    case Mp4WriterResult::kOutputDirNotWritable:
+        return "output_dir_not_writable";
+    case Mp4WriterResult::kInvalidStreamId:
+        return "invalid_stream_id";
+    case Mp4WriterResult::kFileCreateFailed:
+        return "recording_file_create_failed";
+    case Mp4WriterResult::kMissingParameterSets:
+        return "missing_h264_parameter_sets";
+    case Mp4WriterResult::kInvalidPacket:
+        return "invalid_h264_packet";
+    case Mp4WriterResult::kFileNotOpen:
+    case Mp4WriterResult::kRecordingIoError:
         return "recording_io_error";
     }
     return "recording_io_error";

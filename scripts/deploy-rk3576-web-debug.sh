@@ -58,12 +58,13 @@ scp \
 scp \
     "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-v1-smoke-rk3576.sh" \
     "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-stability-test-rk3576.sh" \
+    "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-mp4-smoke-rk3576.sh" \
     "${BOARD_USER}@${BOARD_HOST}:${remote_scripts}/"
 
 scp -r "${WEB_DIST}/"* "${BOARD_USER}@${BOARD_HOST}:${remote_web}/"
 
 ssh "${BOARD_USER}@${BOARD_HOST}" \
-    "chmod +x '${remote_bin}/camera_publisher_example' '${remote_bin}/camera_codec_server' '${remote_bin}/web_preview_gateway' '${remote_scripts}/codec-v1-smoke-rk3576.sh' '${remote_scripts}/codec-stability-test-rk3576.sh'"
+    "chmod +x '${remote_bin}/camera_publisher_example' '${remote_bin}/camera_codec_server' '${remote_bin}/web_preview_gateway' '${remote_scripts}/codec-v1-smoke-rk3576.sh' '${remote_scripts}/codec-stability-test-rk3576.sh' '${remote_scripts}/codec-mp4-smoke-rk3576.sh'"
 
 echo "Deploy complete."
 echo "Board root: ${REMOTE_ROOT}"
