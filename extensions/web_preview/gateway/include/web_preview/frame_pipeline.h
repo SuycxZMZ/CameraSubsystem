@@ -47,7 +47,7 @@ private:
     uint32_t max_fps_;
     mutable std::mutex mutex_;
     StreamStats stats_;
-    std::chrono::steady_clock::time_point last_publish_time_;
+    std::chrono::steady_clock::time_point next_publish_time_;
     PacketCallback packet_callback_;
     StatusCallback status_callback_;
 };

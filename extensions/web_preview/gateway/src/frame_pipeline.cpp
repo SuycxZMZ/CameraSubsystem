@@ -7,8 +7,8 @@
 namespace web_preview {
 
 FramePipeline::FramePipeline()
-    : max_fps_(15)
-    , last_publish_time_(std::chrono::steady_clock::time_point::min())
+    : max_fps_(30)
+    , next_publish_time_(std::chrono::steady_clock::time_point::min())
 {
 }
 
@@ -16,6 +16,7 @@ void FramePipeline::SetMaxFps(uint32_t max_fps)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     max_fps_ = max_fps == 0 ? 1 : max_fps;
+    next_publish_time_ = std::chrono::steady_clock::time_point::min();
 }
 
 void FramePipeline::SetPacketCallback(PacketCallback callback)
@@ -81,7 +82,6 @@ void FramePipeline::SubmitFrame(CameraFrame&& frame)
 
             ++stats_.published_frames;
             stats_.status = "streaming";
-            last_publish_time_ = std::chrono::steady_clock::now();
             packet_callback = packet_callback_;
             status_callback = status_callback_;
         }
@@ -126,12 +126,26 @@ WebPixelFormat FramePipeline::MapPixelFormat(uint32_t camera_pixel_format) const
 bool FramePipeline::ShouldPublishNow()
 {
     const auto now = std::chrono::steady_clock::now();
-    if (last_publish_time_ == std::chrono::steady_clock::time_point::min())
+    const auto interval =
+        std::chrono::nanoseconds(1000000000ULL / (max_fps_ == 0 ? 1 : max_fps_));
+    if (next_publish_time_ == std::chrono::steady_clock::time_point::min())
     {
+        next_publish_time_ = now + interval;
         return true;
     }
-    const auto min_interval = std::chrono::milliseconds(1000 / (max_fps_ == 0 ? 1 : max_fps_));
-    return now - last_publish_time_ >= min_interval;
+    if (now < next_publish_time_)
+    {
+        return false;
+    }
+    if (now - next_publish_time_ > interval)
+    {
+        next_publish_time_ = now + interval;
+    }
+    else
+    {
+        next_publish_time_ += interval;
+    }
+    return true;
 }
 
 } // namespace web_preview

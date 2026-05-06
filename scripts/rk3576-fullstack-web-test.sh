@@ -16,6 +16,7 @@ DATA_SOCKET="${DATA_SOCKET:-/tmp/camera_subsystem_data.sock}"
 CODEC_SOCKET="${CODEC_SOCKET:-/tmp/camera_subsystem_codec.sock}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REMOTE_ROOT}/recordings}"
 HTTP_PORT="${HTTP_PORT:-8080}"
+MAX_PREVIEW_FPS="${MAX_PREVIEW_FPS:-30}"
 
 RECORD_SECONDS="${RECORD_SECONDS:-10}"
 
@@ -38,6 +39,7 @@ echo "Board:       ${BOARD_USER}@${BOARD_HOST}"
 echo "Remote root: ${REMOTE_ROOT}"
 echo "Device:      ${DEVICE}"
 echo "HTTP port:   ${HTTP_PORT}"
+echo "Max FPS:     ${MAX_PREVIEW_FPS}"
 echo "Record sec:  ${RECORD_SECONDS}"
 echo ""
 
@@ -97,6 +99,7 @@ ssh "${BOARD_USER}@${BOARD_HOST}" "
         --output-dir '${OUTPUT_DIR}' \
         --device '${DEVICE}' \
         --static-root '${remote_web}' \
+        --max-fps ${MAX_PREVIEW_FPS} \
         > '${GATEWAY_LOG}' 2>&1 &
     echo \$! > '${GATEWAY_PID}'
     sleep 1

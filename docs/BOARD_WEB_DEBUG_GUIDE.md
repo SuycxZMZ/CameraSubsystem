@@ -162,6 +162,7 @@ rm -f /tmp/camera_subsystem_control.sock \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
   --output-dir /home/luckfox/CameraSubsystem/recordings \
+  --max-fps 30 \
   > logs/web_preview_gateway.log 2>&1 &
 ```
 
@@ -186,6 +187,7 @@ http://192.168.31.9:8080
 | 功能 | 状态 | 说明 |
 |------|------|------|
 | 实时预览 | 已实现 | WebSocket 接收 JPEG payload，Canvas 显示画面。 |
+| 预览帧率 | 已优化 | Gateway 默认 `--max-fps 30`，限帧使用 deadline 累加，避免 25fps 输入被固定压到约 12fps。 |
 | 开始 / 停止预览 | 已实现 | Play / Stop 按钮发送 subscribe / unsubscribe。 |
 | 开始 / 停止录制 | 已实现 | Record 按钮发送 `set_record_enabled`，Gateway 转发给 `camera_codec_server`。 |
 | 录制状态 | 已实现状态面板 | 前端处理 `record_status`，记录 recording、file、duration_ms、bytes_written、packets_written、profile、encoded_frames、decoded_frames 和错误；录制切换期间按钮进入 pending，避免重复点击。 |

@@ -12,6 +12,7 @@ CODEC_SOCKET="${CODEC_SOCKET:-/tmp/camera_subsystem_codec.sock}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REMOTE_ROOT}/recordings/web_freeze_records}"
 STATIC_ROOT="${STATIC_ROOT:-${REMOTE_ROOT}/web_preview/dist}"
 PORT="${PORT:-8080}"
+MAX_PREVIEW_FPS="${MAX_PREVIEW_FPS:-30}"
 
 PUBLISHER_LOG="${PUBLISHER_LOG:-${REMOTE_ROOT}/logs/publisher_web_freeze.log}"
 CODEC_LOG="${CODEC_LOG:-${REMOTE_ROOT}/logs/codec_web_freeze.log}"
@@ -173,6 +174,7 @@ sleep 1
     --static-root "$STATIC_ROOT" \
     --output-dir "$OUTPUT_DIR" \
     --port "$PORT" \
+    --max-fps "$MAX_PREVIEW_FPS" \
     > "$GATEWAY_LOG" 2>&1 &
 echo "$!" > "$GATEWAY_PID_FILE"
 sleep 2

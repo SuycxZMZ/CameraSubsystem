@@ -59,7 +59,7 @@ void PrintUsage(const char* program_name)
         << "  --client-id <id>          Control IPC client id\n"
         << "  --output-dir <path>       Recording output directory\n"
         << "  --camera-id <id>          Camera id, default 0\n"
-        << "  --max-fps <fps>           Preview max fps, default 15\n"
+        << "  --max-fps <fps>           Preview max fps, default 30\n"
         << "  --help                    Show this help\n";
 }
 

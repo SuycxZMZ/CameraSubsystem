@@ -81,7 +81,8 @@ cd /home/luckfox/CameraSubsystem
   --device /dev/video45 \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
-  --output-dir /home/luckfox/CameraSubsystem/recordings
+  --output-dir /home/luckfox/CameraSubsystem/recordings \
+  --max-fps 30
 ```
 
 > **重要**：必须先启动 camera_publisher_example，再启动 web_preview_gateway。Gateway 启动时会立即连接发布端的控制面和数据面 IPC，如果发布端未就绪，Gateway 会因连接失败而退出。
@@ -170,7 +171,8 @@ cd /home/luckfox/CameraSubsystem
   --device /dev/video45 \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
-  --output-dir /home/luckfox/CameraSubsystem/recordings
+  --output-dir /home/luckfox/CameraSubsystem/recordings \
+  --max-fps 30
 ```
 
 **步骤 4：在局域网浏览器访问**
@@ -206,7 +208,7 @@ http://192.168.31.9:8080
 | `--client-id <id>` | `web_preview_gateway` | 控制面 IPC 客户端 ID |
 | `--output-dir <path>` | `/home/luckfox/CameraSubsystem/recordings` | 录制文件输出目录 |
 | `--camera-id <id>` | `0` | Camera ID |
-| `--max-fps <fps>` | `15` | 预览最大帧率 |
+| `--max-fps <fps>` | `30` | 预览最大帧率 |
 | `--help` | - | 显示帮助 |
 
 ## 前端功能说明
@@ -324,6 +326,7 @@ Gateway → 浏览器：
 | 本机开发无法连接 WebSocket | Vite proxy 配置错误 | 检查 `vite.config.ts` 中的开发板 IP |
 | 显示"不支持的格式" | 摄像头输出非 JPEG 格式 | 当前仅支持 JPEG/MJPEG 透传 |
 | 停止录制后页面刷新 `ERR_CONNECTION_REFUSED` | 板端仍在运行旧 gateway/publisher，或正式目录二进制未更新 | 重新部署 `/home/luckfox/CameraSubsystem/bin/` 下的 `camera_publisher_example`、`web_preview_gateway`，并确认 `ss -lntp | grep 8080`。 |
+| 右上角 FPS 只有 10 左右 | 旧版 Gateway 默认 15fps 且限帧按上一帧硬切，25fps 输入会被压到约 12fps | 使用新版 `web_preview_gateway`，默认 `--max-fps 30`；低带宽场景再显式传较低 `--max-fps`。 |
 
 ## 文档
 

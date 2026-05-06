@@ -18,7 +18,7 @@ struct GatewayConfig
     std::string client_id = "web_preview_gateway";
     std::string output_dir = "/home/luckfox/CameraSubsystem/recordings";
     uint32_t camera_id = 0;
-    uint32_t max_preview_fps = 15;
+    uint32_t max_preview_fps = 30;
 };
 
 bool ParseGatewayConfig(int argc, char* argv[], GatewayConfig* config);
