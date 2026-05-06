@@ -65,7 +65,7 @@ CameraSubsystem 当前已经具备核心发布端、订阅端、Web Preview 和 
 
 | 项目 | 当前状态 | 对 camera_codec_server 的影响 |
 |------|----------|------------------------|
-| Web Preview 前端 | 已接入 `set_record_enabled`，Record 按钮可启动/停止后台录制 | UI 入口已可用，预览仍显示原始流 |
+| Web Preview 前端 | 已接入 `set_record_enabled` 和录制状态面板，Record 按钮可启动/停止后台录制 | UI 入口已可用，预览仍显示原始流，状态面板展示时长、文件统计、profile 和错误 |
 | `web_preview_gateway` | 当前作为原始预览订阅端，负责 HTTP + WebSocket，并转发录制控制到 `camera_codec_server` | 只做代理，不承担编码 |
 | DataPlaneV2 | 已支持 `SCM_RIGHTS` fd 传递和独立 ReleaseFrame 通道 | `camera_codec_server` 可作为高优先级订阅端接入 |
 | DMA-BUF import 探测 | RGA import 和 MPP buffer import 已在 RKISP/RKVpss 节点验证 | MIPI/RKISP 后续可走 MPP import 低拷贝路径 |
@@ -74,10 +74,9 @@ CameraSubsystem 当前已经具备核心发布端、订阅端、Web Preview 和 
 
 当前不支持的部分：
 
-1. 编码参数还没有从前端请求或启动参数完整传入 encoder。
-2. 还没有长时间稳定性验证、播放兼容性验证和异常恢复策略。
-3. DataPlaneV2 / DMA-BUF / MIPI/RKISP NV12 还没有接入编码主链路。
-4. Web 录制状态展示仍是基础状态，尚未做录制时长、文件大小、错误提示组件。
+1. Web 长时间异常恢复验证还不完整，浏览器刷新、WebSocket 断线重连和 codec server 重启恢复仍需补充。
+2. DataPlaneV2 / DMA-BUF / MIPI/RKISP NV12 还没有接入编码主链路。
+3. 容器封装还没有接入，第一阶段仍输出裸 `.h264` 文件。
 
 ## 3. 总体架构
 
@@ -311,7 +310,12 @@ flowchart TB
   "codec": "h264",
   "container": "raw_h264",
   "file": "/home/luckfox/CameraSubsystem/recordings/usb_camera_0_20260427_153000.h264",
+  "duration_ms": 1200,
+  "bytes_written": 4096,
+  "packets_written": 7,
+  "input_frames": 30,
   "encoded_frames": 0,
+  "decoded_frames": 0,
   "dropped_frames": 0,
   "profile": {
     "fps": 30,
@@ -595,11 +599,16 @@ USB 第一阶段允许 `JpegDecodeStage + ColorConvertStage` 产生 MPP 内部�
 | `recording` | 是否正在录制 |
 | `state` | idle / starting / recording / stopping / error |
 | `file` | 当前或最近一次录制文件路径 |
+| `duration_ms` | 当前或最近一次录制时长 |
+| `bytes_written` | 当前或最近一次输出文件写入字节数 |
+| `packets_written` | 当前或最近一次写入 packet 数 |
 | `encoded_frames` | 已编码帧数 |
+| `decoded_frames` | 已解码帧数 |
 | `dropped_frames` | 编码链路丢帧数 |
 | `input_frames` | 订阅到的原始帧数 |
-| `encode_failures` | 编码失败次数 |
+| `decode_failures` | 解码失败次数 |
 | `write_failures` | 文件写失败次数 |
+| `profile` | 实际生效编码参数，例如 fps、bitrate、gop |
 | `last_error` | 最近错误码 |
 
 ### 14.5 RecordingSession 状态机
@@ -838,9 +847,10 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | `H264MppEncoder` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingAVC` 编码；合成 NV12 测试 5/5 通过；live 链路已写出裸 `.h264` 文件 |
 | Web 录制控制闭环 | 已完成 | `web_preview_gateway` 转发 start/stop 到 `camera_codec_server`，前端接收 `record_status`；停止录制后 Web 预览继续显示 |
 | Web 录制卡死防护 | 已完成 | publisher / gateway 忽略 `SIGPIPE`，gateway codec 控制链路按命令短连接并设置超时，前端增加 recording pending |
+| Web 录制状态增强 | 已完成当前切片 | `record_status` 增加 `duration_ms`、`bytes_written`、`packets_written` 和有效 `profile`；前端状态面板展示时长、文件统计、输入/编码/解码计数和错误 |
 | 60 秒录制稳定性 | 已完成 | 1490 帧输入/解码/编码，0 decode_failures，0 write_failures，输出 24MB H.264 文件 |
 | H.264 文件播放兼容性 | 已验证 | `ffprobe` 确认 H.264 High profile 1920x1080 yuv420p，avg_frame_rate=25/1 |
-| 本机 writer/session 验证 | 已完成 | `recording_file_writer_test` 41/41 通过；`recording_session_manager_test` 7/7 通过 |
+| 本机 writer/session 验证 | 已完成 | `recording_file_writer_test` 41/41 通过；`recording_session_manager_test` 15/15 通过 |
 | 5 分钟录制长稳 | 已完成 | 5676 帧输入，5674 帧解码/编码（99.96%），2 decode_failures，0 write_failures，91MB 输出 |
 | 重复 start/stop 循环 | 已完成 | 10 次 x 5 秒循环，995 帧编码，0 失败，10 个独立 .h264 文件 |
 | H.264 多工具兼容性 | 已验证 | ffprobe + ffmpeg 全帧解码 5674 帧成功，cycle 文件 100 帧全解码成功 |
@@ -848,10 +858,9 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 
 当前尚未实现：
 
-1. Web 录制长稳验证（浏览器刷新/断线重连、codec server 重启恢复）。
-2. Web 录制状态展示增强，例如录制时长、文件大小和错误提示组件。
-3. 容器封装：MP4/MKV muxer 集成。
-4. DataPlaneV2 -> MPP 低拷贝录制路径。
+1. Web 录制异常恢复验证（浏览器刷新/断线重连、codec server 重启恢复）。
+2. 容器封装：MP4/MKV muxer 集成。
+3. DataPlaneV2 -> MPP 低拷贝录制路径。
 
 RK3576 v1 copy 数据面 smoke 结果：
 
@@ -886,12 +895,11 @@ RK3576 60 秒录制稳定性结果：
 | write_failures | 0 |
 | 输出文件 | 24 MB，H.264 High profile 1920x1080 |
 
-下一步推进容器封装和 DataPlaneV2 低拷贝录制路径：
+下一步推进容器封装、Web 异常恢复和 DataPlaneV2 低拷贝录制路径：
 
 1. **容器封装**：优先引入 MP4 muxer，明确时间基、SPS/PPS 写入、异常停止后的文件可恢复性；MKV 作为后续备选。
-2. **Web 录制状态增强**：把录制时长、文件大小、有效编码 profile、decode/write 错误提示展示到前端。
-3. **Web 长稳补充**：覆盖浏览器刷新、WebSocket 断线重连、codec server 重启恢复。
-4. **DataPlaneV2 低拷贝**：`camera_codec_server` 接入 DataPlaneV2 + MPP buffer import，减少 copy path 压力。
+2. **Web 异常恢复补充**：覆盖浏览器刷新、WebSocket 断线重连、codec server 重启恢复，并把错误提示统一回传到录制状态面板。
+3. **DataPlaneV2 低拷贝**：`camera_codec_server` 接入 DataPlaneV2 + MPP buffer import，减少 copy path 压力。
 
 当前实现边界：
 

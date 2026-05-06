@@ -219,6 +219,9 @@ std::string SerializeCodecControlStatus(const CodecControlStatus& status)
         << ",\"decoded_frames\":" << status.decoded_frames
         << ",\"dropped_frames\":" << status.dropped_frames
         << ",\"input_frames\":" << status.input_frames
+        << ",\"duration_ms\":" << status.duration_ms
+        << ",\"bytes_written\":" << status.bytes_written
+        << ",\"packets_written\":" << status.packets_written
         << ",\"decode_failures\":" << status.decode_failures
         << ",\"write_failures\":" << status.write_failures;
     if (!status.error.empty())

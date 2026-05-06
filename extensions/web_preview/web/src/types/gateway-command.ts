@@ -22,9 +22,19 @@ export interface RecordStatus {
   decoded_frames?: number;
   dropped_frames?: number;
   input_frames?: number;
+  duration_ms?: number;
+  bytes_written?: number;
+  packets_written?: number;
   decode_failures?: number;
   write_failures?: number;
   error?: string;
+  profile?: {
+    width?: number;
+    height?: number;
+    fps?: number;
+    bitrate?: number;
+    gop?: number;
+  };
 }
 
 export interface GatewayStatus {

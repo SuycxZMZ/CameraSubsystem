@@ -24,8 +24,24 @@ export interface StreamState {
   isFormatSupported: boolean;
   recording: boolean;
   recordPending: boolean;
+  recordState: string;
   recordFile: string;
   encodedFrames: number;
   decodedFrames: number;
+  recordInputFrames: number;
+  recordDroppedFrames: number;
+  recordDurationMs: number;
+  recordStartedAtMs: number;
+  recordBytesWritten: number;
+  recordPacketsWritten: number;
+  recordDecodeFailures: number;
+  recordWriteFailures: number;
+  recordProfile: {
+    width?: number;
+    height?: number;
+    fps?: number;
+    bitrate?: number;
+    gop?: number;
+  };
   recordError: string;
 }

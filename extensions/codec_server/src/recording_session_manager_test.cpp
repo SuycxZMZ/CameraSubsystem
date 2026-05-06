@@ -155,10 +155,17 @@ static void TestCodecControlProfileProtocol()
     status.profile.fps = 15;
     status.profile.bitrate = 1500000;
     status.profile.gop = 30;
+    status.duration_ms = 1234;
+    status.bytes_written = 4096;
+    status.packets_written = 7;
     const std::string json = SerializeCodecControlStatus(status);
     Report("CodecControlProfileProtocol: serialize profile",
            json.find("\"profile\":{\"fps\":15,\"bitrate\":1500000,\"gop\":30}") !=
                std::string::npos);
+    Report("CodecControlProfileProtocol: serialize recording metrics",
+           json.find("\"duration_ms\":1234") != std::string::npos &&
+               json.find("\"bytes_written\":4096") != std::string::npos &&
+               json.find("\"packets_written\":7") != std::string::npos);
 }
 
 int main()

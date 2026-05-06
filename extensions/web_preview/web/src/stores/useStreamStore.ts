@@ -71,9 +71,19 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
         isFormatSupported: false,
         recording: false,
         recordPending: false,
+        recordState: 'idle',
         recordFile: '',
         encodedFrames: 0,
         decodedFrames: 0,
+        recordInputFrames: 0,
+        recordDroppedFrames: 0,
+        recordDurationMs: 0,
+        recordStartedAtMs: 0,
+        recordBytesWritten: 0,
+        recordPacketsWritten: 0,
+        recordDecodeFailures: 0,
+        recordWriteFailures: 0,
+        recordProfile: {},
         recordError: '',
       };
       return {
@@ -100,6 +110,20 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
       state.updateStream(command.stream_id, {
         recordPending: true,
         recordError: '',
+        ...(command.enabled
+          ? {
+              recordState: 'starting',
+              recordFile: '',
+              recordDurationMs: 0,
+              recordStartedAtMs: 0,
+              recordBytesWritten: 0,
+              recordPacketsWritten: 0,
+              recordInputFrames: 0,
+              recordDroppedFrames: 0,
+              recordDecodeFailures: 0,
+              recordWriteFailures: 0,
+            }
+          : { recordState: 'stopping' }),
       });
     }
 
@@ -181,9 +205,21 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
     store.updateStream(streamId, {
       recording: Boolean(status.recording),
       recordPending: false,
+      recordState: status.state ?? (status.recording ? 'recording' : 'idle'),
       recordFile: status.file ?? '',
       encodedFrames: status.encoded_frames ?? 0,
       decodedFrames: status.decoded_frames ?? 0,
+      recordInputFrames: status.input_frames ?? 0,
+      recordDroppedFrames: status.dropped_frames ?? 0,
+      recordDurationMs: status.duration_ms ?? 0,
+      recordStartedAtMs: status.recording
+        ? Date.now() - (status.duration_ms ?? 0)
+        : 0,
+      recordBytesWritten: status.bytes_written ?? 0,
+      recordPacketsWritten: status.packets_written ?? 0,
+      recordDecodeFailures: status.decode_failures ?? 0,
+      recordWriteFailures: status.write_failures ?? 0,
+      recordProfile: status.profile ?? {},
       recordError: status.error ?? '',
       dropCount: status.dropped_frames ?? store.streams[streamId]?.dropCount ?? 0,
     });

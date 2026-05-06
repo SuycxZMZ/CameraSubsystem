@@ -20,6 +20,7 @@
 | HTTP + WebSocket 预览 | 已完成 | `/status` 返回 `format=JPEG`、`width=1920`、`height=1080`，浏览器实时预览可用。 |
 | React 前端渲染 | 已完成 | Canvas 按 DPR-aware backing store 渲染，单路预览可持续显示。 |
 | Web Record 控制 | 已完成 | Record start/stop 转发到 `camera_codec_server`，前端处理 `record_status` 并维护 pending 状态。 |
+| 录制状态面板 | 已完成当前切片 | 展示录制时长、文件统计、输入/编码/解码计数、有效 profile 和错误提示。 |
 | 停止录制后预览保持 | 已验证 | RK3576 正式目录验证 `LIVE_WS_COUNTS before=15 during=25 after=25`，8080 保持监听。 |
 | 板端 smoke | 已补充 | `scripts/web-record-freeze-smoke-rk3576.sh` 默认使用 `/home/luckfox/CameraSubsystem`。 |
 
@@ -332,6 +333,5 @@ Gateway → 浏览器：
 ## 下一步计划
 
 1. 把 Web 录制 smoke 纳入统一部署流程，保证正式目录脚本和二进制同步更新。
-2. 增加 Web 录制长稳验证：重复 start/stop、浏览器刷新、WebSocket 断开重连、codec server 重启。
-3. 增强录制状态 UI：显示录制时长、文件大小、最近一次错误和输出文件路径。
-4. 为非 JPEG 输入预留前端格式提示和 Gateway transform pipeline 的板端验证入口。
+2. 增加 Web 异常恢复验证：浏览器刷新、WebSocket 断开重连、codec server 重启。
+3. 为非 JPEG 输入预留前端格式提示和 Gateway transform pipeline 的板端验证入口。

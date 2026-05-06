@@ -188,7 +188,7 @@ http://192.168.31.9:8080
 | 实时预览 | 已实现 | WebSocket 接收 JPEG payload，Canvas 显示画面。 |
 | 开始 / 停止预览 | 已实现 | Play / Stop 按钮发送 subscribe / unsubscribe。 |
 | 开始 / 停止录制 | 已实现 | Record 按钮发送 `set_record_enabled`，Gateway 转发给 `camera_codec_server`。 |
-| 录制状态 | 已实现基础状态 | 前端处理 `record_status`，记录 recording、file、encoded_frames、decoded_frames 和错误；录制切换期间按钮进入 pending，避免重复点击。 |
+| 录制状态 | 已实现状态面板 | 前端处理 `record_status`，记录 recording、file、duration_ms、bytes_written、packets_written、profile、encoded_frames、decoded_frames 和错误；录制切换期间按钮进入 pending，避免重复点击。 |
 | 快照 | 已实现 | 从 Canvas 保存 PNG。 |
 | AI Detect | 暂未实现 | 按钮保留，后续接 AI 订阅端。 |
 
@@ -287,6 +287,5 @@ WS_COUNTS before=<正数> during=<正数> after=<正数>
 ## 10. 下一步计划
 
 1. 将 `web-record-freeze-smoke-rk3576.sh` 纳入统一部署脚本，避免手工部署时遗漏最新 smoke 工具。
-2. 增加 Web 录制长稳脚本，覆盖 5 到 30 分钟连续录制、重复 start/stop、浏览器断开重连和录制服务重启。
-3. 补充 H.264 文件播放兼容验证，至少覆盖 `ffprobe` / `ffplay` 或板端可用播放器的基本可解码检查。
-4. 梳理 `camera_codec_server` 与 `web_preview_gateway` 的生产化启动方式，后续可沉淀为 systemd service 或统一 run script。
+2. 增加 Web 异常恢复脚本，覆盖浏览器刷新、WebSocket 断开重连和录制服务重启。
+3. 梳理 `camera_codec_server` 与 `web_preview_gateway` 的生产化启动方式，后续可沉淀为 systemd service 或统一 run script。

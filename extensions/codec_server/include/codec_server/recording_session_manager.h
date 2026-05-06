@@ -8,6 +8,7 @@
 #include "codec_server/recording_file_writer.h"
 
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -41,6 +42,7 @@ private:
     void HandleInputFrame(const camera_subsystem::ipc::CameraDataFrameHeader& header,
                           const std::vector<uint8_t>& payload);
     H264EncoderConfig BuildEncoderConfig(const DecodedImageFrame& frame) const;
+    uint64_t GetDurationMsLocked() const;
     static std::string MapWriterError(WriterResult result);
 
     RecordingSessionConfig config_;
@@ -54,6 +56,8 @@ private:
     std::string stream_id_;
     std::string file_path_;
     CodecControlProfile active_profile_;
+    std::chrono::steady_clock::time_point started_at_{};
+    uint64_t last_duration_ms_ = 0;
     std::atomic<uint64_t> encoded_frames_{0};
     std::atomic<uint64_t> dropped_frames_{0};
     uint64_t input_frames_ = 0;

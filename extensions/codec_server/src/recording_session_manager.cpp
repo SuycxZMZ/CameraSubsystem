@@ -26,6 +26,8 @@ CodecControlStatus RecordingSessionManager::StartRecording(
     active_profile_.bitrate =
         request.profile.bitrate > 0 ? request.profile.bitrate : config_.bitrate;
     active_profile_.gop = request.profile.gop > 0 ? request.profile.gop : config_.gop;
+    started_at_ = std::chrono::steady_clock::now();
+    last_duration_ms_ = 0;
     encoded_frames_.store(0);
     dropped_frames_.store(0);
     input_frames_ = 0;
@@ -83,6 +85,7 @@ CodecControlStatus RecordingSessionManager::StopRecording(
     }
 
     state_ = "stopping";
+    last_duration_ms_ = GetDurationMsLocked();
     subscriber_.Stop();
     {
         std::lock_guard<std::mutex> pipeline_lock(pipeline_mutex_);
@@ -128,6 +131,9 @@ CodecControlStatus RecordingSessionManager::BuildStatusLocked(
     status.input_frames = config_.enable_camera_subscriber
                               ? subscriber_stats.input_frames
                               : input_frames_;
+    status.duration_ms = GetDurationMsLocked();
+    status.bytes_written = stats.bytes_written;
+    status.packets_written = stats.packets_written;
     status.decode_failures = decode_failures_.load();
     status.write_failures = stats.write_failures + subscriber_stats.read_failures;
     status.error = error;
@@ -200,6 +206,21 @@ H264EncoderConfig RecordingSessionManager::BuildEncoderConfig(
     config.bitrate = active_profile_.bitrate > 0 ? active_profile_.bitrate : config_.bitrate;
     config.gop = active_profile_.gop > 0 ? active_profile_.gop : config_.gop;
     return config;
+}
+
+uint64_t RecordingSessionManager::GetDurationMsLocked() const
+{
+    if (started_at_ == std::chrono::steady_clock::time_point{})
+    {
+        return last_duration_ms_;
+    }
+    if (state_ == "recording" || state_ == "starting" || state_ == "stopping")
+    {
+        const auto elapsed = std::chrono::steady_clock::now() - started_at_;
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
+    }
+    return last_duration_ms_;
 }
 
 std::string RecordingSessionManager::MapWriterError(WriterResult result)

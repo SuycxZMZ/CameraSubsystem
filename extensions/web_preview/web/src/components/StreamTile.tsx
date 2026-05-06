@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card';
 import { FrameCanvas } from './FrameCanvas';
 import { StreamOverlay } from './StreamOverlay';
 import { StreamActions } from './StreamActions';
+import { RecordingStatus } from './RecordingStatus';
 import { useStreamStore } from '@/stores/useStreamStore';
 
 interface StreamTileProps {
@@ -50,6 +51,7 @@ export function StreamTile({ streamId }: StreamTileProps) {
         connectionState={connectionState}
         canvasRef={canvasRef}
       />
+      <RecordingStatus stream={stream} />
     </Card>
   );
 }

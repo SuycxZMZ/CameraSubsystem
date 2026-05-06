@@ -47,6 +47,9 @@ struct CodecControlStatus
     uint64_t decoded_frames = 0;
     uint64_t dropped_frames = 0;
     uint64_t input_frames = 0;
+    uint64_t duration_ms = 0;
+    uint64_t bytes_written = 0;
+    uint64_t packets_written = 0;
     uint64_t decode_failures = 0;
     uint64_t write_failures = 0;
     std::string error;
