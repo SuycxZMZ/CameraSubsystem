@@ -24,6 +24,7 @@ add_executable(camera_codec_server
     src/codec_server_config.cpp
     src/codec_control_protocol.cpp
     src/codec_control_server.cpp
+    src/h264_annexb_parser.cpp
     src/h264_mpp_encoder.cpp
     src/jpeg_decode_stage.cpp
     src/recording_file_writer.cpp
@@ -78,6 +79,29 @@ target_link_libraries(camera_codec_server PRIVATE Threads::Threads)
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(camera_codec_server PRIVATE pthread)
 endif ()
+
+# H264 Annex-B parser verification tool
+add_executable(h264_annexb_parser_test
+    src/h264_annexb_parser.cpp
+    src/h264_annexb_parser_test.cpp
+)
+
+set_target_properties(h264_annexb_parser_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
+)
+
+target_include_directories(h264_annexb_parser_test
+    PRIVATE
+        include
+        "${CAMERA_SUBSYSTEM_ROOT}/include"
+)
+
+target_compile_options(h264_annexb_parser_test
+    PRIVATE
+        -Wall
+        -Wextra
+        -Werror
+)
 
 # RecordingFileWriter verification tool
 add_executable(recording_file_writer_test

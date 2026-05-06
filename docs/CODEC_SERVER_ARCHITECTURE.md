@@ -845,6 +845,7 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | `CameraStreamSubscriber` | 已完成当前切片 | 已实现 v1 copy 数据面连接、控制面 Subscribe / Unsubscribe、帧头/帧 payload 读取和 `input_frames` / `input_bytes` 统计；RK3576 `/dev/video45` smoke 已验证 start/status/stop |
 | `JpegDecodeStage` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingMJPEG` 解码，输出 NV12 `DecodedImageFrame`；主机无 MPP 时返回 `jpeg_decoder_not_available` |
 | `H264MppEncoder` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingAVC` 编码；合成 NV12 测试 5/5 通过；live 链路已写出裸 `.h264` 文件 |
+| `H264AnnexBParser` | 已完成当前切片 | 支持 3/4 字节 start code、NAL type 识别、SPS/PPS 提取和 slice 分类；为 MP4 `avcC` 与 length-prefixed sample 转换做准备 |
 | Web 录制控制闭环 | 已完成 | `web_preview_gateway` 转发 start/stop 到 `camera_codec_server`，前端接收 `record_status`；停止录制后 Web 预览继续显示 |
 | Web 录制卡死防护 | 已完成 | publisher / gateway 忽略 `SIGPIPE`，gateway codec 控制链路按命令短连接并设置超时，前端增加 recording pending |
 | Web 录制状态增强 | 已完成当前切片 | `record_status` 增加 `duration_ms`、`bytes_written`、`packets_written` 和有效 `profile`；前端状态面板展示时长、文件统计、输入/编码/解码计数和错误 |
@@ -856,6 +857,7 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | H.264 多工具兼容性 | 已验证 | ffprobe + ffmpeg 全帧解码 5674 帧成功，cycle 文件 100 帧全解码成功 |
 | 编码参数化 | 已完成 | 请求级 `fps` / `bitrate` / `gop` 覆盖 + 启动参数默认值 + status 响应返回有效 profile；`width` / `height` 仅预留，当前不做缩放覆盖 |
 | 容器 writer 前置抽象 | 已完成当前切片 | `RecordingFileWriter` 支持可配置文件扩展名、扩展名校验和冲突避让复用，后续 MP4 muxer 可复用同一输出路径与统计接口 |
+| MP4 muxer 输入解析 | 已完成当前切片 | 新增 Annex-B H.264 NAL parser，后续 muxer 可基于 SPS/PPS 生成 `avcC`，并把编码 packet 转为 MP4 sample |
 
 当前尚未实现：
 
