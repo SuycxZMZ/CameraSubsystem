@@ -24,6 +24,11 @@ struct WriterStats
     uint64_t write_failures = 0;
 };
 
+struct RecordingFileWriterOptions
+{
+    std::string file_extension = ".h264";
+};
+
 class RecordingFileWriter
 {
 public:
@@ -37,6 +42,9 @@ public:
 
     WriterResult Open(const std::string& stream_id,
                       const std::string& output_dir);
+    WriterResult Open(const std::string& stream_id,
+                      const std::string& output_dir,
+                      const RecordingFileWriterOptions& options);
     WriterResult Write(const uint8_t* data, size_t size);
     WriterResult Flush();
     WriterResult Close();
@@ -53,7 +61,9 @@ private:
 
     WriterResult EnsureOutputDir(const std::string& output_dir);
     WriterResult ValidateStreamId(const std::string& stream_id) const;
-    std::string GenerateFileName(const std::string& stream_id) const;
+    WriterResult ValidateFileExtension(const std::string& extension) const;
+    std::string GenerateFileName(const std::string& stream_id,
+                                 const std::string& extension) const;
     WriterResult DoFlush();
     void CloseHandle();
 };

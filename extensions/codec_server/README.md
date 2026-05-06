@@ -7,7 +7,7 @@
 当前已完成：
 
 - `CodecServerConfig` 启动参数解析。
-- `RecordingFileWriter` 文件命名、目录创建、写入、flush、close 和统计。
+- `RecordingFileWriter` 文件命名、目录创建、写入、flush、close、统计、可配置扩展名和冲突避让。
 - `CodecControlServer` Unix Domain Socket JSON line 控制面。
 - `RecordingSessionManager` 最小 start/status/stop 状态机。
 - `CameraStreamSubscriber` v1 copy 数据面订阅模块，支持读取 CameraSubsystem 帧头和 payload 并统计 `input_frames`。
@@ -16,6 +16,8 @@
 - `mpp_jpeg_decode_probe` 已在 RK3576 上验证单帧 JPEG 可通过 MPP 解码为 NV12。
 
 当前 start recording 会打开裸 `.h264` 输出文件、订阅 CameraSubsystem v1 copy 数据面，并将 USB MJPEG/JPEG payload 送入 MPP JPEG decode，再将 NV12 帧送入 MPP H.264 encoder 写入文件。
+
+容器封装前置工作已完成：writer 已支持可配置输出扩展名，当前 session 仍显式使用 `.h264`；后续 MP4 muxer 接入时复用同一输出路径、文件冲突避让和写入统计接口。
 
 RK3576 `/dev/video45` smoke 已验证：`camera_codec_server` 通过控制面 start/status/stop 后，`input_frames=94`、`decoded_frames=94`、`encoded_frames=94`、`decode_failures=0`、`write_failures=0`；输出 `.h264` 文件约 1.5MB。
 

@@ -12,6 +12,7 @@
 
 namespace fs = std::filesystem;
 using camera_subsystem::extensions::codec_server::RecordingFileWriter;
+using camera_subsystem::extensions::codec_server::RecordingFileWriterOptions;
 using camera_subsystem::extensions::codec_server::WriterResult;
 using camera_subsystem::extensions::codec_server::WriterStats;
 
@@ -147,6 +148,57 @@ static void TestFileNameConflict()
 
     w1.Close();
     w2.Close();
+    RemoveTempDir(tmp);
+}
+
+static void TestCustomFileExtension()
+{
+    std::string tmp = MakeTempDir() + "/custom_ext";
+    RecordingFileWriter w;
+    RecordingFileWriterOptions options;
+    options.file_extension = ".mp4";
+
+    WriterResult r = w.Open("cam_ext", tmp, options);
+    Report("CustomFileExtension: Open returns kOk", r == WriterResult::kOk);
+
+    std::string path = w.GetFilePath();
+    Report("CustomFileExtension: GetFilePath ends with .mp4",
+           path.size() >= 4 &&
+           path.substr(path.size() - 4) == ".mp4");
+
+    uint8_t data[] = {0x00, 0x00, 0x00, 0x18};
+    r = w.Write(data, sizeof(data));
+    Report("CustomFileExtension: Write returns kOk", r == WriterResult::kOk);
+
+    w.Close();
+    auto content = ReadFile(path);
+    Report("CustomFileExtension: file content matches",
+           content.size() == sizeof(data) &&
+           std::memcmp(content.data(), data, sizeof(data)) == 0);
+    RemoveTempDir(tmp);
+}
+
+static void TestInvalidFileExtension()
+{
+    std::string tmp = MakeTempDir() + "/invalid_ext";
+    RecordingFileWriter w;
+    RecordingFileWriterOptions options;
+
+    options.file_extension = "mp4";
+    WriterResult r1 = w.Open("cam_bad_ext1", tmp, options);
+    Report("InvalidFileExtension: missing dot returns kFileCreateFailed",
+           r1 == WriterResult::kFileCreateFailed);
+
+    options.file_extension = ".m/p4";
+    WriterResult r2 = w.Open("cam_bad_ext2", tmp, options);
+    Report("InvalidFileExtension: slash returns kFileCreateFailed",
+           r2 == WriterResult::kFileCreateFailed);
+
+    options.file_extension = ".";
+    WriterResult r3 = w.Open("cam_bad_ext3", tmp, options);
+    Report("InvalidFileExtension: empty suffix returns kFileCreateFailed",
+           r3 == WriterResult::kFileCreateFailed);
+
     RemoveTempDir(tmp);
 }
 
@@ -318,6 +370,8 @@ int main()
     TestDirNotWritable();
     TestInvalidStreamId();
     TestFileNameConflict();
+    TestCustomFileExtension();
+    TestInvalidFileExtension();
     TestRepeatedOpen();
     TestWriteNotOpen();
     TestZeroLengthWrite();

@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <climits>
+#include <cctype>
 #include <filesystem>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -33,8 +34,27 @@ WriterResult RecordingFileWriter::ValidateStreamId(
     return WriterResult::kOk;
 }
 
+WriterResult RecordingFileWriter::ValidateFileExtension(
+    const std::string& extension) const
+{
+    if (extension.size() < 2 || extension.size() > 16 || extension[0] != '.')
+    {
+        return WriterResult::kFileCreateFailed;
+    }
+    for (size_t i = 1; i < extension.size(); ++i)
+    {
+        const unsigned char c = static_cast<unsigned char>(extension[i]);
+        if (!std::isalnum(c) && c != '_')
+        {
+            return WriterResult::kFileCreateFailed;
+        }
+    }
+    return WriterResult::kOk;
+}
+
 std::string RecordingFileWriter::GenerateFileName(
-    const std::string& stream_id) const
+    const std::string& stream_id,
+    const std::string& extension) const
 {
     auto now = std::chrono::system_clock::now();
     auto time_t_now = std::chrono::system_clock::to_time_t(now);
@@ -46,7 +66,7 @@ std::string RecordingFileWriter::GenerateFileName(
     {};
     std::strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", &tm_buf);
 
-    std::string base_name = stream_id + "_" + timestamp + ".h264";
+    std::string base_name = stream_id + "_" + timestamp + extension;
     return base_name;
 }
 
@@ -111,6 +131,14 @@ void RecordingFileWriter::CloseHandle()
 WriterResult RecordingFileWriter::Open(const std::string& stream_id,
                                        const std::string& output_dir)
 {
+    return Open(stream_id, output_dir, RecordingFileWriterOptions{});
+}
+
+WriterResult RecordingFileWriter::Open(
+    const std::string& stream_id,
+    const std::string& output_dir,
+    const RecordingFileWriterOptions& options)
+{
     // Implicit close if a file is already open.
     if (is_open_)
     {
@@ -124,6 +152,12 @@ WriterResult RecordingFileWriter::Open(const std::string& stream_id,
         return vr;
     }
 
+    WriterResult er = ValidateFileExtension(options.file_extension);
+    if (er != WriterResult::kOk)
+    {
+        return er;
+    }
+
     // Ensure output directory exists and is writable.
     WriterResult dr = EnsureOutputDir(output_dir);
     if (dr != WriterResult::kOk)
@@ -132,7 +166,7 @@ WriterResult RecordingFileWriter::Open(const std::string& stream_id,
     }
 
     // Generate filename and build full path.
-    std::string filename = GenerateFileName(stream_id);
+    std::string filename = GenerateFileName(stream_id, options.file_extension);
     std::string full_path = output_dir + "/" + filename;
 
     // Handle filename conflicts: if file exists, append _N suffix.
@@ -140,11 +174,11 @@ WriterResult RecordingFileWriter::Open(const std::string& stream_id,
     if (fs::exists(full_path))
     {
         std::string base_no_ext = filename.substr(
-            0, filename.size() - 5); // strip ".h264"
+            0, filename.size() - options.file_extension.size());
         for (int n = 2; ; ++n)
         {
             std::string candidate = base_no_ext + "_" +
-                std::to_string(n) + ".h264";
+                std::to_string(n) + options.file_extension;
             full_path = output_dir + "/" + candidate;
             if (!fs::exists(full_path))
             {

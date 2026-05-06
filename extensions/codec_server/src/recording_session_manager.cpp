@@ -37,7 +37,9 @@ CodecControlStatus RecordingSessionManager::StartRecording(
 
     const std::string output_dir =
         request.output_dir.empty() ? config_.default_output_dir : request.output_dir;
-    const WriterResult result = writer_.Open(request.stream_id, output_dir);
+    RecordingFileWriterOptions writer_options;
+    writer_options.file_extension = ".h264";
+    const WriterResult result = writer_.Open(request.stream_id, output_dir, writer_options);
     if (result != WriterResult::kOk)
     {
         state_ = "error";

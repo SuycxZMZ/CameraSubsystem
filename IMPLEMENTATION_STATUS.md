@@ -288,6 +288,7 @@ flowchart TB
 5. **编码参数化与容器封装**
    - 已完成请求级 `fps` / `bitrate` / `gop` 覆盖、启动参数默认值和 status profile 返回
    - `width` / `height` 仅作为后续缩放或裁剪预留，当前不覆盖实际解码帧尺寸
+   - 已完成 writer 输出扩展名前置抽象，支持后续 `.mp4` 路径、冲突避让和统计接口复用
    - 下一步集成 MP4 muxer，MKV 作为后续备选
 
 6. **DataPlaneV2 低拷贝录制路径**

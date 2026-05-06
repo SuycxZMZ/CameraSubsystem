@@ -839,7 +839,7 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | 本机构建验证 | 已完成 | `cmake --build build-codec --target camera_codec_server` 通过 |
 | RK3576 交叉编译 | 已完成 | `scripts/build-rk3576.sh` 已生成 `bin/rk3576/camera_codec_server` |
 | RK3576 板端最小运行 | 已完成 | 已按 `/home/luckfox/CameraSubsystem/bin/` 统一目录部署，`--help` 和参数解析输出正常 |
-| `RecordingFileWriter` | 已完成 | 支持创建输出目录、生成 `<stream_id>_<YYYYMMDD_HHMMSS>.h264`、写入 packet、flush、close、统计和重复文件名避让 |
+| `RecordingFileWriter` | 已完成 | 支持创建输出目录、生成 `<stream_id>_<YYYYMMDD_HHMMSS>.<ext>`、写入 packet、flush、close、统计、可配置扩展名和重复文件名避让 |
 | `CodecControlServer` | 已完成最小版 | 支持 Unix Domain Socket JSON line start/status/stop；本机 `nc -U` 已验证 |
 | `RecordingSessionManager` | 已完成最小版 | 支持 idle / starting / recording / stopping / error 状态裁决，重复 start、重复 stop 和 writer 错误映射已验证；start recording 已接入 `CameraStreamSubscriber` |
 | `CameraStreamSubscriber` | 已完成当前切片 | 已实现 v1 copy 数据面连接、控制面 Subscribe / Unsubscribe、帧头/帧 payload 读取和 `input_frames` / `input_bytes` 统计；RK3576 `/dev/video45` smoke 已验证 start/status/stop |
@@ -850,11 +850,12 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | Web 录制状态增强 | 已完成当前切片 | `record_status` 增加 `duration_ms`、`bytes_written`、`packets_written` 和有效 `profile`；前端状态面板展示时长、文件统计、输入/编码/解码计数和错误 |
 | 60 秒录制稳定性 | 已完成 | 1490 帧输入/解码/编码，0 decode_failures，0 write_failures，输出 24MB H.264 文件 |
 | H.264 文件播放兼容性 | 已验证 | `ffprobe` 确认 H.264 High profile 1920x1080 yuv420p，avg_frame_rate=25/1 |
-| 本机 writer/session 验证 | 已完成 | `recording_file_writer_test` 41/41 通过；`recording_session_manager_test` 15/15 通过 |
+| 本机 writer/session 验证 | 已完成 | `recording_file_writer_test` 48/48 通过；`recording_session_manager_test` 15/15 通过 |
 | 5 分钟录制长稳 | 已完成 | 5676 帧输入，5674 帧解码/编码（99.96%），2 decode_failures，0 write_failures，91MB 输出 |
 | 重复 start/stop 循环 | 已完成 | 10 次 x 5 秒循环，995 帧编码，0 失败，10 个独立 .h264 文件 |
 | H.264 多工具兼容性 | 已验证 | ffprobe + ffmpeg 全帧解码 5674 帧成功，cycle 文件 100 帧全解码成功 |
 | 编码参数化 | 已完成 | 请求级 `fps` / `bitrate` / `gop` 覆盖 + 启动参数默认值 + status 响应返回有效 profile；`width` / `height` 仅预留，当前不做缩放覆盖 |
+| 容器 writer 前置抽象 | 已完成当前切片 | `RecordingFileWriter` 支持可配置文件扩展名、扩展名校验和冲突避让复用，后续 MP4 muxer 可复用同一输出路径与统计接口 |
 
 当前尚未实现：
 
