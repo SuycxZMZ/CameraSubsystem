@@ -12,11 +12,14 @@ BOARD_DIR="${BOARD_DIR:-/tmp/camera_subsystem_dmabuf_v2_failover}"
 DEVICE="${DEVICE:-/dev/video45}"
 PRE_CRASH_SEC="${PRE_CRASH_SEC:-6}"
 POST_CRASH_SEC="${POST_CRASH_SEC:-8}"
+FAULT_MODE="${FAULT_MODE:-crash}"
+FAULT_RELEASE_DISCONNECT_AFTER_FRAMES="${FAULT_RELEASE_DISCONNECT_AFTER_FRAMES:-5}"
 CRASH_RELEASE_DELAY_MS="${CRASH_RELEASE_DELAY_MS:-700}"
 NORMAL_PROCESS_DELAY_MS="${NORMAL_PROCESS_DELAY_MS:-5}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 MIN_NORMAL_FRAMES="${MIN_NORMAL_FRAMES:-10}"
 MIN_CRASHED_FRAMES="${MIN_CRASHED_FRAMES:-3}"
+MIN_FAULT_RELEASE_FAIL="${MIN_FAULT_RELEASE_FAIL:-1}"
 MAX_RELEASE_PENDING="${MAX_RELEASE_PENDING:-0}"
 MAX_ACTIVE_LEASES="${MAX_ACTIVE_LEASES:-0}"
 MAX_RELEASE_TIMEOUT="${MAX_RELEASE_TIMEOUT:--1}"
@@ -30,6 +33,11 @@ RELEASE_SOCKET="/tmp/camera_subsystem_release_v2.sock"
 LOCAL_LOG_DIR="${LOCAL_LOG_DIR:-${PROJECT_ROOT}/logs/rk3576-dataplane-v2-failover-smoke}"
 TARGET="${BOARD_USER}@${BOARD_HOST}"
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+
+if [[ "${FAULT_MODE}" != "crash" && "${FAULT_MODE}" != "release-disconnect" ]]; then
+    echo "FAULT_MODE must be 'crash' or 'release-disconnect'"
+    exit 1
+fi
 
 run_ssh()
 {
@@ -136,6 +144,11 @@ fi
 
 mkdir -p "${LOCAL_LOG_DIR}"
 
+fault_extra_args=""
+if [[ "${FAULT_MODE}" == "release-disconnect" ]]; then
+    fault_extra_args="--release-disconnect-after-frames ${FAULT_RELEASE_DISCONNECT_AFTER_FRAMES}"
+fi
+
 run_ssh "mkdir -p '${BOARD_DIR}'"
 run_scp \
     "${OUTPUT_DIR}/camera_publisher_example" \
@@ -166,21 +179,26 @@ run_ssh "set -e; \
         > subscriber-normal.log 2>&1 & echo \$! > subscriber-normal.pid; \
     nohup ./camera_subscriber_example crash_frames '${CONTROL_SOCKET}' '${DATA_SOCKET}' '${DEVICE}' \
         --data-plane v2 --release-socket '${RELEASE_SOCKET}' \
-        --process-delay-ms 5 --release-delay-ms '${CRASH_RELEASE_DELAY_MS}' \
+        --process-delay-ms 5 --release-delay-ms '${CRASH_RELEASE_DELAY_MS}' ${fault_extra_args} \
         > subscriber-crash.log 2>&1 & echo \$! > subscriber-crash.pid"
 
-sleep "${PRE_CRASH_SEC}"
+if [[ "${FAULT_MODE}" == "crash" ]]; then
+    sleep "${PRE_CRASH_SEC}"
 
-run_ssh "set +e; \
-    cd '${BOARD_DIR}'; \
-    kill -9 \$(cat subscriber-crash.pid 2>/dev/null) 2>/dev/null; \
-    true"
+    run_ssh "set +e; \
+        cd '${BOARD_DIR}'; \
+        kill -9 \$(cat subscriber-crash.pid 2>/dev/null) 2>/dev/null; \
+        true"
 
-sleep "${POST_CRASH_SEC}"
+    sleep "${POST_CRASH_SEC}"
+else
+    sleep $((PRE_CRASH_SEC + POST_CRASH_SEC))
+fi
 
 run_ssh "set +e; \
     cd '${BOARD_DIR}'; \
     kill \$(cat subscriber-normal.pid 2>/dev/null) 2>/dev/null; \
+    kill \$(cat subscriber-crash.pid 2>/dev/null) 2>/dev/null; \
     sleep 2; \
     kill \$(cat publisher.pid 2>/dev/null) 2>/dev/null; \
     sleep 1; \
@@ -203,13 +221,14 @@ echo
 echo "Normal subscriber summary:"
 grep -E "summary|release_fail|fps=" "${LOCAL_LOG_DIR}/subscriber-normal.log" | tail -n 10 || true
 echo
-echo "Crashed subscriber last counters:"
+echo "Fault subscriber last counters:"
 grep -E "sec=|summary|release_fail|fps=" "${LOCAL_LOG_DIR}/subscriber-crash.log" | tail -n 10 || true
 
 publisher_line="$(grep -E "release_pending|lease_exhausted|v2_sent|release_timeout" \
     "${LOCAL_LOG_DIR}/publisher.log" | tail -n 1 || true)"
 normal_summary="$(grep -E "summary:" "${LOCAL_LOG_DIR}/subscriber-normal.log" | tail -n 1 || true)"
 crashed_line="$(grep -E "sec=" "${LOCAL_LOG_DIR}/subscriber-crash.log" | tail -n 1 || true)"
+crashed_summary="$(grep -E "summary:" "${LOCAL_LOG_DIR}/subscriber-crash.log" | tail -n 1 || true)"
 
 echo
 echo "Automatic failover checks:"
@@ -262,14 +281,24 @@ else
     check_eq "normal.release_fail" "${normal_release_fail:-missing}" "0" || failures=$((failures + 1))
 fi
 
-if [[ -z "${crashed_line}" ]]; then
-    echo "FAIL: crashed subscriber received no frames before kill"
+if [[ "${FAULT_MODE}" == "release-disconnect" ]]; then
+    if [[ -z "${crashed_summary}" ]]; then
+        echo "FAIL: fault subscriber summary not found"
+        failures=$((failures + 1))
+    else
+        fault_frames="$(extract_counter "${crashed_summary}" "frames")"
+        fault_release_fail="$(extract_counter "${crashed_summary}" "release_fail")"
+        check_ge "fault.frames" "${fault_frames:-0}" "${MIN_CRASHED_FRAMES}" || failures=$((failures + 1))
+        check_ge "fault.release_fail_after_disconnect" "${fault_release_fail:-0}" "${MIN_FAULT_RELEASE_FAIL}" || failures=$((failures + 1))
+    fi
+elif [[ -z "${crashed_line}" ]]; then
+    echo "FAIL: fault subscriber received no frames before kill"
     failures=$((failures + 1))
 else
     crashed_frames="$(extract_counter "${crashed_line}" "frames")"
     crashed_release_fail="$(extract_counter "${crashed_line}" "release_fail")"
-    check_ge "crashed.frames_before_kill" "${crashed_frames:-0}" "${MIN_CRASHED_FRAMES}" || failures=$((failures + 1))
-    check_eq "crashed.release_fail_before_kill" "${crashed_release_fail:-missing}" "0" || failures=$((failures + 1))
+    check_ge "fault.frames" "${crashed_frames:-0}" "${MIN_CRASHED_FRAMES}" || failures=$((failures + 1))
+    check_eq "fault.release_fail_before_kill" "${crashed_release_fail:-missing}" "0" || failures=$((failures + 1))
 fi
 
 if (( failures > 0 )); then

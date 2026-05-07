@@ -211,6 +211,7 @@ TEST(CameraReleaseTrackerTest, ReclaimsOnConsumerDisconnect)
     EXPECT_EQ(reclaims[0].status, CameraReleaseStatus::kError);
     EXPECT_EQ(reclaims[0].expected_release_count, 2u);
     EXPECT_EQ(reclaims[0].observed_release_count, 2u);
+    EXPECT_EQ(reclaims[0].disconnected_consumer_id, 8u);
 
     const CameraReleaseTrackerStats stats = tracker.GetStats();
     EXPECT_EQ(stats.disconnect_reclaims, 1u);

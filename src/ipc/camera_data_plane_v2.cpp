@@ -454,7 +454,8 @@ std::vector<CameraReleaseReclaim> CameraReleaseTracker::ReclaimConsumerDisconnec
 
         if (frame.released_consumers.size() == frame.expected_consumers.size())
         {
-            reclaims.push_back(MakeReclaimLocked(frame, CameraReleaseStatus::kError));
+            reclaims.push_back(
+                MakeReclaimLocked(frame, CameraReleaseStatus::kError, consumer_id));
             it = pending_frames_.erase(it);
             ++stats_.reclaimed_frames;
             ++stats_.disconnect_reclaims;
@@ -497,7 +498,8 @@ size_t CameraReleaseTracker::FrameKeyHash::operator()(const FrameKey& key) const
 
 CameraReleaseReclaim CameraReleaseTracker::MakeReclaimLocked(
     const PendingFrame& frame,
-    CameraReleaseStatus status) const
+    CameraReleaseStatus status,
+    uint32_t disconnected_consumer_id) const
 {
     CameraReleaseReclaim reclaim;
     reclaim.stream_id = frame.key.stream_id;
@@ -506,6 +508,7 @@ CameraReleaseReclaim CameraReleaseTracker::MakeReclaimLocked(
     reclaim.status = status;
     reclaim.expected_release_count = static_cast<uint32_t>(frame.expected_consumers.size());
     reclaim.observed_release_count = static_cast<uint32_t>(frame.released_consumers.size());
+    reclaim.disconnected_consumer_id = disconnected_consumer_id;
     return reclaim;
 }
 

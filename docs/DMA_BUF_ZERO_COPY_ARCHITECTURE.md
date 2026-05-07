@@ -649,13 +649,13 @@ DMA-BUF Phase 2 阶段性任务已经完成。本文后续只保留数据面自�
 | P2 | 接入 MIPI 摄像头后验证 RKISP 节点 EXPBUF 和多平面 | 已新增 `mplane_dmabuf_probe` 并在 RK3576 `/dev/video22`、`/dev/video23`、`/dev/video31`、`/dev/video32`、`/dev/video41` 完成 MPLANE `REQBUFS + QUERYBUF + EXPBUF` 探测；当前 STREAMON 失败，说明真实 MIPI/RKISP 出帧链路仍依赖 sensor/media pipeline 接入 |
 | P2 | 验证 RGA/MPP import DMA-BUF fd | ✅ RGA import 与 MPP buffer import 已完成最小验证；RKNN import 暂不做 |
 | P2 | DataPlaneV2 设计与实现 | ✅ 已完成协议结构、SCM_RIGHTS helper、ReleaseFrame helper、release tracker、publisher release server、publisher/subscriber 示例接入与 RK3576 smoke |
-| P2 | DataPlaneV2 长稳与异常验证 | 进行中：已补本机异常单测，覆盖无效 descriptor fd 清理、无效 release 计数、部分 release 超时回收、重复/未知 release 统计和 publisher 退出前 pending lease 清理；已补 subscriber 慢消费参数、慢消费者/多订阅者 smoke 和 subscriber 崩溃 failover smoke，并完成 `/dev/video45` 板端验证 |
+| P2 | DataPlaneV2 长稳与异常验证 | 进行中：已补本机异常单测，覆盖无效 descriptor fd 清理、无效 release 计数、部分 release 超时回收、重复/未知 release 统计和 publisher 退出前 pending lease 清理；已补 subscriber 慢消费参数、release socket 断开调试参数、慢消费者/多订阅者 smoke 和异常 failover smoke，并完成 `/dev/video45` 板端验证 |
 | P3 | Web 录制按钮接入 camera_codec_server | 转入 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)，当前前端只有命令类型和禁用按钮，未接入后台录制 |
 | P3 | H.264 编码录制 | 转入 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)，建议独立 `camera_codec_server` 订阅原始流并使用 Rockchip MPP 编码 |
 
 DMA-BUF 数据面剩余开发顺序如下：
 
-1. **DataPlaneV2 异常验证**：优先验证 subscriber 崩溃、release socket 断开、release 超时、fd 泄漏检查和 publisher 退出清理，确保显式 release 通道不会造成 V4L2 buffer 泄漏或过早 QBUF。当前已完成本机单测覆盖、publisher 退出 pending lease 清理和 RK3576 真实 subscriber 崩溃 failover smoke；仍需补 release socket 主动断开和 fd 泄漏长稳验证。
+1. **DataPlaneV2 异常验证**：优先验证 subscriber 崩溃、release socket 断开、release 超时、fd 泄漏检查和 publisher 退出清理，确保显式 release 通道不会造成 V4L2 buffer 泄漏或过早 QBUF。当前已完成本机单测覆盖、publisher 退出 pending lease 清理、RK3576 真实 subscriber 崩溃 failover smoke 和 release socket 主动断开验证；仍需补 fd 泄漏长稳验证。
 2. **慢消费者与多订阅者验证**：在 1 个慢消费者、1 个正常消费者和多消费者组合下观察 `lease_in_flight_max`、pending release、QBUF 时序、帧率和丢帧策略。当前已新增 `camera_subscriber_example --process-delay-ms N --release-delay-ms N`，其中 `--release-delay-ms` 用于 DataPlaneV2 场景下延迟发送 `ReleaseFrame`，模拟消费者长时间持有帧。RK3576 `/dev/video45` 已完成双订阅者验证：`SLOW_RELEASE_DELAY_MS=200` 时两个订阅者均 `release_fail=0`，publisher `release_timeout=0`；`SLOW_RELEASE_DELAY_MS=700` 时会触发 `release_timeout` 和 `lease_exhausted`，用于压力观察。
 3. **板端 smoke 脚本固化**：把当前手工 RK3576 验证流程整理成脚本，自动完成上传、启动、停止、日志采集和 counters 校验。当前已新增 `scripts/rk3576-dataplane-v2-slow-consumer-smoke.sh`，默认使用 `luckfox` 用户，支持 `BOARD_PASSWORD` 自动密码输入（优先 `sshpass`，否则使用 `expect`），启动 1 个正常 subscriber 和 1 个慢 release subscriber，日志回收至 `logs/rk3576-dataplane-v2-smoke/`。脚本已修复 `pkill -f` 误匹配远端 shell 的问题，并增加 counters 自动 PASS/FAIL 判定。
 4. **MIPI/RKISP 多平面验证**：接入 MPLANE capture 节点，验证 per-plane fd / offset / stride 和后续 RGA/NPU/编码器 import 可行性。当前已新增 `mplane_dmabuf_probe`，可在不改 CameraSource 主链路的前提下验证 RKISP/RKVpss 节点的 MPLANE DMA-BUF export 能力；真实 STREAMON 出帧仍需 sensor/media pipeline 完整配置。
@@ -688,6 +688,7 @@ SLOW_RELEASE_DELAY_MS=700 \
 | `SLOW_RELEASE_DELAY_MS=200`，双订阅者运行约 60 秒 | 自动判定 PASS；publisher `dmabuf_enabled=1`、`export_fail=0`、`v2_sent=545`、`v2_send_fail=1`（停止阶段断连）、`release_pending=0`、`release_timeout=0`；正常 subscriber `frames=272`、慢 subscriber `frames=271`，两者 `save_fail=0`、`release_fail=0` |
 | `SLOW_RELEASE_DELAY_MS=700`，双订阅者运行约 20 秒 | publisher 持续运行，无崩溃；`release_timeout` 和 `lease_exhausted` 增长，符合慢消费者持有 lease 接近/超过 1s release timeout 的压力预期；两个 subscriber 均 `release_fail=0` |
 | `rk3576-dataplane-v2-failover-smoke.sh`，强杀慢 release subscriber | 自动判定 PASS；publisher `dmabuf_enabled=1`、`export_fail=0`、`v2_sent=241`、`release_pending=0`、`active_leases=0`；正常 subscriber `frames=227`、`release_fail=0`；被强杀 subscriber kill 前 `frames=7`、`release_fail=0`；`release_timeout=10`、`lease_exhausted=138` 在强杀慢 release 场景下作为压力指标记录，不作为默认失败条件 |
+| `FAULT_MODE=release-disconnect`，fault subscriber 第 5 帧后主动关闭 release socket | 自动判定 PASS；publisher 通过断连 reclaim 移除对应 DataPlaneV2 数据客户端，最终 `clients=0`、`release_pending=0`、`active_leases=0`、`release_timeout=0`、`lease_exhausted=0`；正常 subscriber `frames=352`、`release_fail=0`，断连 subscriber `frames=5`、`release_fail=1` |
 
 MPLANE DMA-BUF probe 验证命令：
 

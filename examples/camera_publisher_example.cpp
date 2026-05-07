@@ -67,6 +67,7 @@ using camera_subsystem::ipc::CameraClientRole;
 using camera_subsystem::ipc::CameraControlServer;
 using camera_subsystem::ipc::CameraDataFrameHeader;
 using camera_subsystem::ipc::CameraEndpoint;
+using camera_subsystem::ipc::CameraReleaseStatus;
 using camera_subsystem::ipc::CameraReleaseServer;
 using camera_subsystem::ipc::MakeCameraDataFrameDescriptorV2;
 using camera_subsystem::ipc::SendCameraDataFrameDescriptorV2;
@@ -589,15 +590,22 @@ int main(int argc, char* argv[])
                     {
                         lease->Release();
                     }
+                    if (reclaim.status == CameraReleaseStatus::kError &&
+                        reclaim.disconnected_consumer_id != 0)
+                    {
+                        data_v2_server.RemoveClient(reclaim.disconnected_consumer_id);
+                    }
                     PlatformLogger::Log(LogLevel::kInfo, "publisher",
                                         "release reclaim: stream=%u frame=%" PRIu64
-                                        " buffer=%u status=%u observed=%u expected=%u",
+                                        " buffer=%u status=%u observed=%u expected=%u"
+                                        " disconnected_consumer=%u",
                                         reclaim.stream_id,
                                         reclaim.frame_id,
                                         reclaim.buffer_id,
                                         static_cast<uint32_t>(reclaim.status),
                                         reclaim.observed_release_count,
-                                        reclaim.expected_release_count);
+                                        reclaim.expected_release_count,
+                                        reclaim.disconnected_consumer_id);
                 }))
         {
             PlatformLogger::Log(LogLevel::kError, "publisher",

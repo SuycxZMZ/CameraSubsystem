@@ -133,6 +133,7 @@ struct CameraReleaseReclaim
     CameraReleaseStatus status = CameraReleaseStatus::kOk;
     uint32_t expected_release_count = 0;
     uint32_t observed_release_count = 0;
+    uint32_t disconnected_consumer_id = 0;
 };
 
 struct CameraReleaseTrackerStats
@@ -194,8 +195,10 @@ private:
         std::chrono::steady_clock::time_point deadline;
     };
 
-    CameraReleaseReclaim MakeReclaimLocked(const PendingFrame& frame,
-                                           CameraReleaseStatus status) const;
+    CameraReleaseReclaim MakeReclaimLocked(
+        const PendingFrame& frame,
+        CameraReleaseStatus status,
+        uint32_t disconnected_consumer_id = 0) const;
 
     std::chrono::milliseconds release_timeout_;
     mutable std::mutex mutex_;

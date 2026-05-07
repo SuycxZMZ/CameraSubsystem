@@ -7,6 +7,7 @@
  * 用法：
  *   ./camera_subscriber_example [output_dir] [control_socket] [data_socket] [device_path]
  *       [--data-plane v1|v2] [--process-delay-ms N] [--release-delay-ms N]
+ *       [--release-disconnect-after-frames N]
  *
  * 默认参数：
  * 1. output_dir    : ./subscriber_frames
@@ -254,6 +255,7 @@ int main(int argc, char* argv[])
     DataPlaneMode data_plane_mode = DataPlaneMode::kV1Copy;
     uint32_t process_delay_ms = 5;
     uint32_t release_delay_ms = 0;
+    uint64_t release_disconnect_after_frames = 0;
 
     int pos = 0;
     for (int i = 1; i < argc; ++i)
@@ -293,12 +295,18 @@ int main(int argc, char* argv[])
             ++i;
             release_delay_ms = static_cast<uint32_t>(std::stoul(argv[i]));
         }
+        else if (arg == "--release-disconnect-after-frames" && i + 1 < argc)
+        {
+            ++i;
+            release_disconnect_after_frames = static_cast<uint64_t>(std::stoull(argv[i]));
+        }
         else if (arg == "--help" || arg == "-h")
         {
             PlatformLogger::Log(LogLevel::kInfo, "subscriber",
                                 "usage: %s [output_dir] [control_socket] [data_socket] "
                                 "[device_path] [--data-plane v1|v2] [--release-socket path] "
-                                "[--process-delay-ms N] [--release-delay-ms N]",
+                                "[--process-delay-ms N] [--release-delay-ms N] "
+                                "[--release-disconnect-after-frames N]",
                                 argv[0]);
             return 0;
         }
@@ -406,10 +414,11 @@ int main(int argc, char* argv[])
 
     PlatformLogger::Log(LogLevel::kInfo, "subscriber",
                         "subscriber started, client_id=%s, output_dir=%s, device=%s, "
-                        "data_plane=%s, process_delay_ms=%u, release_delay_ms=%u",
+                        "data_plane=%s, process_delay_ms=%u, release_delay_ms=%u, "
+                        "release_disconnect_after_frames=%" PRIu64,
                         client_id.c_str(), output_dir_path.c_str(), endpoint.device_path,
                         data_plane_mode == DataPlaneMode::kV2DmaBuf ? "v2" : "v1",
-                        process_delay_ms, release_delay_ms);
+                        process_delay_ms, release_delay_ms, release_disconnect_after_frames);
     PlatformLogger::Log(LogLevel::kInfo, "subscriber",
                         "sec | frames | fps | received_bytes | save_fail | image");
 
@@ -422,6 +431,7 @@ int main(int argc, char* argv[])
     uint64_t release_fail_count = 0;
     uint64_t elapsed_sec = 0;
     uint64_t last_frames = 0;
+    bool release_socket_disconnected = false;
 
     auto next_report_time = std::chrono::steady_clock::now() + std::chrono::seconds(1);
 
@@ -498,6 +508,22 @@ int main(int argc, char* argv[])
                 if (release_delay_ms > 0)
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(release_delay_ms));
+                }
+
+                if (!release_socket_disconnected &&
+                    release_disconnect_after_frames > 0 &&
+                    total_frames + 1 >= release_disconnect_after_frames)
+                {
+                    PlatformLogger::Log(LogLevel::kWarning, "subscriber",
+                                        "closing release socket for debug after %" PRIu64
+                                        " frames",
+                                        total_frames + 1);
+                    if (release_fd >= 0)
+                    {
+                        close(release_fd);
+                        release_fd = -1;
+                    }
+                    release_socket_disconnected = true;
                 }
 
                 const CameraReleaseFrameV2 release = MakeCameraReleaseFrameV2(

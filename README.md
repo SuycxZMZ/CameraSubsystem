@@ -294,14 +294,14 @@ cd /home/luckfox/CameraSubsystem
 当前限制：
 
 1. 默认数据面 IPC 仍是示例复制链路，不适合作为 4K 高帧率生产通路；跨进程 DMA-BUF 需要显式启用 `--io-method dmabuf --data-plane v2`。
-2. DMA-BUF 数据面已完成 RK3576 `/dev/video45` Phase 2 冒烟、慢消费者/双订阅者长稳和 subscriber 崩溃 failover 验证，但仍需补充 release socket 主动断开、fd 泄漏长稳和真实 MIPI/RKISP 出帧验证，阶段性记录见 [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md)。
+2. DMA-BUF 数据面已完成 RK3576 `/dev/video45` Phase 2 冒烟、慢消费者/双订阅者长稳、subscriber 崩溃 failover 和 release socket 主动断开验证，但仍需补充 fd 泄漏长稳和真实 MIPI/RKISP 出帧验证，阶段性记录见 [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md)。
 3. 背压策略只有基础队列上限和池耗尽丢帧，尚未参数化。
 4. 设备断连恢复、订阅端异常恢复、核心发布端重启恢复仍未形成完整状态机。
 5. 多平台后端能力发现、设备热插拔与恢复策略仍需完善。
 
 下一步建议按以下顺序推进，并与 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 的 P0/P1 风险项对齐：
 
-1. **DataPlaneV2 异常验证**：subscriber 崩溃 failover 已完成，继续覆盖 release socket 主动断开、release 超时、fd 泄漏检查和 publisher 退出清理。
+1. **DataPlaneV2 异常验证**：subscriber 崩溃 failover 和 release socket 主动断开已完成，继续覆盖 release 超时、fd 泄漏检查和 publisher 退出清理。
 2. **慢消费者与多订阅者验证**：确认 `lease_in_flight_max`、pending release、QBUF 时序和采集帧率在压力下稳定。
 3. **板端 smoke 与启动方式固化**：沉淀一键上传、运行、采集日志、校验关键 counters 的 RK3576 自检脚本，并整理 `camera_codec_server` / `web_preview_gateway` 的生产化启动方式。
 4. **Web Codec 可用性体验评估**：Web 录制异常恢复 smoke 已覆盖 raw_h264 / mp4；后续按体验决定是否增加 Gateway codec health 广播和前端能力状态。
