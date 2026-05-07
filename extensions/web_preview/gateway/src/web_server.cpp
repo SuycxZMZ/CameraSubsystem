@@ -163,6 +163,11 @@ std::string BuildRecordErrorJson(const std::string& stream_id, const std::string
            "\",\"recording\":false,\"error\":\"" + error + "\"}";
 }
 
+bool IsSupportedRecordContainer(const std::string& container)
+{
+    return container == "raw_h264" || container == "mp4";
+}
+
 } // namespace
 
 WebServer::WebServer()
@@ -397,6 +402,7 @@ std::string WebServer::HandleRecordCommand(const std::string& payload)
 
     std::string stream_id = find_string("stream_id");
     std::string enabled_str = find_string("enabled");
+    std::string container = find_string("container");
     bool enabled = (enabled_str == "true" || enabled_str == "1");
 
     if (stream_id.empty())
@@ -407,10 +413,20 @@ std::string WebServer::HandleRecordCommand(const std::string& payload)
     std::string codec_cmd;
     if (enabled)
     {
+        if (container.empty())
+        {
+            container = "raw_h264";
+        }
+        if (!IsSupportedRecordContainer(container))
+        {
+            return BuildRecordErrorJson(stream_id, "unsupported_container");
+        }
+
         codec_cmd = "{\"type\":\"start_recording\",\"request_id\":\"web-"
                   + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())
                   + "\",\"stream_id\":\"" + stream_id
-                  + "\",\"output_dir\":\"" + config_.output_dir + "\"}";
+                  + "\",\"output_dir\":\"" + config_.output_dir
+                  + "\",\"container\":\"" + container + "\"}";
     }
     else
     {

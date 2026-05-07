@@ -61,7 +61,7 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 | 控制面 IPC | 基础落地 | Subscribe / Unsubscribe / Ping |
 | 数据面 IPC | 示例落地 | 默认保留 Unix Socket 复制链路；DMA-BUF 模式已支持 DataPlaneV2 + `SCM_RIGHTS` fd 传递 |
 | Buffer 生命周期治理 | 基础落地 | `BufferPool` / `BufferGuard` / 状态机 / 泄漏检测 |
-| Web Preview 扩展 | 已落地并完成板端录制联调 | Gateway + React 前端，浏览器实时预览 Camera 画面；Record start/stop 后预览与 8080 服务保持可用，录制状态面板展示时长、文件统计、profile 和错误 |
+| Web Preview 扩展 | 已落地并完成板端录制联调 | Gateway + React 前端，浏览器实时预览 Camera 画面；Record start/stop 后预览与 8080 服务保持可用，录制状态面板展示时长、文件统计、profile 和错误；已暴露 H.264 裸流 / MP4 录制格式选择 |
 | DMA-BUF 零拷贝主链路 | Phase 2 冒烟通过 | 已新增 `FrameDescriptor` / `FrameLease` 与 V4L2 `VIDIOC_EXPBUF` 尝试路径；RK3576 `/dev/video45` 已通过 `dmabuf_smoke_test` 和跨进程 DataPlaneV2 smoke |
 | H.264 录制编码 | 已打通 Web 控制闭环 | 独立 `camera_codec_server` 订阅原始流并使用 Rockchip MPP 编码；状态回传包含录制时长、文件统计、有效编码 profile 和错误信息；已支持 `container=mp4` 主链路并完成 RK3576 live 验证 |
 | 板端运行验证 | 阶段完成 | 已在 RK3576 Debian 12 上完成 publisher/subscriber copy、DataPlaneV2 smoke、Web 录制 start/stop smoke |
@@ -305,5 +305,5 @@ cd /home/luckfox/CameraSubsystem
 2. **慢消费者与多订阅者验证**：确认 `lease_in_flight_max`、pending release、QBUF 时序和采集帧率在压力下稳定。
 3. **板端 smoke 脚本固化**：沉淀一键上传、运行、采集日志、校验关键 counters 的 RK3576 自检脚本。
 4. **Web 录制异常恢复验证**：在 RK3576 正式部署目录下覆盖浏览器刷新、WebSocket 断线重连、codec server 重启恢复，避免只依赖短 smoke。
-5. **Camera Codec Server 容器化 Web 入口**：`container=mp4` 主链路已完成，下一步把 MP4 选择暴露到 Gateway / Web 控制入口，并补充重复录制和异常停止验证。
+5. **Web MP4 录制入口补充验证**：`container=mp4` 主链路和 Web 参数入口已完成，下一步补充重复录制、异常停止、刷新重连和 codec server 重启恢复验证。
 6. **MIPI/RKISP 多平面验证**：接入 MPLANE 节点，验证 per-plane fd / offset / stride，并为 DataPlaneV2 -> MPP 低拷贝编码路径做准备。

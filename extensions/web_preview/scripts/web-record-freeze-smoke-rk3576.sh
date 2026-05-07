@@ -13,6 +13,14 @@ OUTPUT_DIR="${OUTPUT_DIR:-${REMOTE_ROOT}/recordings/web_freeze_records}"
 STATIC_ROOT="${STATIC_ROOT:-${REMOTE_ROOT}/web_preview/dist}"
 PORT="${PORT:-8080}"
 MAX_PREVIEW_FPS="${MAX_PREVIEW_FPS:-30}"
+RECORD_CONTAINER="${RECORD_CONTAINER:-raw_h264}"
+case "$RECORD_CONTAINER" in
+    raw_h264|mp4) ;;
+    *)
+        echo "unsupported RECORD_CONTAINER: $RECORD_CONTAINER" >&2
+        exit 2
+        ;;
+esac
 
 PUBLISHER_LOG="${PUBLISHER_LOG:-${REMOTE_ROOT}/logs/publisher_web_freeze.log}"
 CODEC_LOG="${CODEC_LOG:-${REMOTE_ROOT}/logs/codec_web_freeze.log}"
@@ -60,6 +68,7 @@ import time
 
 HOST = '127.0.0.1'
 PORT = int(os.environ.get('PORT', '8080'))
+RECORD_CONTAINER = os.environ.get('RECORD_CONTAINER', 'raw_h264')
 
 def recv_exact(sock, n):
     data = b''
@@ -136,7 +145,7 @@ if b'101' not in response.split(b'\r\n', 1)[0]:
     raise RuntimeError(response.decode(errors='replace'))
 
 before, text_before = count_binary_frames(sock, 2.0)
-send_text(sock, '{"type":"set_record_enabled","stream_id":"0","enabled":true}')
+send_text(sock, '{"type":"set_record_enabled","stream_id":"0","enabled":true,"container":"' + RECORD_CONTAINER + '"}')
 during, text_during = count_binary_frames(sock, 3.0)
 send_text(sock, '{"type":"set_record_enabled","stream_id":"0","enabled":false}')
 after, text_after = count_binary_frames(sock, 3.0)
@@ -180,7 +189,7 @@ echo "$!" > "$GATEWAY_PID_FILE"
 sleep 2
 
 set +e
-PORT="$PORT" python3 "$CLIENT_PY"
+PORT="$PORT" RECORD_CONTAINER="$RECORD_CONTAINER" python3 "$CLIENT_PY"
 client_rc=$?
 set -e
 

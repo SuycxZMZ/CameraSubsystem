@@ -2,7 +2,7 @@ export type GatewayCommand =
   | { type: 'subscribe_stream'; stream_id: string }
   | { type: 'unsubscribe_stream'; stream_id: string }
   | { type: 'set_stream_enabled'; stream_id: string; enabled: boolean }
-  | { type: 'set_record_enabled'; stream_id: string; enabled: boolean }
+  | { type: 'set_record_enabled'; stream_id: string; enabled: boolean; container?: 'raw_h264' | 'mp4' }
   | { type: 'set_detect_enabled'; stream_id: string; enabled: boolean };
 
 export interface CommandResult {
@@ -17,6 +17,8 @@ export interface RecordStatus {
   stream_id: string;
   recording?: boolean;
   state?: string;
+  codec?: string;
+  container?: string;
   file?: string;
   encoded_frames?: number;
   decoded_frames?: number;

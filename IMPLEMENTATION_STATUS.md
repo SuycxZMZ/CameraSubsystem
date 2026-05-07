@@ -292,7 +292,8 @@ flowchart TB
    - 已完成 Annex-B H.264 NAL parser，支持 SPS/PPS 提取，为 MP4 `avcC` 和 sample 转换做准备
    - 已完成 MP4 最小写入器，正常 close 后生成可被 `ffprobe` 识别的 `.mp4`
    - 已完成 `container=mp4` 录制主链路接入和 RK3576 live `.mp4` 验证
-   - 下一步把 MP4 选择暴露到 Web 控制入口，MKV 作为后续备选
+   - 已完成 Web MP4 参数入口：前端格式选择按钮（H4/M4）+ Gateway 转发 `container` + 板端 WebSocket 验证
+   - MKV 作为后续备选
 
 6. **DataPlaneV2 低拷贝录制路径**
    - `camera_codec_server` 接入 DataPlaneV2 + MPP buffer import

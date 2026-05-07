@@ -5,6 +5,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useState } from 'react';
 import { Play, Square, Circle, ScanSearch, Camera } from 'lucide-react';
 import type { StreamStatus } from '@/types/stream';
 import type { ConnectionState } from '@/types/gateway-command';
@@ -29,6 +30,7 @@ export function StreamActions({
   const isStreaming = status === 'streaming' || status === 'subscribed';
   const isRecording = Boolean(stream?.recording);
   const isRecordPending = Boolean(stream?.recordPending);
+  const [recordContainer, setRecordContainer] = useState<'raw_h264' | 'mp4'>('raw_h264');
   const recordButtonClass = isRecording
     ? 'h-8 w-8 border-red-500 bg-red-950 text-red-200 hover:bg-red-900'
     : 'h-8 w-8';
@@ -42,7 +44,12 @@ export function StreamActions({
   };
 
   const handleRecord = () => {
-    sendCommand({ type: 'set_record_enabled', stream_id: streamId, enabled: !isRecording });
+    sendCommand({
+      type: 'set_record_enabled',
+      stream_id: streamId,
+      enabled: !isRecording,
+      container: recordContainer,
+    });
   };
 
   const handleDetect = () => {
@@ -105,6 +112,26 @@ export function StreamActions({
             </TooltipContent>
           </Tooltip>
         )}
+
+        {/* Record format selector */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8 text-xs font-mono"
+              disabled={!isConnected || isRecording || isRecordPending}
+              onClick={() =>
+                setRecordContainer(recordContainer === 'raw_h264' ? 'mp4' : 'raw_h264')
+              }
+            >
+              {recordContainer === 'mp4' ? 'M4' : 'H4'}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {recordContainer === 'mp4' ? 'MP4 容器（点击切换 H.264）' : 'H.264 裸流（点击切换 MP4）'}
+          </TooltipContent>
+        </Tooltip>
 
         {/* Record */}
         <Tooltip>

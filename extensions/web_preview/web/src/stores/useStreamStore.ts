@@ -84,6 +84,7 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
         recordDecodeFailures: 0,
         recordWriteFailures: 0,
         recordProfile: {},
+        recordContainer: 'raw_h264',
         recordError: '',
       };
       return {
@@ -113,6 +114,7 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
         ...(command.enabled
           ? {
               recordState: 'starting',
+              recordContainer: command.container ?? 'raw_h264',
               recordFile: '',
               recordDurationMs: 0,
               recordStartedAtMs: 0,
@@ -220,6 +222,7 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
       recordDecodeFailures: status.decode_failures ?? 0,
       recordWriteFailures: status.write_failures ?? 0,
       recordProfile: status.profile ?? {},
+      recordContainer: status.container ?? store.streams[streamId]?.recordContainer ?? 'raw_h264',
       recordError: status.error ?? '',
       dropCount: status.dropped_frames ?? store.streams[streamId]?.dropCount ?? 0,
     });

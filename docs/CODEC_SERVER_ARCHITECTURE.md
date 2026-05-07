@@ -861,12 +861,12 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | MP4 muxer 输入解析 | 已完成当前切片 | 新增 Annex-B H.264 NAL parser，后续 muxer 可基于 SPS/PPS 生成 `avcC`，并把编码 packet 转为 MP4 sample |
 | MP4 最小文件写入 | 已完成当前切片 | 新增 `Mp4FileWriter`，支持 `ftyp` / `mdat` / `moov`、`avc1` / `avcC`、`stts` / `stss` / `stsc` / `stsz` / `stco` 基础表，`mp4_file_writer_test` 通过 `ffprobe` 验证 |
 | MP4 录制主链路接入 | 已完成当前切片 | `RecordingSessionManager` 支持 `container=mp4` 分支；RK3576 `/dev/video45` live 录制 95 帧，生成 `.mp4` 可被 `ffprobe` 识别并可被 `ffmpeg` 解码 |
+| Web MP4 参数入口 | 已完成 | 前端格式选择按钮（H4/M4）+ Gateway 转发 `container` 参数 + 板端 WebSocket 验证 `container=mp4` 录制生成 `.mp4` |
 
 当前尚未实现：
 
 1. Web 录制异常恢复验证（浏览器刷新/断线重连、codec server 重启恢复）。
-2. Web MP4 参数入口：前端/Gateway 暂未暴露 `container=mp4` 选择，当前通过 codec control smoke 验证。
-3. DataPlaneV2 -> MPP 低拷贝录制路径。
+2. DataPlaneV2 -> MPP 低拷贝录制路径。
 
 RK3576 v1 copy 数据面 smoke 结果：
 
@@ -901,11 +901,10 @@ RK3576 60 秒录制稳定性结果：
 | write_failures | 0 |
 | 输出文件 | 24 MB，H.264 High profile 1920x1080 |
 
-下一步推进容器封装、Web 异常恢复和 DataPlaneV2 低拷贝录制路径：
+下一步推进 Web 异常恢复和 DataPlaneV2 低拷贝录制路径：
 
-1. **容器封装主链路接入**：把 `Mp4FileWriter` 接入 `RecordingSessionManager` 的 `container=mp4` 分支，补齐控制协议、状态回传和 RK3576 live 录制验证；MKV 作为后续备选。
-2. **Web 异常恢复补充**：覆盖浏览器刷新、WebSocket 断线重连、codec server 重启恢复，并把错误提示统一回传到录制状态面板。
-3. **DataPlaneV2 低拷贝**：`camera_codec_server` 接入 DataPlaneV2 + MPP buffer import，减少 copy path 压力。
+1. **Web 异常恢复补充**：覆盖浏览器刷新、WebSocket 断线重连、codec server 重启恢复，并把错误提示统一回传到录制状态面板。
+2. **DataPlaneV2 低拷贝**：`camera_codec_server` 接入 DataPlaneV2 + MPP buffer import，减少 copy path 压力。
 
 当前实现边界：
 

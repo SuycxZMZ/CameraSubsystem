@@ -189,7 +189,7 @@ http://192.168.31.9:8080
 | 实时预览 | 已实现 | WebSocket 接收 JPEG payload，Canvas 显示画面。 |
 | 预览帧率 | 已优化 | Gateway 默认 `--max-fps 30`，限帧使用 deadline 累加，避免 25fps 输入被固定压到约 12fps。 |
 | 开始 / 停止预览 | 已实现 | Play / Stop 按钮发送 subscribe / unsubscribe。 |
-| 开始 / 停止录制 | 已实现 | Record 按钮发送 `set_record_enabled`，Gateway 转发给 `camera_codec_server`。 |
+| 开始 / 停止录制 | 已实现 | Record 按钮发送 `set_record_enabled`，Gateway 转发给 `camera_codec_server`；格式按钮可选择 H.264 裸流或 MP4。 |
 | 录制状态 | 已实现状态面板 | 前端处理 `record_status`，记录 recording、file、duration_ms、bytes_written、packets_written、profile、encoded_frames、decoded_frames 和错误；录制切换期间按钮进入 pending，避免重复点击。 |
 | 快照 | 已实现 | 从 Canvas 保存 PNG。 |
 | AI Detect | 暂未实现 | 按钮保留，后续接 AI 订阅端。 |
@@ -250,13 +250,20 @@ ssh luckfox@192.168.31.9
 sh /home/luckfox/CameraSubsystem/scripts/web-record-freeze-smoke-rk3576.sh
 ```
 
+MP4 入口 smoke：
+
+```bash
+ssh luckfox@192.168.31.9
+RECORD_CONTAINER=mp4 sh /home/luckfox/CameraSubsystem/scripts/web-record-freeze-smoke-rk3576.sh
+```
+
 成功标志：
 
 ```text
 WS_COUNTS before=<正数> during=<正数> after=<正数>
 ```
 
-`after` 必须大于 0，表示停止录制后 WebSocket 预览仍然持续出帧；脚本默认使用 `/home/luckfox/CameraSubsystem` 规范目录，不再依赖 `/home/luckfox` 根目录临时文件。
+`after` 必须大于 0，表示停止录制后 WebSocket 预览仍然持续出帧；脚本默认使用 `/home/luckfox/CameraSubsystem` 规范目录，不再依赖 `/home/luckfox` 根目录临时文件。`RECORD_CONTAINER=mp4` 时输出文件应为 `.mp4`。
 
 ## 8. 故障排查
 

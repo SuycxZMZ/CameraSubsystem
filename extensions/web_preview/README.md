@@ -19,7 +19,7 @@
 |------|------|------|
 | HTTP + WebSocket 预览 | 已完成 | `/status` 返回 `format=JPEG`、`width=1920`、`height=1080`，浏览器实时预览可用。 |
 | React 前端渲染 | 已完成 | Canvas 按 DPR-aware backing store 渲染，单路预览可持续显示。 |
-| Web Record 控制 | 已完成 | Record start/stop 转发到 `camera_codec_server`，前端处理 `record_status` 并维护 pending 状态。 |
+| Web Record 控制 | 已完成 | Record start/stop 转发到 `camera_codec_server`，可选择 H.264 裸流或 MP4，前端处理 `record_status` 并维护 pending 状态。 |
 | 录制状态面板 | 已完成当前切片 | 展示录制时长、文件统计、输入/编码/解码计数、有效 profile 和错误提示。 |
 | 停止录制后预览保持 | 已验证 | RK3576 正式目录验证 `LIVE_WS_COUNTS before=15 during=25 after=25`，8080 保持监听。 |
 | 板端 smoke | 已补充 | `scripts/web-record-freeze-smoke-rk3576.sh` 默认使用 `/home/luckfox/CameraSubsystem`。 |

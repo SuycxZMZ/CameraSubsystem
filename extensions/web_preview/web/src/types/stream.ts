@@ -43,5 +43,6 @@ export interface StreamState {
     bitrate?: number;
     gop?: number;
   };
+  recordContainer: string;
   recordError: string;
 }
