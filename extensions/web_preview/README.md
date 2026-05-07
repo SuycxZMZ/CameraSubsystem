@@ -22,7 +22,7 @@
 | Web Record 控制 | 已完成 | Record start/stop 转发到 `camera_codec_server`，可选择 H.264 裸流或 MP4，前端处理 `record_status` 并维护 pending 状态。 |
 | 录制状态面板 | 已完成当前切片 | 展示录制时长、文件统计、输入/编码/解码计数、有效 profile 和错误提示。 |
 | 停止录制后预览保持 | 已验证 | RK3576 正式目录验证 `LIVE_WS_COUNTS before=15 during=25 after=25`，8080 保持监听。 |
-| 板端 smoke | 已补充 | `scripts/web-record-freeze-smoke-rk3576.sh` 默认使用 `/home/luckfox/CameraSubsystem`。 |
+| 板端 smoke | 已补充 | `scripts/web-record-freeze-smoke-rk3576.sh` 默认使用 `/home/luckfox/CameraSubsystem`，支持多轮录制、停止后重连和 MP4 输出校验。 |
 
 ## 目录结构
 
@@ -336,5 +336,5 @@ Gateway → 浏览器：
 ## 下一步计划
 
 1. 把 Web 录制 smoke 纳入统一部署流程，保证正式目录脚本和二进制同步更新。
-2. 增加 Web 异常恢复验证：浏览器刷新、WebSocket 断开重连、codec server 重启。
+2. 增加 Web 异常恢复验证：codec server 录制中重启和重启后重新录制。
 3. 为非 JPEG 输入预留前端格式提示和 Gateway transform pipeline 的板端验证入口。

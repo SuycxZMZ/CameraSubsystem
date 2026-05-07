@@ -862,10 +862,11 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | MP4 最小文件写入 | 已完成当前切片 | 新增 `Mp4FileWriter`，支持 `ftyp` / `mdat` / `moov`、`avc1` / `avcC`、`stts` / `stss` / `stsc` / `stsz` / `stco` 基础表，`mp4_file_writer_test` 通过 `ffprobe` 验证 |
 | MP4 录制主链路接入 | 已完成当前切片 | `RecordingSessionManager` 支持 `container=mp4` 分支；RK3576 `/dev/video45` live 录制 95 帧，生成 `.mp4` 可被 `ffprobe` 识别并可被 `ffmpeg` 解码 |
 | Web MP4 参数入口 | 已完成 | 前端格式选择按钮（H4/M4）+ Gateway 转发 `container` 参数 + 板端 WebSocket 验证 `container=mp4` 录制生成 `.mp4` |
+| Web 录制重连 smoke | 已完成当前切片 | `web-record-freeze-smoke-rk3576.sh` 支持 `RECORD_CYCLES`、停止后 WebSocket 重连和 `RECORD_CONTAINER=mp4` 输出扩展名校验 |
 
 当前尚未实现：
 
-1. Web 录制异常恢复验证（浏览器刷新/断线重连、codec server 重启恢复）。
+1. Web 录制异常恢复验证（codec server 重启恢复、长时间刷新/断线重连）。
 2. DataPlaneV2 -> MPP 低拷贝录制路径。
 
 RK3576 v1 copy 数据面 smoke 结果：
@@ -889,6 +890,14 @@ RK3576 Web 录制 start/stop smoke 结果：
 | record stop | 返回 `recording=false`、`state=idle`，最终 `encoded_frames=50`、`decoded_frames=50`、`decode_failures=0` |
 | 停止后预览 | `/status` 仍返回 `streaming`，WebSocket after 计数大于 0 |
 
+RK3576 Web 录制重连和 MP4 入口 smoke 结果：
+
+| 场景 | 结果 |
+|------|------|
+| H.264 两轮 start/stop | `WS_COUNTS cycle=1 before=51 during=75 after=75`，`cycle=2 before=50 during=74 after=75` |
+| 停止后 WebSocket 重连 | 两轮均 `WS_RECONNECT frames=50` |
+| MP4 Web 入口 | `container=mp4`，`before=50 during=75 after=75`，生成 `/home/luckfox/CameraSubsystem/recordings/web_freeze_records/*.mp4` |
+
 RK3576 60 秒录制稳定性结果：
 
 | 项目 | 结果 |
@@ -903,7 +912,7 @@ RK3576 60 秒录制稳定性结果：
 
 下一步推进 Web 异常恢复和 DataPlaneV2 低拷贝录制路径：
 
-1. **Web 异常恢复补充**：覆盖浏览器刷新、WebSocket 断线重连、codec server 重启恢复，并把错误提示统一回传到录制状态面板。
+1. **Web 异常恢复补充**：已覆盖短 smoke 的 WebSocket 停止后重连；下一步覆盖 codec server 录制中重启恢复，并把错误提示统一回传到录制状态面板。
 2. **DataPlaneV2 低拷贝**：`camera_codec_server` 接入 DataPlaneV2 + MPP buffer import，减少 copy path 压力。
 
 当前实现边界：

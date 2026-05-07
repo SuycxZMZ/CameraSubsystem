@@ -250,6 +250,13 @@ ssh luckfox@192.168.31.9
 sh /home/luckfox/CameraSubsystem/scripts/web-record-freeze-smoke-rk3576.sh
 ```
 
+多轮 start / stop 与停止后重连 smoke：
+
+```bash
+ssh luckfox@192.168.31.9
+RECORD_CYCLES=2 sh /home/luckfox/CameraSubsystem/scripts/web-record-freeze-smoke-rk3576.sh
+```
+
 MP4 入口 smoke：
 
 ```bash
@@ -263,7 +270,14 @@ RECORD_CONTAINER=mp4 sh /home/luckfox/CameraSubsystem/scripts/web-record-freeze-
 WS_COUNTS before=<正数> during=<正数> after=<正数>
 ```
 
-`after` 必须大于 0，表示停止录制后 WebSocket 预览仍然持续出帧；脚本默认使用 `/home/luckfox/CameraSubsystem` 规范目录，不再依赖 `/home/luckfox` 根目录临时文件。`RECORD_CONTAINER=mp4` 时输出文件应为 `.mp4`。
+新脚本会按轮次输出 `WS_COUNTS cycle=<N> before=<正数> during=<正数> after=<正数>` 和 `WS_RECONNECT cycle=<N> frames=<正数>`。`after` 和 `frames` 必须大于 0，表示停止录制后 WebSocket 预览仍然持续出帧，并且浏览器刷新/重连后仍可恢复预览。脚本默认使用 `/home/luckfox/CameraSubsystem` 规范目录，不再依赖 `/home/luckfox` 根目录临时文件。`RECORD_CONTAINER=mp4` 时输出文件应为 `.mp4`。
+
+2026-05-07 RK3576 验证结果：
+
+| 场景 | 结果 |
+|------|------|
+| `RECORD_CYCLES=2 RECORD_CONTAINER=raw_h264` | 两轮均通过，`before/during/after` 均大于 0，停止后重连 `frames=50`，生成两个 `.h264` 文件。 |
+| `RECORD_CYCLES=1 RECORD_CONTAINER=mp4` | 通过，`before=50`、`during=75`、`after=75`，停止后重连 `frames=50`，生成 `.mp4` 文件。 |
 
 ## 8. 故障排查
 
@@ -296,5 +310,5 @@ WS_COUNTS before=<正数> during=<正数> after=<正数>
 ## 10. 下一步计划
 
 1. 将 `web-record-freeze-smoke-rk3576.sh` 纳入统一部署脚本，避免手工部署时遗漏最新 smoke 工具。
-2. 增加 Web 异常恢复脚本，覆盖浏览器刷新、WebSocket 断开重连和录制服务重启。
+2. 扩展 Web 异常恢复脚本，覆盖 `camera_codec_server` 录制中重启和重启后重新录制。
 3. 梳理 `camera_codec_server` 与 `web_preview_gateway` 的生产化启动方式，后续可沉淀为 systemd service 或统一 run script。

@@ -14,6 +14,8 @@ STATIC_ROOT="${STATIC_ROOT:-${REMOTE_ROOT}/web_preview/dist}"
 PORT="${PORT:-8080}"
 MAX_PREVIEW_FPS="${MAX_PREVIEW_FPS:-30}"
 RECORD_CONTAINER="${RECORD_CONTAINER:-raw_h264}"
+RECORD_CYCLES="${RECORD_CYCLES:-1}"
+RECONNECT_AFTER_STOP="${RECONNECT_AFTER_STOP:-1}"
 case "$RECORD_CONTAINER" in
     raw_h264|mp4) ;;
     *)
@@ -21,6 +23,16 @@ case "$RECORD_CONTAINER" in
         exit 2
         ;;
 esac
+case "$RECORD_CYCLES" in
+    ''|*[!0-9]*)
+        echo "invalid RECORD_CYCLES: $RECORD_CYCLES" >&2
+        exit 2
+        ;;
+esac
+if [ "$RECORD_CYCLES" -lt 1 ]; then
+    echo "RECORD_CYCLES must be >= 1" >&2
+    exit 2
+fi
 
 PUBLISHER_LOG="${PUBLISHER_LOG:-${REMOTE_ROOT}/logs/publisher_web_freeze.log}"
 CODEC_LOG="${CODEC_LOG:-${REMOTE_ROOT}/logs/codec_web_freeze.log}"
@@ -61,6 +73,7 @@ chmod +x "$PUBLISHER_BIN" "$CODEC_BIN" "$GATEWAY_BIN"
 
 cat > "$CLIENT_PY" <<'PY'
 import base64
+import json
 import os
 import socket
 import struct
@@ -69,6 +82,8 @@ import time
 HOST = '127.0.0.1'
 PORT = int(os.environ.get('PORT', '8080'))
 RECORD_CONTAINER = os.environ.get('RECORD_CONTAINER', 'raw_h264')
+RECORD_CYCLES = int(os.environ.get('RECORD_CYCLES', '1'))
+RECONNECT_AFTER_STOP = os.environ.get('RECONNECT_AFTER_STOP', '1') not in ('0', 'false', 'False')
 
 def recv_exact(sock, n):
     data = b''
@@ -110,6 +125,26 @@ def send_text(sock, text):
     masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
     sock.sendall(bytes(header) + mask + masked)
 
+def connect_ws():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((HOST, PORT))
+    key = base64.b64encode(os.urandom(16)).decode()
+    request = (
+        'GET /ws HTTP/1.1\r\n'
+        f'Host: {HOST}:{PORT}\r\n'
+        'Upgrade: websocket\r\n'
+        'Connection: Upgrade\r\n'
+        f'Sec-WebSocket-Key: {key}\r\n'
+        'Sec-WebSocket-Version: 13\r\n\r\n'
+    )
+    sock.sendall(request.encode())
+    response = b''
+    while b'\r\n\r\n' not in response:
+        response += sock.recv(1)
+    if b'101' not in response.split(b'\r\n', 1)[0]:
+        raise RuntimeError(response.decode(errors='replace'))
+    return sock
+
 def count_binary_frames(sock, seconds):
     deadline = time.time() + seconds
     count = 0
@@ -126,37 +161,56 @@ def count_binary_frames(sock, seconds):
             raise RuntimeError('websocket closed')
     return count, text
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.connect((HOST, PORT))
-key = base64.b64encode(os.urandom(16)).decode()
-request = (
-    'GET /ws HTTP/1.1\r\n'
-    f'Host: {HOST}:{PORT}\r\n'
-    'Upgrade: websocket\r\n'
-    'Connection: Upgrade\r\n'
-    f'Sec-WebSocket-Key: {key}\r\n'
-    'Sec-WebSocket-Version: 13\r\n\r\n'
-)
-sock.sendall(request.encode())
-response = b''
-while b'\r\n\r\n' not in response:
-    response += sock.recv(1)
-if b'101' not in response.split(b'\r\n', 1)[0]:
-    raise RuntimeError(response.decode(errors='replace'))
+def record_status_items(items):
+    out = []
+    for item in items:
+        try:
+            payload = json.loads(item)
+        except json.JSONDecodeError:
+            continue
+        if payload.get('type') == 'record_status':
+            out.append(payload)
+    return out
 
-before, text_before = count_binary_frames(sock, 2.0)
-send_text(sock, '{"type":"set_record_enabled","stream_id":"0","enabled":true,"container":"' + RECORD_CONTAINER + '"}')
-during, text_during = count_binary_frames(sock, 3.0)
-send_text(sock, '{"type":"set_record_enabled","stream_id":"0","enabled":false}')
-after, text_after = count_binary_frames(sock, 3.0)
+sock = connect_ws()
+all_status = []
+for cycle in range(1, RECORD_CYCLES + 1):
+    before, text_before = count_binary_frames(sock, 2.0)
+    start_cmd = {
+        'type': 'set_record_enabled',
+        'stream_id': '0',
+        'enabled': True,
+        'container': RECORD_CONTAINER,
+    }
+    send_text(sock, json.dumps(start_cmd, separators=(',', ':')))
+    during, text_during = count_binary_frames(sock, 3.0)
+    send_text(sock, '{"type":"set_record_enabled","stream_id":"0","enabled":false}')
+    after, text_after = count_binary_frames(sock, 3.0)
 
-print(f'WS_COUNTS before={before} during={during} after={after}', flush=True)
-for item in text_before + text_during + text_after:
-    if 'record_status' in item:
-        print('WS_TEXT ' + item, flush=True)
+    statuses = record_status_items(text_before + text_during + text_after)
+    all_status.extend(statuses)
+    print(f'WS_COUNTS cycle={cycle} before={before} during={during} after={after}', flush=True)
+    for item in statuses:
+        print('WS_RECORD_STATUS ' + json.dumps(item, sort_keys=True, separators=(',', ':')), flush=True)
 
-if before <= 0 or during <= 0 or after <= 0:
-    raise SystemExit(2)
+    if before <= 0 or during <= 0 or after <= 0:
+        raise SystemExit(2)
+    if not any(item.get('recording') is True for item in statuses):
+        raise SystemExit(3)
+    if not any(item.get('recording') is False and not item.get('error') for item in statuses):
+        raise SystemExit(4)
+
+    if RECONNECT_AFTER_STOP:
+        sock.close()
+        sock = connect_ws()
+        reconnect, reconnect_text = count_binary_frames(sock, 2.0)
+        print(f'WS_RECONNECT cycle={cycle} frames={reconnect}', flush=True)
+        all_status.extend(record_status_items(reconnect_text))
+        if reconnect <= 0:
+            raise SystemExit(5)
+
+if not all(item.get('container', RECORD_CONTAINER) == RECORD_CONTAINER for item in all_status if item.get('recording') is True):
+    raise SystemExit(6)
 sock.close()
 PY
 
@@ -189,13 +243,34 @@ echo "$!" > "$GATEWAY_PID_FILE"
 sleep 2
 
 set +e
-PORT="$PORT" RECORD_CONTAINER="$RECORD_CONTAINER" python3 "$CLIENT_PY"
+PORT="$PORT" \
+RECORD_CONTAINER="$RECORD_CONTAINER" \
+RECORD_CYCLES="$RECORD_CYCLES" \
+RECONNECT_AFTER_STOP="$RECONNECT_AFTER_STOP" \
+python3 "$CLIENT_PY"
 client_rc=$?
 set -e
 
 cleanup
 sleep 1
 trap - EXIT INT TERM
+
+expected_ext="h264"
+if [ "$RECORD_CONTAINER" = "mp4" ]; then
+    expected_ext="mp4"
+fi
+record_count="$(find "$OUTPUT_DIR" -maxdepth 1 -type f -name "*.${expected_ext}" | wc -l | tr -d ' ')"
+if [ "$client_rc" -eq 0 ] && [ "$record_count" -lt "$RECORD_CYCLES" ]; then
+    echo "record file count too small: ext=${expected_ext} count=${record_count} expected=${RECORD_CYCLES}" >&2
+    client_rc=6
+fi
+if [ "$client_rc" -eq 0 ] && [ "$RECORD_CONTAINER" = "mp4" ] && command -v ffprobe >/dev/null 2>&1; then
+    newest_mp4="$(find "$OUTPUT_DIR" -maxdepth 1 -type f -name '*.mp4' | sort | tail -1)"
+    if [ -n "$newest_mp4" ]; then
+        ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height \
+            -of default=noprint_wrappers=1 "$newest_mp4"
+    fi
+fi
 
 dump_logs
 exit "$client_rc"

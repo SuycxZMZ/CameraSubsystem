@@ -304,6 +304,6 @@ cd /home/luckfox/CameraSubsystem
 1. **DataPlaneV2 异常验证**：覆盖 subscriber 崩溃、release socket 断开、release 超时、fd 泄漏检查和 publisher 退出清理。
 2. **慢消费者与多订阅者验证**：确认 `lease_in_flight_max`、pending release、QBUF 时序和采集帧率在压力下稳定。
 3. **板端 smoke 脚本固化**：沉淀一键上传、运行、采集日志、校验关键 counters 的 RK3576 自检脚本。
-4. **Web 录制异常恢复验证**：在 RK3576 正式部署目录下覆盖浏览器刷新、WebSocket 断线重连、codec server 重启恢复，避免只依赖短 smoke。
-5. **Web MP4 录制入口补充验证**：`container=mp4` 主链路和 Web 参数入口已完成，下一步补充重复录制、异常停止、刷新重连和 codec server 重启恢复验证。
+4. **Web 录制异常恢复验证**：在 RK3576 正式部署目录下已覆盖短 smoke 的重复录制和停止后 WebSocket 重连；下一步补充 codec server 录制中重启恢复。
+5. **Web MP4 录制入口补充验证**：`container=mp4` 主链路和 Web 参数入口已完成，并通过 WebSocket smoke 生成 `.mp4`；下一步补充异常停止和重启恢复验证。
 6. **MIPI/RKISP 多平面验证**：接入 MPLANE 节点，验证 per-plane fd / offset / stride，并为 DataPlaneV2 -> MPP 低拷贝编码路径做准备。
