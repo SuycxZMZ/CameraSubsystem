@@ -246,6 +246,7 @@ int main(int argc, char* argv[])
 {
     signal(SIGINT, SignalHandler);
     signal(SIGTERM, SignalHandler);
+    signal(SIGPIPE, SIG_IGN);
 
     std::string output_dir = "./subscriber_frames";
     std::string control_socket_path = camera_subsystem::ipc::kDefaultCameraControlSocketPath;

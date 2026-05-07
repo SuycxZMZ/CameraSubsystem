@@ -268,39 +268,34 @@ flowchart TB
 
 ### 短期优先级（1-2周）
 
-1. **DataPlaneV2 异常验证**
-   - 已完成 RK3576 真实进程 subscriber 崩溃 failover smoke：强杀慢 release subscriber 后，正常 subscriber 持续收帧，publisher 最终 `release_pending=0`、`active_leases=0`
-   - 已完成 release socket 主动断开隔离：publisher 收到断连 reclaim 后移除对应 DataPlaneV2 数据客户端，正常 subscriber 保持 24-25fps，`release_timeout=0`、`lease_exhausted=0`
-   - 下一步补 publisher 退出清理和 fd 泄漏长稳检查
-   - 验收重点：`active_leases` 最终归零，`release_timeout` / `lease_exhausted` 可解释，publisher 不出现永久 QBUF 阻塞
-
-2. **慢消费者与多订阅者压测**
-   - 组合 1 个正常 subscriber + 1 个慢 release subscriber + 多订阅者压力场景
-   - 验收重点：`lease_in_flight_max`、pending release、QBUF 时序、采集 fps 和丢帧策略稳定
-
-3. **板端 smoke 与启动方式固化**
+1. **板端 smoke 与启动方式固化**
    - 把 DataPlaneV2、Web record、codec restart、MP4 录制 smoke 串成 RK3576 一键自检入口
    - 同步整理 `camera_codec_server` / `web_preview_gateway` 的生产化启动方式，优先评估 systemd service 或统一 run script
 
-4. **Web Codec 可用性体验评估**
+2. **Web Codec 可用性体验评估**
    - 观察 codec 不可用、重启恢复、MP4 异常退出时前端状态是否足够清晰
    - 如果体验不足，再增加 Gateway codec health 广播和前端能力状态，不提前引入自动续录
 
-5. **MIPI/RKISP 多平面准备**
+3. **MIPI/RKISP 多平面准备**
    - 接入 MPLANE 节点验证 per-plane fd / offset / stride / bytesused
    - 为 DataPlaneV2 -> MPP 低拷贝录制路径准备真实 NV12 输入验证
 
-6. **DataPlaneV2 低拷贝录制架构设计**
+4. **DataPlaneV2 低拷贝录制架构设计**
    - 在 `camera_codec_server` 接入 DataPlaneV2 前，先明确 copy path 与 fd path 的选择条件、fallback 行为、MPP import 输入契约和 release 时序
    - 涉及跨模块接口或状态机调整时，先更新 [docs/CODEC_SERVER_ARCHITECTURE.md](docs/CODEC_SERVER_ARCHITECTURE.md) 和 [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md)，讨论确认后再写代码
 
 ### 已完成但需持续回归
 
-1. **Web 录制与 MP4 主链路**
+1. **DataPlaneV2 异常验证**
+   - 已完成 RK3576 真实进程 subscriber 崩溃 failover smoke：强杀慢 release subscriber 后，正常 subscriber 持续收帧，publisher 最终 `release_pending=0`、`active_leases=0`
+   - 已完成 release socket 主动断开隔离：publisher 收到断连 reclaim 后移除对应 DataPlaneV2 数据客户端，正常 subscriber 保持 24-25fps，`release_timeout=0`、`lease_exhausted=0`
+   - 已完成 fd 泄漏长稳与 publisher 退出清理验证：60 秒双 subscriber 运行期间 publisher fd drift=0、subscriber fd drift=0，publisher 主动退出后进程与 socket 均清理为 0
+
+2. **Web 录制与 MP4 主链路**
    - 已完成连续录制 5 分钟+、重复 start/stop 循环、`.h264` 多工具解码验证、Web MP4 参数入口和 RK3576 live `.mp4` 验证
    - 已完成 Web smoke 多轮 start/stop、停止后 WebSocket 重连、codec server 重启恢复，覆盖 raw_h264 和 mp4
 
-2. **编码参数化与容器封装**
+3. **编码参数化与容器封装**
    - 已完成请求级 `fps` / `bitrate` / `gop` 覆盖、启动参数默认值、status profile 返回、MP4 最小写入器和 `container=mp4` 主链路
    - MKV、分段录制和断电恢复作为后续扩展，不进入当前短期优先级
 
@@ -363,7 +358,7 @@ flowchart TB
 | P1 | 设计 CPU mmap 调试读路径和 sync helper | ✅ 已抽象 `DmaBufSyncHelper`，`dmabuf_smoke_test` 已验证 CPU mmap + `DMA_BUF_IOCTL_SYNC` |
 | P1 | 明确多平面扩展落点 | ✅ `FrameDescriptor` 已以 per-plane `fd_index` 表达多 fd / 多平面，并补单元测试；MPLANE 采集接入待有硬件后推进 |
 | P2 | 进入 `DataPlaneV2` / `SCM_RIGHTS` 设计实现 | ✅ 已完成协议结构、`FrameDescriptor` 映射、SCM_RIGHTS helper、独立 release channel、publisher/subscriber 示例接入与 RK3576 smoke |
-| P2 | DataPlaneV2 异常验证 | 进行中：本机单测已覆盖无效 descriptor fd 清理、无效 release 计数、部分 release 超时回收、重复/未知 release 统计；RK3576 真实进程 subscriber 崩溃 failover 和 release socket 主动断开已通过，fd 泄漏长稳仍待验证 |
+| P2 | DataPlaneV2 异常验证 | ✅ 已完成本机异常单测、RK3576 subscriber 崩溃 failover、release socket 主动断开、fd 泄漏长稳和 publisher 退出清理验证 |
 | P2 | 慢消费者与多订阅者验证 | 进行中：subscriber 已支持 `--process-delay-ms` 和 `--release-delay-ms`，RK3576 slow-consumer smoke 脚本已支持自动密码和 counters 判定；`/dev/video45` 双订阅者 60 秒长稳 PASS |
 
 本阶段保持两个边界：
@@ -426,7 +421,7 @@ flowchart TB
 - [x] 补 DataPlaneV2 本机异常单测：release 超时、fd 泄漏防护、无效 release、重复/未知 release 和 publisher 退出 pending lease 清理 ✅ 2026-04-27
 - [x] 新增 RK3576 DataPlaneV2 subscriber 崩溃 failover smoke 脚本并完成板端验证：强杀慢 release subscriber 后正常 subscriber 持续收帧，publisher 最终 `release_pending=0`、`active_leases=0` ✅ 2026-05-07
 - [x] 完成 RK3576 DataPlaneV2 release socket 主动断开验证：publisher 移除断开 release channel 的 DataPlaneV2 数据客户端，正常 subscriber 保持 24-25fps，`release_timeout=0`、`lease_exhausted=0` ✅ 2026-05-07
-- [ ] 在 RK3576 上继续验证 DataPlaneV2 真实异常：fd 泄漏长稳和 publisher 退出清理
+- [x] 完成 RK3576 DataPlaneV2 fd 泄漏长稳与 publisher 退出清理验证：60 秒双 subscriber 运行期间 publisher fd drift=0、subscriber fd drift=0，publisher 主动退出后进程与 socket 均清理为 0 ✅ 2026-05-07
 - [x] 补 subscriber 慢消费者参数：`--process-delay-ms` / `--release-delay-ms` ✅ 2026-04-27
 - [x] 新增 RK3576 DataPlaneV2 慢消费者/多订阅者 smoke 脚本 ✅ 2026-04-27
 - [x] 在 RK3576 上运行慢消费者与多订阅者验证：`SLOW_RELEASE_DELAY_MS=200` 无 release timeout，`SLOW_RELEASE_DELAY_MS=700` 可触发 timeout 压力场景 ✅ 2026-04-27
