@@ -118,7 +118,37 @@ cd extensions/web_preview
 
 ## 5. 板端启动顺序
 
-登录开发板：
+默认从开发机使用统一启动脚本管理三服务：
+
+```bash
+BOARD_HOST=192.168.31.9 \
+BOARD_USER=luckfox \
+BOARD_PASSWORD=luckfox \
+./scripts/rk3576-run-web-stack.sh start
+```
+
+常用操作：
+
+```bash
+./scripts/rk3576-run-web-stack.sh status
+./scripts/rk3576-run-web-stack.sh logs
+./scripts/rk3576-run-web-stack.sh restart
+./scripts/rk3576-run-web-stack.sh stop
+```
+
+脚本默认管理以下进程和目录：
+
+| 项 | 默认值 |
+|----|--------|
+| Publisher | `/home/luckfox/CameraSubsystem/bin/camera_publisher_example` |
+| Codec Server | `/home/luckfox/CameraSubsystem/bin/camera_codec_server` |
+| Web Gateway | `/home/luckfox/CameraSubsystem/bin/web_preview_gateway` |
+| 日志目录 | `/home/luckfox/CameraSubsystem/logs/` |
+| PID 目录 | `/home/luckfox/CameraSubsystem/run/` |
+| 录制目录 | `/home/luckfox/CameraSubsystem/recordings/` |
+| Web URL | `http://192.168.31.9:8080` |
+
+手动排查时登录开发板：
 
 ```bash
 ssh luckfox@192.168.31.9
@@ -209,6 +239,21 @@ http://192.168.31.9:8080
 
 ## 7. 录制验证
 
+统一 smoke 入口在开发机执行：
+
+```bash
+BOARD_HOST=192.168.31.9 \
+BOARD_USER=luckfox \
+BOARD_PASSWORD=luckfox \
+./scripts/rk3576-board-smoke-suite.sh
+```
+
+默认套件覆盖 `dataplane-lifecycle`、`codec-mp4`、`web-record-mp4` 和 `web-codec-restart-mp4`。按需缩小范围：
+
+```bash
+./scripts/rk3576-board-smoke-suite.sh codec-v1 web-record-raw
+```
+
 短 smoke：
 
 ```bash
@@ -294,6 +339,6 @@ Web 录制 smoke：
 
 ## 10. 下一步计划
 
-1. **统一板端自检入口**：跟随全局优先级，先把 DataPlaneV2 smoke、Web record smoke、codec restart smoke 和 codec MP4 smoke 纳入统一部署/运行脚本。
-2. **启动方式固化**：梳理 `camera_codec_server` 与 `web_preview_gateway` 的生产化启动方式，优先评估 systemd service 或统一 run script。
+1. **统一板端自检入口回归**：已新增 `scripts/rk3576-board-smoke-suite.sh`，下一步把它加入固定发布前检查流程。
+2. **启动方式固化**：已新增 `scripts/rk3576-run-web-stack.sh` 统一 run script；systemd service 暂不进入当前切片，等启动参数和日志策略稳定后再沉淀。
 3. **Web codec health 体验评估**：根据 codec 不可用、重启恢复和 MP4 异常退出时的 UI 表现，决定是否增加 Gateway codec health 广播和前端能力状态。

@@ -269,8 +269,9 @@ flowchart TB
 ### 短期优先级（1-2周）
 
 1. **板端 smoke 与启动方式固化**
-   - 把 DataPlaneV2、Web record、codec restart、MP4 录制 smoke 串成 RK3576 一键自检入口
-   - 同步整理 `camera_codec_server` / `web_preview_gateway` 的生产化启动方式，优先评估 systemd service 或统一 run script
+   - 已新增 `scripts/rk3576-board-smoke-suite.sh` 作为 RK3576 统一自检入口，默认串联 DataPlaneV2 lifecycle、codec MP4、Web MP4 record 和 Web codec restart MP4 smoke
+   - 已新增 `scripts/rk3576-run-web-stack.sh` 管理 `camera_publisher_example` / `camera_codec_server` / `web_preview_gateway` 的 start / stop / restart / status / logs
+   - 下一步在板端跑一轮统一 suite，并根据耗时决定默认发布前检查集合
 
 2. **Web Codec 可用性体验评估**
    - 观察 codec 不可用、重启恢复、MP4 异常退出时前端状态是否足够清晰

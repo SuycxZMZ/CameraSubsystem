@@ -237,7 +237,21 @@ bin/rk3576/
 
 ### 7.3 板端 Web 预览
 
-在开发板上启动 Camera 发布端和 Web Preview Gateway 后，局域网内浏览器可直接访问实时画面：
+在开发板上启动 Camera 发布端和 Web Preview Gateway 后，局域网内浏览器可直接访问实时画面。默认使用统一启动脚本：
+
+```bash
+BOARD_HOST=192.168.31.9 BOARD_USER=luckfox ./scripts/rk3576-run-web-stack.sh start
+BOARD_HOST=192.168.31.9 BOARD_USER=luckfox ./scripts/rk3576-run-web-stack.sh status
+```
+
+停止或重启：
+
+```bash
+./scripts/rk3576-run-web-stack.sh stop
+./scripts/rk3576-run-web-stack.sh restart
+```
+
+需要手工排查时，可在开发板上按以下等价顺序启动：
 
 ```bash
 cd /home/luckfox/CameraSubsystem
@@ -261,6 +275,13 @@ cd /home/luckfox/CameraSubsystem
 > **重要**：必须先启动 `camera_publisher_example`，再启动 `web_preview_gateway`。Gateway 启动时会立即连接发布端的 IPC，如果发布端未就绪，Gateway 会因连接失败而退出。
 
 详细部署步骤和开发模式配置见 [extensions/web_preview/README.md](extensions/web_preview/README.md) 和 [docs/BOARD_WEB_DEBUG_GUIDE.md](docs/BOARD_WEB_DEBUG_GUIDE.md)。
+
+统一板端 smoke 入口：
+
+```bash
+./scripts/rk3576-board-smoke-suite.sh
+./scripts/rk3576-board-smoke-suite.sh dataplane-lifecycle codec-mp4 web-record-mp4
+```
 
 ### 7.4 示例参数
 
