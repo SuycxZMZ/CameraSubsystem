@@ -306,3 +306,4 @@ cd /home/luckfox/CameraSubsystem
 3. **板端 smoke 与启动方式固化**：沉淀一键上传、运行、采集日志、校验关键 counters 的 RK3576 自检脚本，并整理 `camera_codec_server` / `web_preview_gateway` 的生产化启动方式。
 4. **Web Codec 可用性体验评估**：Web 录制异常恢复 smoke 已覆盖 raw_h264 / mp4；后续按体验决定是否增加 Gateway codec health 广播和前端能力状态。
 5. **MIPI/RKISP 多平面验证**：接入 MPLANE 节点，验证 per-plane fd / offset / stride，并为 DataPlaneV2 -> MPP 低拷贝编码路径做准备。
+6. **DataPlaneV2 低拷贝录制架构设计**：`camera_codec_server` 接入 DataPlaneV2 前，先明确 copy path / fd path 选择、fallback、MPP import 输入契约和 release 时序；大范围接口调整先文档评审再写代码。

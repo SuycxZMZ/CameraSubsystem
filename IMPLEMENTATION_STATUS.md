@@ -266,38 +266,41 @@ flowchart TB
 
 ## 下一步工作计划
 
-### 短期目标（1-2周）
+### 短期优先级（1-2周）
 
-1. **完善 CameraSource 数据通路**
-   - 增加多平面格式验证用例
-   - 推进 DMA-BUF 零拷贝主链路
+1. **DataPlaneV2 异常验证**
+   - RK3576 真实进程验证 subscriber 崩溃、release socket 断开、release 超时、fd 泄漏和 publisher 退出清理
+   - 验收重点：`active_leases` 最终归零，`release_timeout` / `lease_exhausted` 可解释，publisher 不出现永久 QBUF 阻塞
 
-2. **完善 Broker 背压策略**
-   - 策略参数化（阈值 / 优先级 / 延迟窗口）
-   - 观测指标联动压测
+2. **慢消费者与多订阅者压测**
+   - 组合 1 个正常 subscriber + 1 个慢 release subscriber + 多订阅者压力场景
+   - 验收重点：`lease_in_flight_max`、pending release、QBUF 时序、采集 fps 和丢帧策略稳定
 
-3. **提升进程模型健壮性**
-   - 控制面心跳与断链恢复
-   - 订阅抖动场景下的会话防抖策略
+3. **板端 smoke 与启动方式固化**
+   - 把 DataPlaneV2、Web record、codec restart、MP4 录制 smoke 串成 RK3576 一键自检入口
+   - 同步整理 `camera_codec_server` / `web_preview_gateway` 的生产化启动方式，优先评估 systemd service 或统一 run script
 
-4. **Web 录制长稳验证**
-   - 已完成连续录制 5 分钟+、重复 start/stop 循环和 `.h264` 多工具解码验证
-   - 已补充 Web smoke 多轮 start/stop、停止后 WebSocket 重连和 `container=mp4` 输出扩展名验证
-   - 已完成 codec server 录制中终止、Stop 错误收敛、重启后重新录制 smoke，覆盖 raw_h264 和 mp4
-   - 确认异常恢复后 `web_preview_gateway` 继续监听 8080，录制按钮状态可重新收敛
+4. **Web Codec 可用性体验评估**
+   - 观察 codec 不可用、重启恢复、MP4 异常退出时前端状态是否足够清晰
+   - 如果体验不足，再增加 Gateway codec health 广播和前端能力状态，不提前引入自动续录
 
-5. **编码参数化与容器封装**
-   - 已完成请求级 `fps` / `bitrate` / `gop` 覆盖、启动参数默认值和 status profile 返回
-   - `width` / `height` 仅作为后续缩放或裁剪预留，当前不覆盖实际解码帧尺寸
-   - 已完成 writer 输出扩展名前置抽象，支持后续 `.mp4` 路径、冲突避让和统计接口复用
-   - 已完成 Annex-B H.264 NAL parser，支持 SPS/PPS 提取，为 MP4 `avcC` 和 sample 转换做准备
-   - 已完成 MP4 最小写入器，正常 close 后生成可被 `ffprobe` 识别的 `.mp4`
-   - 已完成 `container=mp4` 录制主链路接入和 RK3576 live `.mp4` 验证
-   - 已完成 Web MP4 参数入口：前端格式选择按钮（H4/M4）+ Gateway 转发 `container` + 板端 WebSocket 验证
-   - MKV 作为后续备选
+5. **MIPI/RKISP 多平面准备**
+   - 接入 MPLANE 节点验证 per-plane fd / offset / stride / bytesused
+   - 为 DataPlaneV2 -> MPP 低拷贝录制路径准备真实 NV12 输入验证
 
-6. **DataPlaneV2 低拷贝录制路径**
-   - `camera_codec_server` 接入 DataPlaneV2 + MPP buffer import
+6. **DataPlaneV2 低拷贝录制架构设计**
+   - 在 `camera_codec_server` 接入 DataPlaneV2 前，先明确 copy path 与 fd path 的选择条件、fallback 行为、MPP import 输入契约和 release 时序
+   - 涉及跨模块接口或状态机调整时，先更新 [docs/CODEC_SERVER_ARCHITECTURE.md](docs/CODEC_SERVER_ARCHITECTURE.md) 和 [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md)，讨论确认后再写代码
+
+### 已完成但需持续回归
+
+1. **Web 录制与 MP4 主链路**
+   - 已完成连续录制 5 分钟+、重复 start/stop 循环、`.h264` 多工具解码验证、Web MP4 参数入口和 RK3576 live `.mp4` 验证
+   - 已完成 Web smoke 多轮 start/stop、停止后 WebSocket 重连、codec server 重启恢复，覆盖 raw_h264 和 mp4
+
+2. **编码参数化与容器封装**
+   - 已完成请求级 `fps` / `bitrate` / `gop` 覆盖、启动参数默认值、status profile 返回、MP4 最小写入器和 `container=mp4` 主链路
+   - MKV、分段录制和断电恢复作为后续扩展，不进入当前短期优先级
 
 ### 中期目标（3-4周）
 

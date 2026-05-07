@@ -335,6 +335,6 @@ Gateway → 浏览器：
 
 ## 下一步计划
 
-1. 把 Web 录制 smoke 纳入统一部署流程，保证正式目录脚本和二进制同步更新。
-2. 根据 codec 重启恢复 smoke 结果，决定是否增加 Gateway codec health 广播和前端能力状态。
-3. 为非 JPEG 输入预留前端格式提示和 Gateway transform pipeline 的板端验证入口。
+1. 跟随全局板端 smoke 固化任务，把 Web 录制和 codec restart smoke 纳入统一部署流程，保证正式目录脚本和二进制同步更新。
+2. 根据 codec 不可用、重启恢复和 MP4 异常退出时的 UI 表现，决定是否增加 Gateway codec health 广播和前端能力状态。
+3. 配合 MIPI/RKISP 验证，为非 JPEG 输入预留前端格式提示和 Gateway transform pipeline 的板端验证入口。

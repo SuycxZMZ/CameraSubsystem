@@ -921,10 +921,11 @@ RK3576 60 秒录制稳定性结果：
 | write_failures | 0 |
 | 输出文件 | 24 MB，H.264 High profile 1920x1080 |
 
-下一步推进 Web 异常恢复和 DataPlaneV2 低拷贝录制路径：
+下一步按 [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md) 的全局优先级推进；与 `camera_codec_server` 直接相关的任务如下：
 
-1. **Web 异常恢复体验补充**：已覆盖短 smoke 的 WebSocket 停止后重连和 codec server 重启恢复；下一步按实际 UI 体验决定是否增加 Gateway codec health 广播。
-2. **DataPlaneV2 低拷贝**：`camera_codec_server` 接入 DataPlaneV2 + MPP buffer import，减少 copy path 压力。
+1. **DataPlaneV2 低拷贝录制设计**：接入 DataPlaneV2 前，先明确 copy path 与 fd path 的选择条件、fallback 行为、MPP import 输入契约和 release 时序。
+2. **MIPI/RKISP 输入准备**：等待真实 sensor/media pipeline 出帧后，优先验证 MPLANE `bytesused`、stride、plane fd 和 timestamp，再进入 MPP import。
+3. **Web 异常恢复体验补充**：已覆盖短 smoke 的 WebSocket 停止后重连和 codec server 重启恢复；后续按实际 UI 体验决定是否增加 Gateway codec health 广播。
 
 当前实现边界：
 

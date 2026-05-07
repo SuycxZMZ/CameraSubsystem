@@ -294,6 +294,6 @@ Web 录制 smoke：
 
 ## 10. 下一步计划
 
-1. 将 Web smoke 脚本纳入统一部署脚本，避免手工部署时遗漏最新工具。
-2. 根据 codec 重启恢复 smoke 结果，决定是否增加 Gateway codec health 广播和前端能力状态。
-3. 梳理 `camera_codec_server` 与 `web_preview_gateway` 的生产化启动方式，后续可沉淀为 systemd service 或统一 run script。
+1. **统一板端自检入口**：跟随全局优先级，先把 DataPlaneV2 smoke、Web record smoke、codec restart smoke 和 codec MP4 smoke 纳入统一部署/运行脚本。
+2. **启动方式固化**：梳理 `camera_codec_server` 与 `web_preview_gateway` 的生产化启动方式，优先评估 systemd service 或统一 run script。
+3. **Web codec health 体验评估**：根据 codec 不可用、重启恢复和 MP4 异常退出时的 UI 表现，决定是否增加 Gateway codec health 广播和前端能力状态。
