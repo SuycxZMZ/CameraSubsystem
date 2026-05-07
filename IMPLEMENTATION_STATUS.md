@@ -283,7 +283,7 @@ flowchart TB
 4. **Web 录制长稳验证**
    - 已完成连续录制 5 分钟+、重复 start/stop 循环和 `.h264` 多工具解码验证
    - 已补充 Web smoke 多轮 start/stop、停止后 WebSocket 重连和 `container=mp4` 输出扩展名验证
-   - 待补充 codec server 重启恢复
+   - 已完成 codec server 录制中终止、Stop 错误收敛、重启后重新录制 smoke，覆盖 raw_h264 和 mp4
    - 确认异常恢复后 `web_preview_gateway` 继续监听 8080，录制按钮状态可重新收敛
 
 5. **编码参数化与容器封装**
@@ -435,9 +435,10 @@ flowchart TB
 - [x] 完成 H.264 多工具兼容性验证：ffprobe + ffmpeg 全帧解码通过 ✅ 2026-05-05
 - [x] 完成编码参数化：请求级 `fps` / `bitrate` / `gop` 覆盖、启动默认值和 status profile 返回 ✅ 2026-05-05
 - [x] 完成 Web smoke 多轮 start/stop + 停止后 WebSocket 重连 + MP4 Web 入口验证 ✅ 2026-05-07
+- [x] 完成 codec server 重启恢复 smoke：录制中终止、Stop 错误收敛、重启后重新录制，raw_h264 / mp4 均通过 ✅ 2026-05-07
 - [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane
 - [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
-- [ ] 补充 Web 异常恢复长稳：codec server 重启恢复、长时间刷新/断线重连
+- [ ] 补充 Web 异常恢复长稳：生产化保活、长时间刷新/断线重连
 - [ ] 背压策略参数化（延迟阈值/优先级规则）
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 

@@ -32,8 +32,9 @@
 - [15. 构建与部署边界](#15-构建与部署边界)
 - [16. 第一阶段实现顺序](#16-第一阶段实现顺序)
 - [17. MVP 范围](#17-mvp-范围)
-- [18. 后续扩展路线](#18-后续扩展路线)
-- [19. TODO 与待确认项](#19-todo-与待确认项)
+- [18. 进程重启恢复策略](#18-进程重启恢复策略)
+- [19. 后续扩展路线](#19-后续扩展路线)
+- [20. TODO 与待确认项](#20-todo-与待确认项)
 
 ---
 
@@ -863,10 +864,11 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | MP4 录制主链路接入 | 已完成当前切片 | `RecordingSessionManager` 支持 `container=mp4` 分支；RK3576 `/dev/video45` live 录制 95 帧，生成 `.mp4` 可被 `ffprobe` 识别并可被 `ffmpeg` 解码 |
 | Web MP4 参数入口 | 已完成 | 前端格式选择按钮（H4/M4）+ Gateway 转发 `container` 参数 + 板端 WebSocket 验证 `container=mp4` 录制生成 `.mp4` |
 | Web 录制重连 smoke | 已完成当前切片 | `web-record-freeze-smoke-rk3576.sh` 支持 `RECORD_CYCLES`、停止后 WebSocket 重连和 `RECORD_CONTAINER=mp4` 输出扩展名校验 |
+| codec 重启恢复 smoke | 已完成脚本 | `web-codec-restart-smoke-rk3576.sh` 覆盖录制中终止 codec、Stop 错误收敛、重启后重新录制成功 |
 
 当前尚未实现：
 
-1. Web 录制异常恢复验证（codec server 重启恢复、长时间刷新/断线重连）。
+1. Web 录制异常恢复长稳（长时间刷新/断线重连、生产化保活）。
 2. DataPlaneV2 -> MPP 低拷贝录制路径。
 
 RK3576 v1 copy 数据面 smoke 结果：
@@ -898,6 +900,15 @@ RK3576 Web 录制重连和 MP4 入口 smoke 结果：
 | 停止后 WebSocket 重连 | 两轮均 `WS_RECONNECT frames=50` |
 | MP4 Web 入口 | `container=mp4`，`before=50 during=75 after=75`，生成 `/home/luckfox/CameraSubsystem/recordings/web_freeze_records/*.mp4` |
 
+RK3576 codec server 重启恢复 smoke 结果：
+
+| 容器 | 结果 |
+|------|------|
+| raw_h264 | failover `before=51 during=75 after_kill=65 after_stop=50`，Stop 返回 `codec_server_not_available`；recover `before=50 during=75 after=75`，生成新的 `.h264` |
+| mp4 | failover `before=41 during=60 after_kill=60 after_stop=40`，Stop 返回 `codec_server_not_available`；recover `before=41 during=60 after=60`，生成新的非空 `.mp4` |
+
+该 smoke 已覆盖 failover 和 recover 两个阶段：录制中终止 `camera_codec_server` 后，WebSocket 预览继续出帧，Stop 命令返回 `record_status(recording=false, error=...)`；重新启动 `camera_codec_server` 后，同一 Gateway/WebSocket 控制入口可以再次 start/stop 录制并生成新文件。MP4 异常退出阶段可能留下 0 字节未完成文件。第一阶段策略是不承诺同文件恢复或修复，UI 只负责错误提示和状态收敛；恢复后重新开始录制生成新文件。
+
 RK3576 60 秒录制稳定性结果：
 
 | 项目 | 结果 |
@@ -912,14 +923,14 @@ RK3576 60 秒录制稳定性结果：
 
 下一步推进 Web 异常恢复和 DataPlaneV2 低拷贝录制路径：
 
-1. **Web 异常恢复补充**：已覆盖短 smoke 的 WebSocket 停止后重连；下一步覆盖 codec server 录制中重启恢复，并把错误提示统一回传到录制状态面板。
+1. **Web 异常恢复体验补充**：已覆盖短 smoke 的 WebSocket 停止后重连和 codec server 重启恢复；下一步按实际 UI 体验决定是否增加 Gateway codec health 广播。
 2. **DataPlaneV2 低拷贝**：`camera_codec_server` 接入 DataPlaneV2 + MPP buffer import，减少 copy path 压力。
 
 当前实现边界：
 
 1. `CodecServerApp::Run()` 已变成长驻控制服务，start recording 会打开输出文件、订阅 Camera v1 copy 数据面、执行 MPP JPEG decode 和 MPP H.264 encode，并写入裸 `.h264` packet。
 2. RK3576 交叉构建中 `camera_codec_server` 会链接 MPP；主机构建仍只依赖 C++ 标准库和 pthread，并通过 stub 保持可测试。
-3. 当前 RK3576 运行验证证明 USB MJPEG live payload 可以进入 MPP JPEG decode 和 MPP H.264 encode；仍需更长时间稳定性与播放兼容性验证。
+3. 当前 RK3576 运行验证证明 USB MJPEG live payload 可以进入 MPP JPEG decode 和 MPP H.264 encode；后续重点转向生产化保活、低拷贝录制路径和真实 MIPI/RKISP 输入。
 4. `scripts/build-rk3576.sh` 已显式打开 `CAMERA_SUBSYSTEM_BUILD_CODEC_SERVER=ON`，用于保证板端产物持续构建；根 CMake 默认仍保持关闭，避免影响普通开发构建。
 
 ## 17. MVP 范围
@@ -942,14 +953,78 @@ RK3576 60 秒录制稳定性结果：
 | 项目 | 说明 |
 |------|------|
 | RKNN import 验证 | 暂不做 |
-| MP4/MKV 封装 | 第二阶段再引入 muxer |
+| MP4/MKV 封装 | MP4 最小主链路已完成；MKV 后续再评估 |
 | RTSP/推流 | 后续扩展 |
 | 多客户端录制控制仲裁 | 第一阶段只支持单控制入口 |
 | 多路高码率长稳 | 先单路打通，再扩展 |
 | 完整 MIPI/RKISP live 编码 | 先预留架构，等待 sensor/media pipeline 出帧 |
 | H.265 | H.264 稳定后再扩展 |
 
-## 18. 后续扩展路线
+## 18. 进程重启恢复策略
+
+`camera_codec_server` 是独立进程，因此必须把“编码服务不可用”和“录制 session 不可恢复”视为正常故障路径，而不是异常崩溃路径。恢复策略分两阶段推进：先保证 Web 预览和控制状态收敛，再讨论是否自动恢复录制。
+
+### 18.1 恢复边界
+
+第一阶段边界：
+
+1. `web_preview_gateway` 不负责拉起 `camera_codec_server`，只负责控制代理和错误回传。
+2. `camera_codec_server` 进程退出后，正在录制的 session 视为中断；第一阶段不自动续录到同一个文件。
+3. 前端收到 codec 不可用或读写失败错误后，必须清理 pending / recording 视觉状态，允许用户在服务恢复后重新点击录制。
+4. 预览链路必须独立存活；codec server 重启不应影响 `web_preview_gateway` 的原始预览 WebSocket。
+5. 生产化拉起和保活由 systemd / supervisor / 统一 run script 承担，不塞进 Gateway。
+
+后续可选增强：
+
+1. Gateway 定时探测 codec socket，向前端广播 `record_capability` 或 `codec_available` 状态。
+2. codec server 支持 `status` 空请求返回全局健康状态。
+3. 录制中异常退出后，若容器格式支持恢复，可做新文件续录；MP4 不做同文件续写。
+
+### 18.2 控制面收敛时序
+
+```mermaid
+sequenceDiagram
+    participant Browser as Browser UI
+    participant Gateway as web_preview_gateway
+    participant Codec as camera_codec_server
+    participant Supervisor as systemd/run script
+
+    Browser->>Gateway: set_record_enabled(stream_id, true)
+    Gateway->>Codec: start_recording
+    Codec-->>Gateway: record_status(recording=true)
+    Gateway-->>Browser: record_status(recording=true)
+
+    Codec--xCodec: process exits during recording
+    Browser->>Gateway: set_record_enabled(stream_id, false)
+    Gateway-xCodec: stop_recording fails
+    Gateway-->>Browser: record_status(recording=false, error=codec_server_not_available)
+    Browser->>Browser: clear pending and recording state
+
+    Supervisor->>Codec: restart camera_codec_server
+    Browser->>Gateway: set_record_enabled(stream_id, true)
+    Gateway->>Codec: start_recording
+    Codec-->>Gateway: record_status(recording=true)
+    Gateway-->>Browser: record_status(recording=true)
+```
+
+### 18.3 验收用例
+
+| 用例 | 期望 |
+|------|------|
+| codec 未启动时点击 Record | Gateway 返回 `record_status(recording=false, error=codec_server_not_available)`，前端 pending 清空。 |
+| 录制中杀掉 codec 后点击 Stop | Gateway 返回错误状态，Web 预览继续出帧，8080 继续监听。 |
+| codec 重启后再次点击 Record | 能创建新录制 session 和新文件，不依赖旧 session。 |
+| MP4 录制中 codec 异常退出 | 当前文件可能不完整；UI 必须提示错误，不承诺可播放。 |
+| raw_h264 / mp4 两种容器 | 同一恢复策略均成立。 |
+
+### 18.4 实现顺序
+
+1. **验证脚本优先**：已新增 `web-codec-restart-smoke-rk3576.sh`，覆盖录制中杀掉 codec、Stop 错误收敛、重启 codec、再次录制成功。
+2. **前端错误收敛检查**：确认 `record_status.error` 会清理 pending / recording，并保留错误提示。
+3. **Gateway 能力状态**：如 UI 体验仍不清晰，再增加 codec socket health 状态广播。
+4. **生产启动策略**：沉淀 systemd service 或统一 run script，负责 codec server 拉起和重启。
+
+## 19. 后续扩展路线
 
 推荐路线：
 
@@ -965,9 +1040,9 @@ RK3576 60 秒录制稳定性结果：
 
 6. **MVP-5：容器封装与长稳**：支持 MP4/MKV、分段录制、断电恢复、磁盘空间保护。
 
-## 19. TODO 与待确认项
+## 20. TODO 与待确认项
 
-### 19.1 USB 第一阶段
+### 20.1 USB 第一阶段
 
 - TODO：确认当前 USB 摄像头实际输出是 JPEG、MJPEG 还是 YUYV。
 - 已确认：板端存在 `jpeglib.h` 和 `libjpeg.so`，但当前交叉工具链 sysroot 不包含 libjpeg 头文件/库；板端未发现 `turbojpeg.h` / `libturbojpeg.so`。
@@ -978,7 +1053,7 @@ RK3576 60 秒录制稳定性结果：
 - TODO：确认 MPP JPEG decode 在更长时间连续 live MJPEG 帧下的延迟、内存复用和错误恢复策略。
 - TODO：确认 USB H.264 录制目标分辨率、帧率、码率和 GOP 默认值。
 
-### 19.2 MPP 编码
+### 20.2 MPP 编码
 
 - 已实现：`H264MppEncoder` 已基于 `external/mpp/test/mpi_enc_test.c` 的最小参数路径接入 `MPP_VIDEO_CodingAVC`。
 - 已验证：RK3576 合成 NV12 帧编码测试通过，live USB MJPEG -> NV12 -> H.264 smoke 通过。
@@ -986,23 +1061,25 @@ RK3576 60 秒录制稳定性结果：
 - TODO：确认 MPP encoder 输入支持的更多 `MppFrameFormat` 与 stride 对齐要求。
 - TODO：确认 MPP encoder drain/EOS 流程和停止录制时的 flush 语义。
 
-### 19.3 camera_codec_server 控制面
+### 20.3 camera_codec_server 控制面
 
 - 已决策：第一阶段进程名和二进制名使用 `camera_codec_server`。
 - 已决策：第一阶段默认编码服务控制 socket 使用 `/tmp/camera_subsystem_codec.sock`。
 - 已决策：第一阶段控制协议优先使用 JSON line，便于手工调试；后续稳定后再评估二进制 POD。
 - 已决策：同一路重复 start 返回 `already_recording`。
 - 已验证：Gateway 与 `camera_codec_server` 采用短连接控制命令；codec 连接异常时会返回带 `stream_id` 的 `record_status` 错误，前端清理 pending 状态。
-- TODO：确认 `camera_codec_server` 进程重启后的 UI 状态刷新和录制按钮可用性策略。
+- 已决策：第一阶段 `camera_codec_server` 进程重启不自动续录；Gateway 返回错误状态，前端收敛后由用户重新开始录制。
+- 已完成脚本：`web-codec-restart-smoke-rk3576.sh` 覆盖录制中杀掉 codec、Stop 错误收敛、重启后重新录制。
+- TODO：根据板端 smoke 结果决定是否补 Gateway codec health 广播。
 
-### 19.4 文件与磁盘
+### 20.4 文件与磁盘
 
 - 已决策：默认录制目录使用 `/home/luckfox/CameraSubsystem/recordings`。
 - 已决策：第一阶段文件命名规则为 `<stream_id>_<YYYYMMDD_HHMMSS>.h264`。
 - TODO：确认磁盘剩余空间阈值，低于阈值时拒绝开始录制或自动停止。
 - TODO：确认异常退出时 `.h264` 文件是否保留，以及是否写 sidecar metadata。
 
-### 19.5 MIPI/RKISP 后续扩展
+### 20.5 MIPI/RKISP 后续扩展
 
 - TODO：接入真实 MIPI sensor 后，确认 NV12 live frame 的 `bytesused`、stride、timestamp 和 sequence。
 - TODO：确认 DataPlaneV2 多 fd / 多 plane metadata 是否满足 MPP encoder 输入。
