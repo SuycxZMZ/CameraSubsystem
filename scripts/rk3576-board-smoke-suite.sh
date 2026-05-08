@@ -8,20 +8,39 @@ BOARD_USER="${BOARD_USER:-luckfox}"
 BOARD_PASSWORD="${BOARD_PASSWORD:-luckfox}"
 REMOTE_ROOT="${REMOTE_ROOT:-/home/luckfox/CameraSubsystem}"
 DEVICE="${DEVICE:-/dev/video45}"
-SUITES="${SUITES:-dataplane-lifecycle codec-mp4 web-record-mp4 web-codec-restart-mp4}"
+# --- Tier definitions ---
+readonly TIER_QUICK="codec-mp4 web-record-mp4 web-codec-restart-mp4"
+readonly TIER_FULL="dataplane-lifecycle codec-mp4 web-record-mp4 web-codec-restart-mp4"
+readonly TIER_EXTENDED="dataplane-lifecycle dataplane-failover dataplane-release-disconnect codec-v1 codec-mp4 codec-stability web-record-raw web-record-mp4 web-codec-restart-raw web-codec-restart-mp4"
+
+TIER="${TIER:-}"
+SUITES="${SUITES:-}"
 SKIP_BUILD="${SKIP_BUILD:-1}"
 DEPLOY_FIRST="${DEPLOY_FIRST:-0}"
 
 TARGET="${BOARD_USER}@${BOARD_HOST}"
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 
+resolve_tier()
+{
+    case "${TIER}" in
+        quick)    echo "${TIER_QUICK}" ;;
+        full)     echo "${TIER_FULL}" ;;
+        extended) echo "${TIER_EXTENDED}" ;;
+        "")       echo "${TIER_FULL}" ;;
+        *)        echo "Unknown TIER: '${TIER}' (expected: quick|full|extended)" >&2; return 1 ;;
+    esac
+}
+
 usage()
 {
     cat <<EOF
 Usage: $0 [suite ...]
 
-Default suites:
-  ${SUITES}
+Tiers (select via TIER environment variable):
+  quick     (~60s)  codec-mp4 web-record-mp4 web-codec-restart-mp4
+  full      (~135s) dataplane-lifecycle codec-mp4 web-record-mp4 web-codec-restart-mp4  [default]
+  extended  (~5-8m) all 10 suites
 
 Available suites:
   dataplane-lifecycle
@@ -36,10 +55,14 @@ Available suites:
   web-codec-restart-mp4
 
 Environment:
+  TIER=${TIER:-<not set, defaults to full>}
+  SUITES=${SUITES:-<not set>}
   BOARD_HOST=${BOARD_HOST}
   BOARD_USER=${BOARD_USER}
   REMOTE_ROOT=${REMOTE_ROOT}
   DEPLOY_FIRST=${DEPLOY_FIRST}
+
+Priority: CLI args > SUITES env > TIER env > default (full)
 EOF
 }
 
@@ -142,11 +165,17 @@ fi
 
 if (( $# > 0 )); then
     selected_suites="$*"
-else
+    active_tier="cli"
+elif [[ -n "${SUITES}" ]]; then
     selected_suites="${SUITES}"
+    active_tier="SUITES-override"
+else
+    selected_suites="$(resolve_tier)" || exit 1
+    active_tier="${TIER:-full}"
 fi
 
 failed=0
+echo "RK3576 smoke tier=${active_tier} suites=${selected_suites}"
 for suite in ${selected_suites}; do
     if ! run_suite "${suite}"; then
         echo "SUITE_RESULT ${suite}=FAIL"

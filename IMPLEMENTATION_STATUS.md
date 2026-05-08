@@ -271,7 +271,7 @@ flowchart TB
 1. **板端 smoke 与启动方式固化**
    - 已新增 `scripts/rk3576-board-smoke-suite.sh` 作为 RK3576 统一自检入口，默认串联 DataPlaneV2 lifecycle、codec MP4、Web MP4 record 和 Web codec restart MP4 smoke
    - 已新增 `scripts/rk3576-run-web-stack.sh` 管理 `camera_publisher_example` / `camera_codec_server` / `web_preview_gateway` 的 start / stop / restart / status / logs
-   - 下一步在板端跑一轮统一 suite，并根据耗时决定默认发布前检查集合
+   - 已完成 smoke suite quick/full/extended 三档拆分（`TIER` 环境变量选择，默认 `full`）
 
 2. **Web Codec 可用性体验评估**
    - 观察 codec 不可用、重启恢复、MP4 异常退出时前端状态是否足够清晰
@@ -439,6 +439,7 @@ flowchart TB
 - [x] 完成编码参数化：请求级 `fps` / `bitrate` / `gop` 覆盖、启动默认值和 status profile 返回 ✅ 2026-05-05
 - [x] 完成 Web smoke 多轮 start/stop + 停止后 WebSocket 重连 + MP4 Web 入口验证 ✅ 2026-05-07
 - [x] 完成 codec server 重启恢复 smoke：录制中终止、Stop 错误收敛、重启后重新录制，raw_h264 / mp4 均通过 ✅ 2026-05-07
+- [x] 板端 smoke suite 拆分为 quick/full/extended 三档 ✅ 2026-05-07
 - [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane
 - [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
 - [ ] 补充 Web 异常恢复长稳：生产化保活、长时间刷新/断线重连

@@ -248,7 +248,17 @@ BOARD_PASSWORD=luckfox \
 ./scripts/rk3576-board-smoke-suite.sh
 ```
 
-默认套件覆盖 `dataplane-lifecycle`、`codec-mp4`、`web-record-mp4` 和 `web-codec-restart-mp4`。按需缩小范围：
+默认套件覆盖 `dataplane-lifecycle`、`codec-mp4`、`web-record-mp4` 和 `web-codec-restart-mp4`（即 `full` 档位）。
+
+Smoke suite 档位（通过 `TIER` 环境变量选择）：
+
+| 档位 | 用途 | 预计耗时 | 命令 |
+|------|------|----------|------|
+| quick | 每次提交/PR 快速检查 | ~60s | `TIER=quick ./scripts/rk3576-board-smoke-suite.sh` |
+| full | 合入 main / 版本发布 | ~135s | `./scripts/rk3576-board-smoke-suite.sh` |
+| extended | 夜间回归 / 重大变更 | ~5-8min | `TIER=extended ./scripts/rk3576-board-smoke-suite.sh` |
+
+按需缩小范围（命令行显式指定 suite 优先级最高）：
 
 ```bash
 ./scripts/rk3576-board-smoke-suite.sh codec-v1 web-record-raw
