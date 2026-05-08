@@ -55,6 +55,17 @@ scp \
     "${GATEWAY_BIN}" \
     "${BOARD_USER}@${BOARD_HOST}:${remote_bin}/"
 
+optional_bins=(
+    "${BIN_DIR}/mplane_dmabuf_probe"
+    "${BIN_DIR}/dmabuf_smoke_test"
+)
+
+for bin in "${optional_bins[@]}"; do
+    if [[ -f "${bin}" ]]; then
+        scp "${bin}" "${BOARD_USER}@${BOARD_HOST}:${remote_bin}/"
+    fi
+done
+
 scp \
     "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-v1-smoke-rk3576.sh" \
     "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-stability-test-rk3576.sh" \
@@ -65,13 +76,14 @@ scp \
     "${PROJECT_ROOT}/scripts/rk3576-dataplane-v2-lifecycle-smoke.sh" \
     "${PROJECT_ROOT}/scripts/rk3576-dataplane-v2-slow-consumer-smoke.sh" \
     "${PROJECT_ROOT}/scripts/rk3576-board-smoke-suite.sh" \
+    "${PROJECT_ROOT}/scripts/rk3576-mplane-readiness-probe.sh" \
     "${PROJECT_ROOT}/scripts/rk3576-run-web-stack.sh" \
     "${BOARD_USER}@${BOARD_HOST}:${remote_scripts}/"
 
 scp -r "${WEB_DIST}/"* "${BOARD_USER}@${BOARD_HOST}:${remote_web}/"
 
 ssh "${BOARD_USER}@${BOARD_HOST}" \
-    "chmod +x '${remote_bin}/camera_publisher_example' '${remote_bin}/camera_codec_server' '${remote_bin}/web_preview_gateway' '${remote_scripts}'/*.sh"
+    "chmod +x '${remote_bin}/camera_publisher_example' '${remote_bin}/camera_codec_server' '${remote_bin}/web_preview_gateway' '${remote_scripts}'/*.sh; [ ! -f '${remote_bin}/mplane_dmabuf_probe' ] || chmod +x '${remote_bin}/mplane_dmabuf_probe'"
 
 echo "Deploy complete."
 echo "Board root: ${REMOTE_ROOT}"

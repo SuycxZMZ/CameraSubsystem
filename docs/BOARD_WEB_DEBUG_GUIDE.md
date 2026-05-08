@@ -256,12 +256,32 @@ Smoke suite 档位（通过 `TIER` 环境变量选择）：
 |------|------|----------|------|
 | quick | 每次提交/PR 快速检查 | ~60s | `TIER=quick ./scripts/rk3576-board-smoke-suite.sh` |
 | full | 合入 main / 版本发布 | ~135s | `./scripts/rk3576-board-smoke-suite.sh` |
-| extended | 夜间回归 / 重大变更 | ~5-8min | `TIER=extended ./scripts/rk3576-board-smoke-suite.sh` |
+| extended | 夜间回归 / 重大变更，包含可选 MPLANE readiness | ~5-8min | `TIER=extended ./scripts/rk3576-board-smoke-suite.sh` |
 
 按需缩小范围（命令行显式指定 suite 优先级最高）：
 
 ```bash
 ./scripts/rk3576-board-smoke-suite.sh codec-v1 web-record-raw
+```
+
+MIPI/RKISP 多平面 readiness：
+
+```bash
+BOARD_HOST=192.168.31.9 \
+BOARD_USER=luckfox \
+BOARD_PASSWORD=luckfox \
+./scripts/rk3576-mplane-readiness-probe.sh
+```
+
+脚本默认优先从 `/sys/class/video4linux/*/name` 选择 RKISP/RKVpss capture 节点；当前只有 USB 摄像头且没有 MPLANE 节点时，输出 `mplane_readiness_result=SKIP reason=no_mplane_nodes` 属于预期结果。如果板端存在 RKISP/RKVpss 节点但没有真实 MIPI sensor，`mplane_readiness_result=PASS` 只表示 buffer/export readiness，不代表 STREAMON 后能拿到有效 live frame。脚本会同时验证两条 probe 路径：
+
+1. `mplane_dmabuf_probe` 独立工具：验证 `S_FMT + REQBUFS + QUERYBUF + EXPBUF`。
+2. `CAMERA_SUBSYSTEM_ENABLE_MPLANE_PROBE=1 ./dmabuf_smoke_test`：验证 `CameraSource::Initialize()` 的 MPLANE probe-only 骨架能初始化并立即 cleanup，不进入 `StartStream/DQBUF/QBUF`；脚本会同步传入 `CAMERA_SUBSYSTEM_MPLANE_PROBE_WIDTH/HEIGHT/FOURCC`，确保与独立 probe 使用同一组格式参数。
+
+接入 MIPI/RKISP sensor 后，使用 `REQUIRE_MPLANE=1` 将没有 MPLANE 或 export 失败视为失败：
+
+```bash
+REQUIRE_MPLANE=1 DEVICES="/dev/video22 /dev/video23" ./scripts/rk3576-mplane-readiness-probe.sh
 ```
 
 短 smoke：

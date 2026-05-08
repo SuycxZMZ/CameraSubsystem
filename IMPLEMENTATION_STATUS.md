@@ -13,22 +13,33 @@
 
 ## 目录
 
-- [项目概述](#项目概述)
-- [目录结构](#目录结构)
-- [已完成模块](#已完成模块)
-- [构建系统](#构建系统)
-- [测试状态](#测试状态)
-- [文档状态](#文档状态)
-- [下一步工作计划](#下一步工作计划)
-- [架构完善项（面向边缘设备）](#架构完善项面向边缘设备)
-- [DMA-BUF Phase 1 后续修改入口](#dma-buf-phase-1-后续修改入口)
-- [发布端/订阅端解耦模型状态](#发布端订阅端解耦模型状态)
-- [架构设计细化（Buffer 生命周期与背压策略）](#架构设计细化buffer-生命周期与背压策略)
-- [边缘设备适配与交叉编译状态](#边缘设备适配与交叉编译状态)
-- [技术债务](#技术债务)
-- [贡献指南](#贡献指南)
-- [许可证](#许可证)
-- [联系方式](#联系方式)
+- [CameraSubsystem 实现状态](#camerasubsystem-实现状态)
+  - [目录](#目录)
+  - [项目概述](#项目概述)
+  - [目录结构](#目录结构)
+  - [已完成模块](#已完成模块)
+    - [1. 核心数据结构 (Core) ✅](#1-核心数据结构-core-)
+    - [2. 平台抽象层 (Platform) ✅](#2-平台抽象层-platform-)
+    - [3. 分发层 (Broker) ✅](#3-分发层-broker-)
+    - [4. Camera层 (Camera) ✅](#4-camera层-camera-)
+    - [5. 工具类 (Utils) 🚧](#5-工具类-utils-)
+  - [构建系统](#构建系统)
+  - [测试状态](#测试状态)
+  - [文档状态](#文档状态)
+  - [下一步工作计划](#下一步工作计划)
+    - [短期优先级（1-2周）](#短期优先级1-2周)
+    - [已完成但需持续回归](#已完成但需持续回归)
+    - [中期目标（3-4周）](#中期目标3-4周)
+    - [长期目标（1-2月）](#长期目标1-2月)
+  - [架构完善项（面向边缘设备）](#架构完善项面向边缘设备)
+  - [DMA-BUF Phase 1 后续修改入口](#dma-buf-phase-1-后续修改入口)
+  - [发布端/订阅端解耦模型状态](#发布端订阅端解耦模型状态)
+  - [架构设计细化（Buffer 生命周期与背压策略）](#架构设计细化buffer-生命周期与背压策略)
+  - [边缘设备适配与交叉编译状态](#边缘设备适配与交叉编译状态)
+  - [技术债务](#技术债务)
+  - [贡献指南](#贡献指南)
+  - [许可证](#许可证)
+  - [联系方式](#联系方式)
 
 ## 项目概述
 
@@ -280,7 +291,13 @@ flowchart TB
    - 如果体验不足，再增加 Gateway codec health 广播和前端能力状态，不提前引入自动续录
 
 3. **MIPI/RKISP 多平面准备**
-   - 接入 MPLANE 节点验证 per-plane fd / offset / stride / bytesused
+   - 当前调试条件只有 USB 摄像头，不能把真实 MIPI/RKISP sensor 出帧验证标记为完成
+   - 已新增 `scripts/rk3576-mplane-readiness-probe.sh`，用于优先枚举 RKISP/RKVpss capture 节点并运行 `mplane_dmabuf_probe`；USB-only 环境没有 MPLANE 节点时返回 `SKIP`，接入 MIPI sensor 后可用 `REQUIRE_MPLANE=1` 作为强校验
+   - 2026-05-08 板端 readiness 结果：`pass=10`、`mplane_candidates=10`、`fail=0`、`mplane_readiness_result=PASS`；当前只证明 RKISP/RKVpss `REQBUFS + QUERYBUF + EXPBUF` readiness，不代表真实 sensor live frame
+   - 已在 [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md) 固化 `CameraSource` 内部 backend 拆分、MPLANE descriptor 映射、release QBUF 边界和实现顺序
+   - 已完成 `CameraSource` single-planar buffer type 依赖收敛，并新增有效 V4L2 capability 解析与内部 backend selector；当前行为仍固定为 `V4L2_BUF_TYPE_VIDEO_CAPTURE`，MPLANE-only 设备会明确失败
+   - 已新增 `CameraSource` 内部 MPLANE format/query/export 初始化骨架和清理逻辑；`CAMERA_SUBSYSTEM_ENABLE_MPLANE_PROBE=1` 时 `Initialize()` 只跑 probe-only 并立即 cleanup，不接入 `StartStream()`、`DQBUF/QBUF` 主循环
+   - 后续接入 MPLANE live sensor 后验证 per-plane fd / offset / stride / bytesused
    - 为 DataPlaneV2 -> MPP 低拷贝录制路径准备真实 NV12 输入验证
 
 4. **DataPlaneV2 低拷贝录制架构设计**
@@ -444,6 +461,11 @@ flowchart TB
 - [x] 板端 smoke suite 拆分为 quick/full/extended 三档 ✅ 2026-05-07
 - [x] Web 录制状态面板补充常见 codec 错误码中文说明 ✅ 2026-05-08
 - [x] Web 录制按钮补充上次失败原因提示 ✅ 2026-05-08
+- [x] 增加 RK3576 MPLANE readiness 枚举脚本，支持 USB-only 环境 SKIP 与 MIPI 接入后强校验 ✅ 2026-05-08
+- [x] 固化 V4L2 MPLANE 采集路径架构拆分设计 ✅ 2026-05-08
+- [x] 收敛 `CameraSource` 内部 single-planar buffer type 依赖，补有效 capability 解析和 backend selector 准备 ✅ 2026-05-08
+- [x] 新增 `CameraSource` 内部 MPLANE format/query/export 初始化骨架，不接入 STREAMON 主循环 ✅ 2026-05-08
+- [x] 增加 `CAMERA_SUBSYSTEM_ENABLE_MPLANE_PROBE=1` 受控开关，支持 `Initialize()` 只跑 MPLANE probe-only 并立即 cleanup ✅ 2026-05-08
 - [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane
 - [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
 - [ ] 补充 Web 异常恢复长稳：生产化保活、长时间刷新/断线重连

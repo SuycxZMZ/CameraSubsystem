@@ -1,6 +1,6 @@
 # DMA-BUF 数据面阶段性设计与验证记录
 
-**最后更新:** 2026-04-27<br>
+**最后更新:** 2026-05-08<br>
 **阶段状态:** DMA-BUF Phase 2 阶段性任务已完成；DataPlaneV2 + `SCM_RIGHTS` + 独立 ReleaseFrame 通道已落地，并通过 RK3576 `/dev/video45` 冒烟验证<br>
 **后续承接:** H.264 编码录制架构见 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)
 
@@ -260,6 +260,65 @@ RKISP/MIPI 场景通常比 USB MJPEG 更需要零拷贝。
    - 每个 plane 独立 DMA-BUF fd。
 4. `FrameHandle` 现有 `buffer_fd_` 只能表达单 fd，因此 Phase 1 就应定义 `FrameDescriptor` 的多 fd 字段，但第一版实现只填单 fd 单平面。
 5. 不建议把 `plane_fds_[3]` 塞入 `reserved_` 作为长期方案。`reserved_` 可以临时防 ABI 断裂，但主线设计应使用显式 `FrameDescriptor` / `FrameHandleV2`。
+
+MPLANE 采集接入拆分：
+
+```mermaid
+flowchart LR
+    CameraSource["CameraSource<br/>对外兼容入口"]
+    BackendFactory["V4L2 backend selector<br/>capability + config"]
+    SingleBackend["V4L2SinglePlaneBackend<br/>VIDEO_CAPTURE"]
+    MplaneBackend["V4L2MPlaneBackend<br/>VIDEO_CAPTURE_MPLANE"]
+    PacketBuilder["FramePacketBuilder<br/>FrameHandle + FrameDescriptor"]
+    CopyPath["copy fallback<br/>heap BufferPool"]
+    DmaPath["DMA-BUF path<br/>FrameLease + DataPlaneV2"]
+
+    CameraSource --> BackendFactory
+    BackendFactory --> SingleBackend
+    BackendFactory --> MplaneBackend
+    SingleBackend --> PacketBuilder
+    MplaneBackend --> PacketBuilder
+    PacketBuilder --> CopyPath
+    PacketBuilder --> DmaPath
+```
+
+第一版代码边界：
+
+1. `CameraSource` 保持现有 public API，不把调用方一次性迁移到新类。
+2. 内部新增 `V4L2BufferType` / backend selector，按设备能力和配置选择：
+   - 默认仍优先 `V4L2_BUF_TYPE_VIDEO_CAPTURE`，保证 USB/UVC 当前链路不变。
+   - 显式请求 MPLANE 或 single-planar 不支持时，尝试 `V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE`。
+   - 两者都不满足时初始化失败；不能静默切到错误设备类型。
+3. `V4L2MPlaneBackend` 第一版只服务 DMA-BUF descriptor 路径：
+   - `VIDIOC_S_FMT` 使用 `fmt.pix_mp`。
+   - `REQBUFS` / `QUERYBUF` / `QBUF` / `DQBUF` / `STREAMON` / `STREAMOFF` 均使用 `VIDEO_CAPTURE_MPLANE`。
+   - 每次 `v4l2_buffer` 都必须携带 `v4l2_plane planes[VIDEO_MAX_PLANES]`，并设置 `buf.length` 与 `buf.m.planes`。
+   - `VIDIOC_EXPBUF` 对每个 plane 执行；如果多个 plane 导出同一个 fd，`FrameDescriptor` 通过同一个 `fd_index` 加不同 `offset` 表达。
+4. MPLANE copy fallback 不作为第一版目标。真实 MIPI/RKISP 主要服务低拷贝 NV12 -> MPP/RGA/RKNN 路径；如果 MPLANE DMA-BUF 初始化失败，直接报出明确错误，避免把多平面 layout 临时摊平成错误 heap buffer。
+5. QBUF release callback 必须保存 buffer type 和 plane count。`DmaBufFrameLease` 的 release 不能再硬编码 `V4L2_BUF_TYPE_VIDEO_CAPTURE`，否则 MPLANE buffer 无法正确归还驱动队列。
+
+MPLANE descriptor 映射规则：
+
+| 字段 | single-planar 来源 | MPLANE 来源 | 约束 |
+|------|--------------------|-------------|------|
+| `buffer_id` | `v4l2_buffer.index` | `v4l2_buffer.index` | release 时原样用于 QBUF |
+| `sequence` | `v4l2_buffer.sequence` | `v4l2_buffer.sequence` | 用于跨进程乱序诊断 |
+| `timestamp_ns` | `v4l2_buffer.timestamp` 优先，否则 monotonic fallback | 同左 | 不再只用本地 `GetTimestampNs()` |
+| `plane_count` | 1 或由软件 layout 推导 | `fmt.pix_mp.num_planes` | 必须在 1..`kMaxFramePlanes` |
+| `fd_count` | 1 | 去重后的 exported fd 数量 | fd 去重后再填 `fds[]` |
+| `planes[i].fd_index` | 0 | plane 对应 fd 在 `fds[]` 的索引 | 多 plane 共享 fd 时可以相同 |
+| `planes[i].offset` | 0 或软件 layout offset | `v4l2_plane.data_offset`，必要时结合 `m.mem_offset` | 描述 plane 在 fd 内的有效起点 |
+| `planes[i].stride` | `bytesperline` 或软件推导 | `fmt.pix_mp.plane_fmt[i].bytesperline` | MPP/RGA import 必需 |
+| `planes[i].length` | buffer length | `v4l2_plane.length` | mmap/import 范围 |
+| `planes[i].bytes_used` | `v4l2_buffer.bytesused` | `v4l2_plane.bytesused` | 真实 sensor 后必须非 0 |
+
+实现顺序：
+
+1. 新增 backend 内部数据结构和 `VIDEO_CAPTURE` / `VIDEO_CAPTURE_MPLANE` 常量封装，不改外部 API。当前已完成 single-planar buffer type 收敛，并新增有效 capability 解析与内部 selector；selector 仍只启用 single-planar，MPLANE-only 设备会明确失败。
+2. 把 single-planar 现有 `ConfigureDevice`、`InitMMap`、`InitDmaBufExport`、`CaptureLoop`、`RequeueBuffer` 的 buffer type 依赖集中起来，先保证 USB `/dev/video45` 回归不变。
+3. 接入 `V4L2MPlaneBackend` 的初始化和 readiness 模式，只做 `REQBUFS + QUERYBUF + EXPBUF`，不 STREAMON。当前已新增 `CameraSource` 内部 MPLANE probe buffer/plane 结构和 `S_FMT -> REQBUFS -> QUERYBUF -> EXPBUF -> cleanup` 骨架；仅当环境变量 `CAMERA_SUBSYSTEM_ENABLE_MPLANE_PROBE=1` 时，`Initialize()` 会进入 probe-only 路径，成功或失败后立即 cleanup 并返回，不进入 `StartStream/DQBUF/QBUF`。probe-only 的格式参数通过 `CAMERA_SUBSYSTEM_MPLANE_PROBE_WIDTH`、`CAMERA_SUBSYSTEM_MPLANE_PROBE_HEIGHT`、`CAMERA_SUBSYSTEM_MPLANE_PROBE_FOURCC` 传入。
+4. 在具备 live sensor 后再打开 MPLANE STREAMON/DQBUF/QBUF，并验证 `bytesused > 0`、timestamp、sequence 和 release 后可持续采集。
+5. 最后再让 DataPlaneV2 subscriber / `camera_codec_server` 消费 MPLANE descriptor，进入 MPP import 低拷贝录制。
 
 ### 4.5 Phase 4：外部分配与硬件链路
 
@@ -758,6 +817,12 @@ MPP 验证边界：
 2. 当前没有证明 MPP encoder session 可以直接消费这些帧；完整编码仍需要后续补齐 `MppFrame` metadata、format、stride、pts、EOS 和编码参数。
 3. 当前没有把 MPP 接入 CameraSubsystem 主链路，不改变 DataPlaneV2 或 release 时序。
 4. RKNN 需要具体 `rknn_context` 和模型输入 tensor 才能验证 `rknn_create_mem_from_fd`，不能用无模型 probe 等价证明。
+
+当前 MIPI/RKISP 设备约束：
+
+1. 当前可持续调试设备只有 USB 摄像头，真实 MIPI/RKISP sensor 出帧、STREAMON 后 `bytesused` 和多 fd plane 尚不能闭环验证。
+2. 已新增 `scripts/rk3576-mplane-readiness-probe.sh` 作为 readiness 入口；脚本优先选择 RKISP/RKVpss capture 节点，USB-only 环境没有 MPLANE 节点时返回 `SKIP`，不把硬件缺失误判为链路失败。
+3. 接入 MIPI/RKISP sensor 后，使用 `REQUIRE_MPLANE=1` 和明确 `DEVICES` 列表复测 `mplane_dmabuf_probe`，再进入 DataPlaneV2 -> MPP 低拷贝录制路径设计。
 
 ### 12.3 主要风险
 

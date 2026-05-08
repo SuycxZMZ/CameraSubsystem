@@ -59,6 +59,53 @@ uint64_t SampleChecksum(const uint8_t* data, size_t size)
     return checksum;
 }
 
+bool IsMPlaneProbeOnly()
+{
+    const char* value = std::getenv("CAMERA_SUBSYSTEM_ENABLE_MPLANE_PROBE");
+    if (value == nullptr)
+    {
+        return false;
+    }
+
+    return std::strcmp(value, "1") == 0 ||
+           std::strcmp(value, "true") == 0 ||
+           std::strcmp(value, "TRUE") == 0 ||
+           std::strcmp(value, "on") == 0 ||
+           std::strcmp(value, "ON") == 0;
+}
+
+uint32_t EnvU32(const char* name, uint32_t fallback)
+{
+    const char* value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0')
+    {
+        return fallback;
+    }
+    return static_cast<uint32_t>(std::strtoul(value, nullptr, 10));
+}
+
+PixelFormat PixelFormatFromEnv(PixelFormat fallback)
+{
+    const char* value = std::getenv("CAMERA_SUBSYSTEM_MPLANE_PROBE_FOURCC");
+    if (value == nullptr)
+    {
+        return fallback;
+    }
+    if (std::strcmp(value, "NV12") == 0)
+    {
+        return PixelFormat::kNV12;
+    }
+    if (std::strcmp(value, "YUYV") == 0)
+    {
+        return PixelFormat::kYUYV;
+    }
+    if (std::strcmp(value, "MJPG") == 0 || std::strcmp(value, "MJPEG") == 0)
+    {
+        return PixelFormat::kMJPEG;
+    }
+    return fallback;
+}
+
 void UpdateMax(std::atomic<size_t>& target, size_t value)
 {
     size_t current = target.load();
@@ -79,9 +126,15 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    CameraConfig config(1920,
-                        1080,
-                        PixelFormat::kMJPEG,
+    const bool mplane_probe_only = IsMPlaneProbeOnly();
+    CameraConfig config(mplane_probe_only
+                            ? EnvU32("CAMERA_SUBSYSTEM_MPLANE_PROBE_WIDTH", 800)
+                            : 1920,
+                        mplane_probe_only
+                            ? EnvU32("CAMERA_SUBSYSTEM_MPLANE_PROBE_HEIGHT", 600)
+                            : 1080,
+                        mplane_probe_only ? PixelFormatFromEnv(PixelFormat::kNV12)
+                                           : PixelFormat::kMJPEG,
                         30,
                         4,
                         static_cast<uint32_t>(IoMethod::kDmaBuf));
@@ -148,6 +201,14 @@ int main(int argc, char* argv[])
                             "CameraSource initialize failed");
         PlatformLogger::Shutdown();
         return 1;
+    }
+
+    if (mplane_probe_only)
+    {
+        std::printf("mplane_probe_only_result=PASS\n");
+        std::printf("device=%s\n", device_path.c_str());
+        PlatformLogger::Shutdown();
+        return 0;
     }
 
     if (!source.Start())

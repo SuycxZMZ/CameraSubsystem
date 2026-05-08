@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
@@ -35,6 +36,15 @@ int Xioctl(int fd, int request, void* arg)
     return ret;
 }
 
+uint32_t EffectiveCapabilities(const v4l2_capability& cap)
+{
+    if ((cap.capabilities & V4L2_CAP_DEVICE_CAPS) != 0)
+    {
+        return cap.device_caps;
+    }
+    return cap.capabilities;
+}
+
 } // namespace
 
 CameraSource::CameraSource()
@@ -42,6 +52,8 @@ CameraSource::CameraSource()
     , device_path_("/dev/video0")
     , device_fd_(-1)
     , streaming_(false)
+    , device_capabilities_(0)
+    , capture_buffer_type_(V4L2_BUF_TYPE_VIDEO_CAPTURE)
     , requeue_context_(std::make_shared<RequeueContext>())
     , is_running_(false)
     , frame_count_(0)
@@ -53,6 +65,7 @@ CameraSource::~CameraSource()
 {
     Stop();
     CleanupDmaBufExports();
+    CleanupMPlaneProbeBuffers();
     CleanupBuffers();
     CloseDevice();
 }
@@ -61,6 +74,7 @@ bool CameraSource::Initialize(const core::CameraConfig& config)
 {
     Stop();
     CleanupDmaBufExports();
+    CleanupMPlaneProbeBuffers();
     CleanupBuffers();
     CloseDevice();
 
@@ -73,6 +87,24 @@ bool CameraSource::Initialize(const core::CameraConfig& config)
 
     if (!OpenDevice())
     {
+        return false;
+    }
+
+    if (ShouldRunMPlaneProbeOnly())
+    {
+        const bool ok = InitMPlaneDmaBufExportSkeleton();
+        CleanupMPlaneProbeBuffers();
+        CloseDevice();
+        platform::PlatformLogger::Log(ok ? core::LogLevel::kInfo : core::LogLevel::kError,
+                                      "camera_source",
+                                      "MPLANE probe-only initialize result=%s",
+                                      ok ? "PASS" : "FAIL");
+        return ok;
+    }
+
+    if (!SelectCaptureBufferType(device_capabilities_))
+    {
+        CloseDevice();
         return false;
     }
 
@@ -282,7 +314,7 @@ void CameraSource::CaptureLoop()
 
         struct v4l2_buffer buf;
         memset(&buf, 0, sizeof(buf));
-        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.type = static_cast<v4l2_buf_type>(CaptureBufferType());
         buf.memory = V4L2_MEMORY_MMAP;
 
         if (Xioctl(device_fd_, VIDIOC_DQBUF, &buf) < 0)
@@ -472,7 +504,7 @@ bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf)
 
                 struct v4l2_buffer qbuf;
                 std::memset(&qbuf, 0, sizeof(qbuf));
-                qbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+                qbuf.type = static_cast<v4l2_buf_type>(context->buffer_type);
                 qbuf.memory = V4L2_MEMORY_MMAP;
                 qbuf.index = buffer_index;
                 if (Xioctl(context->device_fd, VIDIOC_QBUF, &qbuf) < 0)
@@ -518,15 +550,8 @@ bool CameraSource::OpenDevice()
         return false;
     }
 
-    if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE))
-    {
-        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
-                                      "Device does not support V4L2 video capture");
-        CloseDevice();
-        return false;
-    }
-
-    if (!(cap.capabilities & V4L2_CAP_STREAMING))
+    device_capabilities_ = EffectiveCapabilities(cap);
+    if ((device_capabilities_ & V4L2_CAP_STREAMING) == 0)
     {
         platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
                                       "Device does not support streaming I/O");
@@ -546,11 +571,43 @@ void CameraSource::CloseDevice()
     }
 }
 
+bool CameraSource::SelectCaptureBufferType(uint32_t capabilities)
+{
+    const bool supports_single_plane = (capabilities & V4L2_CAP_VIDEO_CAPTURE) != 0;
+    const bool supports_mplane = (capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE) != 0;
+
+    if (supports_single_plane)
+    {
+        capture_buffer_type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        if (requeue_context_)
+        {
+            requeue_context_->buffer_type = capture_buffer_type_;
+        }
+        platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                      "selected V4L2 single-planar capture backend "
+                                      "(mplane_supported=%u)",
+                                      supports_mplane ? 1U : 0U);
+        return true;
+    }
+
+    if (supports_mplane)
+    {
+        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                      "Device supports only V4L2 MPLANE capture; "
+                                      "MPLANE backend is designed but not enabled yet");
+        return false;
+    }
+
+    platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                  "Device does not support V4L2 video capture");
+    return false;
+}
+
 bool CameraSource::ConfigureDevice()
 {
     struct v4l2_format fmt;
     memset(&fmt, 0, sizeof(fmt));
-    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    fmt.type = static_cast<v4l2_buf_type>(CaptureBufferType());
     fmt.fmt.pix.width = config_.width_;
     fmt.fmt.pix.height = config_.height_;
     fmt.fmt.pix.pixelformat = ToV4L2PixelFormat(config_.format_);
@@ -582,7 +639,7 @@ bool CameraSource::ConfigureDevice()
 
     struct v4l2_streamparm parm;
     memset(&parm, 0, sizeof(parm));
-    parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    parm.type = static_cast<v4l2_buf_type>(CaptureBufferType());
     parm.parm.capture.timeperframe.numerator = 1;
     parm.parm.capture.timeperframe.denominator = std::max<uint32_t>(1, config_.fps_);
 
@@ -600,7 +657,7 @@ bool CameraSource::InitMMap()
     struct v4l2_requestbuffers req;
     memset(&req, 0, sizeof(req));
     req.count = config_.buffer_count_;
-    req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    req.type = static_cast<v4l2_buf_type>(CaptureBufferType());
     req.memory = V4L2_MEMORY_MMAP;
 
     if (Xioctl(device_fd_, VIDIOC_REQBUFS, &req) < 0)
@@ -624,7 +681,7 @@ bool CameraSource::InitMMap()
     {
         struct v4l2_buffer buf;
         memset(&buf, 0, sizeof(buf));
-        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.type = static_cast<v4l2_buf_type>(CaptureBufferType());
         buf.memory = V4L2_MEMORY_MMAP;
         buf.index = i;
 
@@ -664,7 +721,7 @@ bool CameraSource::InitMMap()
     {
         struct v4l2_buffer buf;
         memset(&buf, 0, sizeof(buf));
-        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.type = static_cast<v4l2_buf_type>(CaptureBufferType());
         buf.memory = V4L2_MEMORY_MMAP;
         buf.index = i;
 
@@ -691,7 +748,7 @@ bool CameraSource::InitDmaBufExport()
     {
         struct v4l2_exportbuffer expbuf;
         std::memset(&expbuf, 0, sizeof(expbuf));
-        expbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        expbuf.type = static_cast<v4l2_buf_type>(CaptureBufferType());
         expbuf.index = i;
         expbuf.plane = 0;
         expbuf.flags = O_CLOEXEC;
@@ -732,7 +789,204 @@ bool CameraSource::InitDmaBufExport()
                                   buffers_.size(),
                                   min_queued_capture_buffers_,
                                   global_lease_in_flight_max_);
+    if (requeue_context_)
+    {
+        requeue_context_->buffer_type = CaptureBufferType();
+    }
     return true;
+}
+
+bool CameraSource::ConfigureMPlaneFormatForProbe()
+{
+    struct v4l2_format fmt;
+    std::memset(&fmt, 0, sizeof(fmt));
+    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+    fmt.fmt.pix_mp.width = config_.width_;
+    fmt.fmt.pix_mp.height = config_.height_;
+    fmt.fmt.pix_mp.pixelformat = ToV4L2PixelFormat(config_.format_);
+    fmt.fmt.pix_mp.field = V4L2_FIELD_NONE;
+
+    if (Xioctl(device_fd_, VIDIOC_S_FMT, &fmt) < 0)
+    {
+        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                      "MPLANE VIDIOC_S_FMT failed: %s", strerror(errno));
+        return false;
+    }
+
+    const uint32_t plane_count = fmt.fmt.pix_mp.num_planes;
+    if (plane_count == 0 || plane_count > VIDEO_MAX_PLANES ||
+        plane_count > core::kMaxFramePlanes)
+    {
+        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                      "MPLANE invalid plane count: %u", plane_count);
+        return false;
+    }
+
+    mplane_probe_plane_count_ = plane_count;
+    mplane_probe_width_ = fmt.fmt.pix_mp.width;
+    mplane_probe_height_ = fmt.fmt.pix_mp.height;
+    mplane_probe_fourcc_ = fmt.fmt.pix_mp.pixelformat;
+    mplane_probe_strides_.clear();
+    mplane_probe_strides_.reserve(mplane_probe_plane_count_);
+    for (uint32_t i = 0; i < mplane_probe_plane_count_; ++i)
+    {
+        mplane_probe_strides_.push_back(fmt.fmt.pix_mp.plane_fmt[i].bytesperline);
+    }
+
+    platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                  "MPLANE probe format: width=%u height=%u "
+                                  "fourcc=%c%c%c%c planes=%u",
+                                  mplane_probe_width_,
+                                  mplane_probe_height_,
+                                  mplane_probe_fourcc_ & 0xff,
+                                  (mplane_probe_fourcc_ >> 8) & 0xff,
+                                  (mplane_probe_fourcc_ >> 16) & 0xff,
+                                  (mplane_probe_fourcc_ >> 24) & 0xff,
+                                  mplane_probe_plane_count_);
+
+    return true;
+}
+
+bool CameraSource::InitMPlaneBuffersForProbe()
+{
+    if (mplane_probe_plane_count_ == 0)
+    {
+        return false;
+    }
+
+    struct v4l2_requestbuffers req;
+    std::memset(&req, 0, sizeof(req));
+    req.count = config_.buffer_count_;
+    req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+    req.memory = V4L2_MEMORY_MMAP;
+
+    if (Xioctl(device_fd_, VIDIOC_REQBUFS, &req) < 0)
+    {
+        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                      "MPLANE VIDIOC_REQBUFS failed: %s", strerror(errno));
+        return false;
+    }
+
+    if (req.count < 2)
+    {
+        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                      "MPLANE insufficient buffer memory");
+        return false;
+    }
+
+    mplane_probe_buffers_.clear();
+    mplane_probe_buffers_.resize(req.count);
+
+    for (uint32_t i = 0; i < req.count; ++i)
+    {
+        struct v4l2_buffer buf;
+        struct v4l2_plane planes[VIDEO_MAX_PLANES];
+        std::memset(&buf, 0, sizeof(buf));
+        std::memset(planes, 0, sizeof(planes));
+        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index = i;
+        buf.length = mplane_probe_plane_count_;
+        buf.m.planes = planes;
+
+        if (Xioctl(device_fd_, VIDIOC_QUERYBUF, &buf) < 0)
+        {
+            platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                          "MPLANE VIDIOC_QUERYBUF failed: %s",
+                                          strerror(errno));
+            return false;
+        }
+
+        MPlaneProbeBuffer& buffer = mplane_probe_buffers_[i];
+        buffer.index = i;
+        buffer.planes.resize(mplane_probe_plane_count_);
+        for (uint32_t p = 0; p < mplane_probe_plane_count_; ++p)
+        {
+            MPlaneProbePlane& plane = buffer.planes[p];
+            plane.bytes_per_line = p < mplane_probe_strides_.size()
+                ? mplane_probe_strides_[p]
+                : 0;
+            plane.length = planes[p].length;
+            plane.bytes_used = planes[p].bytesused;
+            plane.data_offset = planes[p].data_offset;
+            plane.mem_offset = planes[p].m.mem_offset;
+        }
+    }
+
+    return true;
+}
+
+bool CameraSource::ExportMPlaneDmaBufsForProbe()
+{
+    if (mplane_probe_buffers_.empty() || mplane_probe_plane_count_ == 0)
+    {
+        return false;
+    }
+
+    for (auto& buffer : mplane_probe_buffers_)
+    {
+        for (uint32_t p = 0; p < buffer.planes.size(); ++p)
+        {
+            struct v4l2_exportbuffer expbuf;
+            std::memset(&expbuf, 0, sizeof(expbuf));
+            expbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+            expbuf.index = buffer.index;
+            expbuf.plane = p;
+            expbuf.flags = O_CLOEXEC;
+
+            if (Xioctl(device_fd_, VIDIOC_EXPBUF, &expbuf) < 0)
+            {
+                platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                              "MPLANE VIDIOC_EXPBUF failed: index=%u "
+                                              "plane=%u error=%s",
+                                              buffer.index,
+                                              p,
+                                              strerror(errno));
+                CleanupMPlaneProbeBuffers();
+                return false;
+            }
+
+            buffer.planes[p].dma_buf_fd = expbuf.fd;
+            buffer.planes[p].dma_buf_exported = true;
+        }
+    }
+
+    platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                  "MPLANE DMA-BUF export skeleton initialized: "
+                                  "buffers=%zu planes=%u",
+                                  mplane_probe_buffers_.size(),
+                                  mplane_probe_plane_count_);
+    return true;
+}
+
+bool CameraSource::InitMPlaneDmaBufExportSkeleton()
+{
+    CleanupMPlaneProbeBuffers();
+    if (!ConfigureMPlaneFormatForProbe())
+    {
+        return false;
+    }
+    if (!InitMPlaneBuffersForProbe())
+    {
+        CleanupMPlaneProbeBuffers();
+        return false;
+    }
+    return ExportMPlaneDmaBufsForProbe();
+}
+
+bool CameraSource::ShouldRunMPlaneProbeOnly() const
+{
+    const char* value = std::getenv("CAMERA_SUBSYSTEM_ENABLE_MPLANE_PROBE");
+    if (value == nullptr)
+    {
+        return false;
+    }
+
+    return std::strcmp(value, "1") == 0 ||
+           std::strcmp(value, "true") == 0 ||
+           std::strcmp(value, "TRUE") == 0 ||
+           std::strcmp(value, "on") == 0 ||
+           std::strcmp(value, "ON") == 0;
 }
 
 void CameraSource::CleanupDmaBufExports()
@@ -765,6 +1019,44 @@ void CameraSource::CleanupDmaBufExports()
     dma_buf_path_enabled_ = false;
 }
 
+void CameraSource::CleanupMPlaneProbeBuffers()
+{
+    for (auto& buffer : mplane_probe_buffers_)
+    {
+        for (auto& plane : buffer.planes)
+        {
+            if (plane.dma_buf_fd >= 0)
+            {
+                close(plane.dma_buf_fd);
+            }
+            plane.dma_buf_fd = -1;
+            plane.dma_buf_exported = false;
+        }
+    }
+
+    if (device_fd_ >= 0 && !mplane_probe_buffers_.empty())
+    {
+        struct v4l2_requestbuffers req;
+        std::memset(&req, 0, sizeof(req));
+        req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+        req.memory = V4L2_MEMORY_MMAP;
+        req.count = 0;
+        if (Xioctl(device_fd_, VIDIOC_REQBUFS, &req) < 0)
+        {
+            platform::PlatformLogger::Log(core::LogLevel::kWarning, "camera_source",
+                                          "MPLANE probe cleanup REQBUFS(0) failed: %s",
+                                          strerror(errno));
+        }
+    }
+
+    mplane_probe_buffers_.clear();
+    mplane_probe_plane_count_ = 0;
+    mplane_probe_width_ = 0;
+    mplane_probe_height_ = 0;
+    mplane_probe_fourcc_ = 0;
+    mplane_probe_strides_.clear();
+}
+
 bool CameraSource::ShouldUseDmaBufPath() const
 {
     if (!dma_buf_path_enabled_)
@@ -779,7 +1071,7 @@ void CameraSource::RequeueBuffer(uint32_t buffer_index)
 {
     struct v4l2_buffer qbuf;
     std::memset(&qbuf, 0, sizeof(qbuf));
-    qbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    qbuf.type = static_cast<v4l2_buf_type>(CaptureBufferType());
     qbuf.memory = V4L2_MEMORY_MMAP;
     qbuf.index = buffer_index;
 
@@ -797,7 +1089,7 @@ bool CameraSource::StartStream()
         return true;
     }
 
-    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    enum v4l2_buf_type type = static_cast<v4l2_buf_type>(CaptureBufferType());
     if (Xioctl(device_fd_, VIDIOC_STREAMON, &type) < 0)
     {
         platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
@@ -816,7 +1108,7 @@ void CameraSource::StopStream()
         return;
     }
 
-    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    enum v4l2_buf_type type = static_cast<v4l2_buf_type>(CaptureBufferType());
     if (Xioctl(device_fd_, VIDIOC_STREAMOFF, &type) < 0)
     {
         platform::PlatformLogger::Log(core::LogLevel::kWarning, "camera_source",
@@ -891,6 +1183,11 @@ uint64_t CameraSource::GetTimestampNs() const
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + static_cast<uint64_t>(ts.tv_nsec);
+}
+
+uint32_t CameraSource::CaptureBufferType() const
+{
+    return capture_buffer_type_;
 }
 
 uint32_t CameraSource::ToV4L2PixelFormat(core::PixelFormat format) const

@@ -77,10 +77,17 @@ private:
     bool HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf);
     bool OpenDevice();
     void CloseDevice();
+    bool SelectCaptureBufferType(uint32_t capabilities);
     bool ConfigureDevice();
     bool InitMMap();
     bool InitDmaBufExport();
+    bool ConfigureMPlaneFormatForProbe();
+    bool InitMPlaneBuffersForProbe();
+    bool ExportMPlaneDmaBufsForProbe();
+    bool InitMPlaneDmaBufExportSkeleton();
+    bool ShouldRunMPlaneProbeOnly() const;
     void CleanupDmaBufExports();
+    void CleanupMPlaneProbeBuffers();
     bool ShouldUseDmaBufPath() const;
     void RequeueBuffer(uint32_t buffer_index);
     bool StartStream();
@@ -89,6 +96,7 @@ private:
     size_t CalculateBufferSize(const core::CameraConfig& config) const;
     void FillFrameLayout(core::FrameHandle& frame, size_t buffer_size) const;
     uint64_t GetTimestampNs() const;
+    uint32_t CaptureBufferType() const;
 
     uint32_t ToV4L2PixelFormat(core::PixelFormat format) const;
     core::PixelFormat FromV4L2PixelFormat(uint32_t format) const;
@@ -97,6 +105,8 @@ private:
     std::string device_path_;
     int device_fd_;
     bool streaming_;
+    uint32_t device_capabilities_;
+    uint32_t capture_buffer_type_;
 
     struct Buffer
     {
@@ -107,10 +117,34 @@ private:
     };
     std::vector<Buffer> buffers_;
 
+    struct MPlaneProbePlane
+    {
+        uint32_t bytes_per_line = 0;
+        uint32_t length = 0;
+        uint32_t bytes_used = 0;
+        uint32_t data_offset = 0;
+        uint32_t mem_offset = 0;
+        int dma_buf_fd = -1;
+        bool dma_buf_exported = false;
+    };
+
+    struct MPlaneProbeBuffer
+    {
+        uint32_t index = 0;
+        std::vector<MPlaneProbePlane> planes;
+    };
+    std::vector<MPlaneProbeBuffer> mplane_probe_buffers_;
+    uint32_t mplane_probe_plane_count_ = 0;
+    uint32_t mplane_probe_width_ = 0;
+    uint32_t mplane_probe_height_ = 0;
+    uint32_t mplane_probe_fourcc_ = 0;
+    std::vector<uint32_t> mplane_probe_strides_;
+
     struct RequeueContext
     {
         std::mutex mutex;
         int device_fd = -1;
+        uint32_t buffer_type = 0;
         bool active = false;
         std::atomic<size_t> active_leases{0};
     };
