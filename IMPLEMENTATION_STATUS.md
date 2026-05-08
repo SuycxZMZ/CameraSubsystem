@@ -1,6 +1,6 @@
 # CameraSubsystem 实现状态
 
-**更新日期:** 2026-05-05
+**更新日期:** 2026-05-08
 
 > **文档硬规范**
 >
@@ -10,6 +10,7 @@
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
 > - 评审建议、风险、ARCH-* 跟踪项只维护在 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)，其他文档只链接引用，避免重复漂移。
+> - Git 提交信息必须遵循项目既有风格：标题使用 `[类别] 简短动词短语`，正文使用 2-3 条 `- ` 列表说明主要修改范围；不要写“验证：XXX”这类独立验证段落，也不要附带外部 AI 生成标记。
 
 ## 目录
 
@@ -264,6 +265,7 @@ flowchart TB
 - ✅ README.md - 项目主文档
 - ✅ structure.md - 架构设计文档
 - ✅ docs/ARCHITECTURE_REVIEW.md - 架构评审文档
+- ✅ docs/MULTI_CAMERA_ARCHITECTURE.md - 多路摄像头架构纠偏文档
 - ✅ API_REFERENCE.md - API接口文档
 - ✅ NAMING_CONVENTION.md - 命名规范文档
 - ✅ IMPLEMENTATION_STATUS.md - 本文件
@@ -279,18 +281,27 @@ flowchart TB
 
 ### 短期优先级（1-2周）
 
-1. **板端 smoke 与启动方式固化**
+1. **多路摄像头架构纠偏（USB + MIPI 同时接入）**
+   - 已新增 [docs/MULTI_CAMERA_ARCHITECTURE.md](docs/MULTI_CAMERA_ARCHITECTURE.md)，把最终多路目标、当前单路偏差、目标对象模型、DataPlaneV2/release key、codec 多 session 和 Web 多 stream 路线统一固化
+   - 已完成 M1 基础贯通：新增 `CameraStreamIdentity`，`CameraEndpoint`、`CameraSessionManager`、`CameraSource`、DMA-BUF `FrameDescriptor`、DataPlaneV2 descriptor 和 publisher/subscriber 关键日志已携带稳定字符串 `stream_id`
+   - 已开始 M2 第一刀：publisher 示例由单全局 `CameraSource` 改为 `stream_id -> CameraStreamRuntime` map，新 endpoint 不再强制 stop/reinit 已存在的 stream runtime
+   - 已完成 M3：publisher pending lease 从裸 `frame_id` 改为 `stream_id/camera_id + frame_id + buffer_id` 多字段 key；ReleaseFrame tracker 已按 stream/frame/buffer 隔离，并用 consumer set 跟踪每个消费者 release
+   - 已完成 codec server 多 session 第一阶段：`RecordingSessionManager` 改为 `stream_id -> RecordingSession`，同一进程可同时管理多路录制状态，单路 stop 不影响其他 stream 状态
+   - 当前剩余主偏差是 Web/gateway 多 stream UX 和真实多 camera 板端联合 smoke 仍未完成；后续不能直接扩大 MIPI live，应先补板端多 stream smoke 或 Web 多 stream 状态
+   - USB-only smoke 可以继续保留单 `DEVICE=/dev/video45` 默认入口；生产化配置需要显式声明 stream topology，保证 USB 与 MIPI 可以同时存在
+
+2. **板端 smoke 与启动方式固化**
    - 已新增 `scripts/rk3576-board-smoke-suite.sh` 作为 RK3576 统一自检入口，默认串联 DataPlaneV2 lifecycle、codec MP4、Web MP4 record 和 Web codec restart MP4 smoke
    - 已新增 `scripts/rk3576-run-web-stack.sh` 管理 `camera_publisher_example` / `camera_codec_server` / `web_preview_gateway` 的 start / stop / restart / status / logs
    - 已完成 smoke suite quick/full/extended 三档拆分（`TIER` 环境变量选择，默认 `full`）
 
-2. **Web Codec 可用性体验评估**
+3. **Web Codec 可用性体验评估**
    - 观察 codec 不可用、重启恢复、MP4 异常退出时前端状态是否足够清晰
    - 已将常见 `record_status.error` 内部错误码映射为前端中文说明，并通过 `title` 保留原始错误码，降低现场调试成本
    - 已将错误码格式化逻辑收敛为前端公共工具，录制按钮 tooltip 会提示上次失败原因，避免 codec 未启动时只能在状态行排查
    - 如果体验不足，再增加 Gateway codec health 广播和前端能力状态，不提前引入自动续录
 
-3. **MIPI/RKISP 多平面准备**
+4. **MIPI/RKISP 多平面准备**
    - 当前调试条件只有 USB 摄像头，不能把真实 MIPI/RKISP sensor 出帧验证标记为完成
    - 已新增 `scripts/rk3576-mplane-readiness-probe.sh`，用于优先枚举 RKISP/RKVpss capture 节点并运行 `mplane_dmabuf_probe`；USB-only 环境没有 MPLANE 节点时返回 `SKIP`，接入 MIPI sensor 后可用 `REQUIRE_MPLANE=1` 作为强校验
    - 2026-05-08 板端 readiness 结果：`pass=10`、`mplane_candidates=10`、`fail=0`、`mplane_readiness_result=PASS`；当前只证明 RKISP/RKVpss `REQBUFS + QUERYBUF + EXPBUF` readiness，不代表真实 sensor live frame
@@ -300,7 +311,7 @@ flowchart TB
    - 后续接入 MPLANE live sensor 后验证 per-plane fd / offset / stride / bytesused
    - 为 DataPlaneV2 -> MPP 低拷贝录制路径准备真实 NV12 输入验证
 
-4. **DataPlaneV2 低拷贝录制架构设计**
+5. **DataPlaneV2 低拷贝录制架构设计**
    - 在 `camera_codec_server` 接入 DataPlaneV2 前，先明确 copy path 与 fd path 的选择条件、fallback 行为、MPP import 输入契约和 release 时序
    - 涉及跨模块接口或状态机调整时，先更新 [docs/CODEC_SERVER_ARCHITECTURE.md](docs/CODEC_SERVER_ARCHITECTURE.md) 和 [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md)，讨论确认后再写代码
 
@@ -362,8 +373,9 @@ flowchart TB
 1. Buffer 生命周期与复用池基础治理已完成，当前默认 V4L2 后端仍保留 MMAP -> BufferPool 的拷贝 fallback。
 2. 发布端/订阅端解耦、按订阅启停、控制面/数据面协议已形成双进程可运行原型。
 3. DMA-BUF Phase 2 已完成最小跨进程闭环：`FrameDescriptor` / `FrameLease` / V4L2 `VIDIOC_EXPBUF`、DataPlaneV2 descriptor、`SCM_RIGHTS` fd 传递、独立 release channel、publisher/subscriber 示例接入，并已在 RK3576 `/dev/video45` 冒烟通过。
-4. 长稳压测、慢消费者隔离、多订阅者、设备恢复、统一 metrics、通用板端自检流程仍是下一阶段重点。
-5. Web Preview 录制控制闭环已在 RK3576 正式目录验证通过，后续重点从“能跑通”转为“长稳、可播放、可运维”。
+4. 多路摄像头目标架构已重新收敛为 `CameraStreamIdentity` + `stream_id -> CameraStreamRuntime`；后续不能继续在单 `CameraSource`、裸 `frame_id` release key 或单 recording session 上扩展生产能力。
+5. 长稳压测、慢消费者隔离、多订阅者、设备恢复、统一 metrics、通用板端自检流程仍是下一阶段重点。
+6. Web Preview 录制控制闭环已在 RK3576 正式目录验证通过，后续重点从“能跑通”转为“长稳、可播放、可运维”。
 
 ## DMA-BUF Phase 1 后续修改入口
 
@@ -466,6 +478,12 @@ flowchart TB
 - [x] 收敛 `CameraSource` 内部 single-planar buffer type 依赖，补有效 capability 解析和 backend selector 准备 ✅ 2026-05-08
 - [x] 新增 `CameraSource` 内部 MPLANE format/query/export 初始化骨架，不接入 STREAMON 主循环 ✅ 2026-05-08
 - [x] 增加 `CAMERA_SUBSYSTEM_ENABLE_MPLANE_PROBE=1` 受控开关，支持 `Initialize()` 只跑 MPLANE probe-only 并立即 cleanup ✅ 2026-05-08
+- [x] 固化 USB + MIPI 多路摄像头架构纠偏文档，明确 `CameraStreamIdentity`、多 `CameraStreamRuntime`、DataPlaneV2/release 多路 key 和 codec 多 session 迁移顺序 ✅ 2026-05-08
+- [x] 引入 `CameraStreamIdentity` 基础模型，`CameraSource`、`FrameDescriptor` 和 DataPlaneV2 descriptor 开始携带稳定字符串 `stream_id` ✅ 2026-05-08
+- [x] 补全控制面与关键日志的 `stream_id` 贯通：`CameraEndpoint` 自动生成稳定 stream id，`CameraSessionManager` session key 与 publisher/subscriber 日志开始使用该身份 ✅ 2026-05-08
+- [x] 将 publisher app 运行时改为 `stream_id -> CameraStreamRuntime` map，避免新 endpoint stop/reinit 已存在 stream runtime ✅ 2026-05-08
+- [x] 将 DataPlaneV2 pending lease 和 ReleaseFrame tracker key 从裸 `frame_id` 纠偏为 stream/frame/buffer/consumer 多字段语义，补同帧跨流和跨 buffer 隔离测试 ✅ 2026-05-08
+- [x] 完成 codec server 多 recording session 第一阶段：`RecordingSessionManager` 改为 `stream_id -> RecordingSession`，补多 stream 独立 start/stop/status 测试，并在 RK3576 上通过 27/27 验证 ✅ 2026-05-08
 - [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane
 - [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
 - [ ] 补充 Web 异常恢复长稳：生产化保活、长时间刷新/断线重连

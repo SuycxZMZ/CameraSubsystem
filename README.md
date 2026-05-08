@@ -3,7 +3,7 @@
 **目标平台:** Linux / 嵌入式边缘设备（当前已接入 RK3576 / Debian 验证链路，预留 Android 迁移）<br>
 **开发语言:** C++17 / C POD 数据结构<br>
 **核心方向:** Camera 采集后端 -> Publish/Subscribe -> AI / 编码 / 录制<br>
-**最后更新:** 2026-04-27
+**最后更新:** 2026-05-08
 
 > **文档硬规范**
 >
@@ -13,6 +13,7 @@
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
 > - 评审建议、风险、ARCH-* 跟踪项只维护在 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)，其他文档只链接引用，避免重复漂移。
+> - Git 提交信息必须遵循项目既有风格：标题使用 `[类别] 简短动词短语`，正文使用 2-3 条 `- ` 列表说明主要修改范围；不要写“验证：XXX”这类独立验证段落，也不要附带外部 AI 生成标记。
 
 ---
 
@@ -99,6 +100,7 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 | [README.md](README.md) | 团队入口 | 快速了解项目状态、工程结构、构建运行入口 |
 | [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md) | 项目概览 | 了解项目目标、技术栈、功能边界和快速开始 |
 | [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) | 架构评审 | 查看系统/代码架构评审、风险、ARCH-* 跟踪项 |
+| [docs/MULTI_CAMERA_ARCHITECTURE.md](docs/MULTI_CAMERA_ARCHITECTURE.md) | 多路摄像头架构纠偏 | 查看 USB + MIPI 多路同时接入的目标架构、当前偏差和迁移顺序 |
 | [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md) | DMA-BUF 数据面记录 | 查看 RK3576 / Linux DMA-BUF 阶段性设计、验证结果和 DataPlaneV2 边界 |
 | [docs/CODEC_SERVER_ARCHITECTURE.md](docs/CODEC_SERVER_ARCHITECTURE.md) | Camera Codec Server 架构 | 查看 H.264 编码录制服务、Web 录制控制和 USB/MIPI 输入策略 |
 | [docs/BOARD_WEB_DEBUG_GUIDE.md](docs/BOARD_WEB_DEBUG_GUIDE.md) | 板端 Web 调试指南 | 查看 RK3576 板端 Web Preview、录制联调、统一部署目录和 smoke 方法 |

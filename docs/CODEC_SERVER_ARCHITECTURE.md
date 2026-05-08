@@ -842,7 +842,7 @@ DURATION=60 ./extensions/codec_server/scripts/codec-stability-test-rk3576.sh
 | RK3576 板端最小运行 | 已完成 | 已按 `/home/luckfox/CameraSubsystem/bin/` 统一目录部署，`--help` 和参数解析输出正常 |
 | `RecordingFileWriter` | 已完成 | 支持创建输出目录、生成 `<stream_id>_<YYYYMMDD_HHMMSS>.<ext>`、写入 packet、flush、close、统计、可配置扩展名和重复文件名避让 |
 | `CodecControlServer` | 已完成最小版 | 支持 Unix Domain Socket JSON line start/status/stop；本机 `nc -U` 已验证 |
-| `RecordingSessionManager` | 已完成最小版 | 支持 idle / starting / recording / stopping / error 状态裁决，重复 start、重复 stop 和 writer 错误映射已验证；start recording 已接入 `CameraStreamSubscriber` |
+| `RecordingSessionManager` | 已完成多 session 第一阶段 | 已从单 session 状态演进为 `stream_id -> RecordingSession`，每路独立 writer、subscriber、decoder、encoder、状态和统计；重复 start、重复 stop、writer 错误映射和多 stream 独立 start/stop/status 已验证 |
 | `CameraStreamSubscriber` | 已完成当前切片 | 已实现 v1 copy 数据面连接、控制面 Subscribe / Unsubscribe、帧头/帧 payload 读取和 `input_frames` / `input_bytes` 统计；RK3576 `/dev/video45` smoke 已验证 start/status/stop |
 | `JpegDecodeStage` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingMJPEG` 解码，输出 NV12 `DecodedImageFrame`；主机无 MPP 时返回 `jpeg_decoder_not_available` |
 | `H264MppEncoder` | 已接入主链路 | RK3576 交叉构建启用 MPP `MPP_VIDEO_CodingAVC` 编码；合成 NV12 测试 5/5 通过；live 链路已写出裸 `.h264` 文件 |
@@ -923,10 +923,11 @@ RK3576 60 秒录制稳定性结果：
 
 下一步按 [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md) 的全局优先级推进；与 `camera_codec_server` 直接相关的任务如下：
 
-1. **统一板端 smoke 回归**：`scripts/rk3576-board-smoke-suite.sh` 已把 `codec-mp4`、`web-record-mp4` 和 `web-codec-restart-mp4` 纳入默认套件；后续 codec 相关改动必须至少跑对应单项 smoke。
-2. **DataPlaneV2 低拷贝录制设计**：接入 DataPlaneV2 前，先明确 copy path 与 fd path 的选择条件、fallback 行为、MPP import 输入契约和 release 时序。
-3. **MIPI/RKISP 输入准备**：MPLANE readiness 已通过 RKISP/RKVpss `REQBUFS + QUERYBUF + EXPBUF` 探测；等待真实 sensor/media pipeline 出帧后，优先验证 MPLANE `bytesused`、stride、plane fd 和 timestamp，再进入 MPP import。
-4. **Web 异常恢复体验补充**：已覆盖短 smoke 的 WebSocket 停止后重连和 codec server 重启恢复；后续按实际 UI 体验决定是否增加 Gateway codec health 广播。
+1. **多路录制架构纠偏**：✅ 已按 [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md) 将当前单 `RecordingSessionManager` 状态演进为 `stream_id -> RecordingSession`，避免后续 USB + MIPI 同时录制时共享 writer、encoder 和错误状态；RK3576 `recording_session_manager_test` 27/27 通过。
+2. **统一板端 smoke 回归**：`scripts/rk3576-board-smoke-suite.sh` 已把 `codec-mp4`、`web-record-mp4` 和 `web-codec-restart-mp4` 纳入默认套件；后续 codec 相关改动必须至少跑对应单项 smoke。
+3. **DataPlaneV2 低拷贝录制设计**：接入 DataPlaneV2 前，先明确 copy path 与 fd path 的选择条件、fallback 行为、MPP import 输入契约和 release 时序；多路场景下所有 lease/release/status key 必须包含稳定 `stream_id`。
+4. **MIPI/RKISP 输入准备**：MPLANE readiness 已通过 RKISP/RKVpss `REQBUFS + QUERYBUF + EXPBUF` 探测；等待真实 sensor/media pipeline 出帧后，优先验证 MPLANE `bytesused`、stride、plane fd 和 timestamp，再进入 MPP import。
+5. **Web 异常恢复体验补充**：已覆盖短 smoke 的 WebSocket 停止后重连和 codec server 重启恢复；后续按实际 UI 体验决定是否增加 Gateway codec health 广播。
 
 当前实现边界：
 
@@ -934,6 +935,7 @@ RK3576 60 秒录制稳定性结果：
 2. RK3576 交叉构建中 `camera_codec_server` 会链接 MPP；主机构建仍只依赖 C++ 标准库和 pthread，并通过 stub 保持可测试。
 3. 当前 RK3576 运行验证证明 USB MJPEG live payload 可以进入 MPP JPEG decode 和 MPP H.264 encode；后续重点转向生产化保活、低拷贝录制路径和真实 MIPI/RKISP 输入。
 4. `scripts/build-rk3576.sh` 已显式打开 `CAMERA_SUBSYSTEM_BUILD_CODEC_SERVER=ON`，用于保证板端产物持续构建；根 CMake 默认仍保持关闭，避免影响普通开发构建。
+5. 当前录制运行时已完成多 session 第一阶段；生产化并发录制还需要补最大并发路数、硬件资源错误映射、Web 多 stream 控制和真实多 camera 板端 smoke。
 
 ## 17. MVP 范围
 

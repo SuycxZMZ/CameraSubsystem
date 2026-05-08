@@ -1,9 +1,9 @@
 # CameraSubsystem 架构评审与建议
 
-**文档版本:** v0.5<br>
-**评审范围:** 当前主干代码与项目文档（截至 2026-04-27）<br>
+**文档版本:** v0.6<br>
+**评审范围:** 当前主干代码与项目文档（截至 2026-05-08）<br>
 **评审角色:** 高级系统架构师<br>
-**关联文档:** [README.md](../README.md)、[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)、[DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)、[CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)、[API_REFERENCE.md](../API_REFERENCE.md)
+**关联文档:** [README.md](../README.md)、[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)、[MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md)、[DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)、[CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)、[API_REFERENCE.md](../API_REFERENCE.md)
 
 > **文档硬规范**
 >
@@ -51,6 +51,7 @@
 2. 将背压、队列、优先级和延迟阈值从硬编码能力升级为可配置策略。
 3. 补齐设备断连、订阅端异常、核心发布端重启后的恢复闭环。
 4. 建立统一 Metrics/Tracing 接口，否则不同板端和不同采集后端的问题很难定位。
+5. 在继续扩展 MIPI/RKISP live、低拷贝录制或多路 Web UI 前，先完成 [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md) 定义的多路身份模型和 publisher 运行时纠偏。
 
 ---
 
@@ -109,6 +110,9 @@
 
 5. **多路 Camera 能力探测还停留在文档层**
    平台能力模型和建议上限 API 有草案，但尚未接入启动流程，也缺少按平台、传感器和采集后端维护的标定数据。
+
+6. **多路摄像头运行时仍存在单路假设**
+   `CameraSessionManager` 的 endpoint 模型已经具备多路表达能力，但当前 publisher app 仍以单全局 `CameraSource` 承接 start/stop；DataPlaneV2 部分 pending lease 仍有裸 `frame_id` key 风险；codec server 录制管理仍是单 session 模型。多路 USB + MIPI 同时接入前，必须先按 [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md) 完成 `CameraStreamIdentity`、`stream_id -> CameraStreamRuntime` 和多路 release key 纠偏。
 
 ---
 
@@ -236,6 +240,7 @@
 | ARCH-010C | MPLANE DMA-BUF 探测 | 进行中 | 已新增 `mplane_dmabuf_probe`，RKISP/RKVpss MPLANE 节点 `REQBUFS + QUERYBUF + EXPBUF` 成功；STREAMON 仍依赖真实 MIPI sensor/media pipeline |
 | ARCH-010D | H.264 录制编码服务 | 设计中 | 新增 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)，规划独立 `camera_codec_server` 订阅原始流，Web Preview 只转发录制控制；第一阶段以 USB JPEG/MJPEG -> H.264 文件落盘打通链路，MIPI/RKISP NV12 DMA-BUF 低拷贝路径后续扩展 |
 | ARCH-011 | 多路能力探测 | 计划中 | 接入启动流程与平台标定 |
+| ARCH-011A | 多路摄像头身份与运行时纠偏 | 进行中 | 已新增 [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md)，M1 身份模型基础贯通、M2 publisher 示例 `stream_id -> CameraStreamRuntime`、M3 DataPlaneV2/release 多字段 key、M4 codec 多 session 第一阶段均已完成；下一步进入板端多 stream smoke 或 Web 多 stream 状态 |
 | ARCH-012 | 线程亲和性 | 计划中 | 采集/分发线程绑定策略 |
 | ARCH-018 | 发布端/订阅端解耦 | 基础落地 | 补生产级协议与异常恢复 |
 | ARCH-019 | 按订阅启停 Camera | 基础落地 | 补防抖 grace period 与失败回滚 |
@@ -249,11 +254,13 @@
 下一阶段建议以“板端可控原型”为目标，而不是继续扩大功能面。
 
 1. `CameraSessionManager` start/stop 回调不再持锁执行，并补充并发订阅/退订测试。
-2. 文档和 API 明确当前数据面是示例复制链路，新增生产数据面设计草案。
-3. `FrameBroker` 支持可配置队列上限、DropPolicy、慢消费者统计。
-4. 统一输出最小 metrics：采集 FPS、发布 FPS、队列深度、丢帧数、发送失败数、端到端延迟。
-5. RK3576 Debian 12 板端完成 `camera_publisher_example` / `camera_subscriber_example` copy 与 DataPlaneV2 最小运行验证，并通过 `dmabuf_smoke_test` 验证 DMA-BUF export、lease、CPU mmap 和 sync 行为。
-6. 设备断连或 `/dev/videoX` 不可用时，发布端能输出明确错误状态并保持进程可控退出或等待恢复。
+2. 完成 `CameraStreamIdentity` 和 `stream_id -> CameraStreamRuntime` 基础改造，确保一路启动/停止不会影响其他 stream。
+3. DataPlaneV2 pending lease 与 ReleaseFrame tracker 不再使用裸 `frame_id` 作为全局键。
+4. 文档和 API 明确当前数据面是示例复制链路，新增生产数据面设计草案。
+5. `FrameBroker` 支持可配置队列上限、DropPolicy、慢消费者统计。
+6. 统一输出最小 metrics：采集 FPS、发布 FPS、队列深度、丢帧数、发送失败数、端到端延迟，并带 `stream_id` 标签。
+7. RK3576 Debian 12 板端完成 `camera_publisher_example` / `camera_subscriber_example` copy 与 DataPlaneV2 最小运行验证，并通过 `dmabuf_smoke_test` 验证 DMA-BUF export、lease、CPU mmap 和 sync 行为。
+8. 设备断连或 `/dev/videoX` 不可用时，发布端能输出明确错误状态并保持进程可控退出或等待恢复。
 
 ---
 

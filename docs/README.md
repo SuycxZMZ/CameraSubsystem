@@ -1,6 +1,6 @@
 # CameraSubsystem 文档索引
 
-**最后更新:** 2026-05-05
+**最后更新:** 2026-05-08
 
 > **文档硬规范**
 >
@@ -10,6 +10,7 @@
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
 > - 评审建议、风险、ARCH-* 跟踪项只维护在 [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)，其他文档只链接引用，避免重复漂移。
+> - Git 提交信息必须遵循项目既有风格：标题使用 `[类别] 简短动词短语`，正文使用 2-3 条 `- ` 列表说明主要修改范围；不要写“验证：XXX”这类独立验证段落，也不要附带外部 AI 生成标记。
 
 ---
 
@@ -34,10 +35,11 @@
 
 1. [../README.md](../README.md)
 2. [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)
-3. [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)
-4. [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)
-5. [../structure.md](../structure.md)
-6. [../API_REFERENCE.md](../API_REFERENCE.md)
+3. [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md)
+4. [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)
+5. [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)
+6. [../structure.md](../structure.md)
+7. [../API_REFERENCE.md](../API_REFERENCE.md)
 
 ### 做代码开发
 
@@ -71,6 +73,7 @@
 | [../README.md](../README.md) | 团队入口、工程结构、常用命令、当前事实摘要 | 长篇设计细节、评审建议全集、API 全量说明 |
 | [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) | 项目定位、技术栈、功能边界、快速开始 | 风险优先级、ARCH-* 详细跟踪 |
 | [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) | 系统/代码架构评审、风险、建议、ARCH-* 跟踪 | 基础使用教程、接口完整定义 |
+| [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md) | USB + MIPI 多路摄像头同时接入的目标架构、当前偏差、身份模型和迁移计划 | 单路 smoke 命令、底层 DMA-BUF fd 生命周期细节 |
 | [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md) | DMA-BUF 数据面阶段性设计与验证记录，包含 RK3576 验证、FrameLease、DataPlaneV2、RGA/MPP import 边界 | H.264 编码录制架构、当前完成度统计、接口全量参考 |
 | [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md) | H.264 编码录制服务架构，包含 `camera_codec_server`、Web 录制控制、USB 首阶段链路和 MIPI/RKISP 扩展路径 | DMA-BUF 底层协议细节、具体 C++ 实现 |
 | [BOARD_WEB_DEBUG_GUIDE.md](BOARD_WEB_DEBUG_GUIDE.md) | RK3576 板端 Web Preview、录制联调、统一部署目录和 smoke / stability 调试流程 | 架构取舍、API 全量说明、长期路线图 |

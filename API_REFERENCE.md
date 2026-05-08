@@ -161,6 +161,7 @@ struct FrameDescriptor
 {
     uint64_t frame_id;
     uint32_t camera_id;
+    std::array<char, kCameraStreamIdMaxLength> stream_id;
     uint64_t timestamp_ns;
     uint32_t sequence;
 
@@ -193,8 +194,9 @@ struct FramePacket
 约束：
 
 1. `MemoryType::kDmaBuf` 场景下必须存在有效 fd，且每个有效 plane 必须通过 `fd_index` 指向 `fds`。
-2. `FrameDescriptor` 描述可访问句柄和布局，不表达底层 V4L2 buffer 的所有权。
-3. 底层 buffer 复用权由 `FrameLease` 控制，消费者释放 lease 后生产端才允许 QBUF。
+2. `stream_id` 是多路摄像头路由的稳定字符串 ID；`camera_id` 只作为 numeric 兼容字段，业务层不能只依赖裸 `frame_id` 做全局唯一键。
+3. `FrameDescriptor` 描述可访问句柄和布局，不表达底层 V4L2 buffer 的所有权。
+4. 底层 buffer 复用权由 `FrameLease` 控制，消费者释放 lease 后生产端才允许 QBUF。
 
 ### 2.7 FrameLease 生命周期接口
 
@@ -404,6 +406,9 @@ explicit CameraSource(uint32_t camera_id);
  * @return 成功返回 true,失败返回 false
  */
 bool Initialize(const CameraConfig& config);
+
+void SetStreamIdentity(const CameraStreamIdentity& identity);
+CameraStreamIdentity GetStreamIdentity() const;
 ```
 
 ### 4.3 流控制
@@ -1270,7 +1275,7 @@ int main()
 
 核心能力：
 - 核心发布端单实例注册与反注册
-- 按 CameraEndpoint 维护订阅引用计数
+- 按 `CameraEndpoint` 维护订阅引用计数；`CameraEndpoint::stream_id` 是控制面路由和日志追踪的稳定流身份
 - 首次订阅触发 start 回调，最后退订触发 stop 回调
 
 关键接口：
@@ -1292,6 +1297,8 @@ int main()
 协议头文件：
 - `include/camera_subsystem/ipc/camera_control_ipc.h`
 - `include/camera_subsystem/ipc/camera_channel_contract.h`
+
+`CameraEndpoint` 当前包含 `camera_id`、`bus_type`、`bus_index`、`device_path` 和 `stream_id`。未显式设置 `stream_id` 时，helper 会按 bus 类型与序号生成默认值，例如 `default0`、`usb0`、`mipi0`。
 
 服务端与客户端：
 - `CameraControlServer`：`include/camera_subsystem/ipc/camera_control_server.h`
@@ -1365,6 +1372,7 @@ struct CameraDataFrameDescriptorV2
     uint32_t flags;
     uint32_t reserved1;
     CameraDataPlaneDescriptorV2 planes[kCameraDataV2MaxPlanes];
+    char stream_id_text[kCameraStreamIdMaxLength];
 };
 
 struct CameraReleaseFrameV2
