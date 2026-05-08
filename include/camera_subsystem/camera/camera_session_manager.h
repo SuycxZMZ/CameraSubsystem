@@ -62,6 +62,7 @@ private:
         uint32_t bus_type;
         uint32_t bus_index;
         std::string device_path;
+        std::string stream_id;
 
         bool operator==(const EndpointKey& other) const;
     };

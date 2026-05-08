@@ -338,10 +338,22 @@ CameraControlResponse CameraControlServer::ProcessRequest(int client_fd,
 
     CameraEndpoint endpoint = request.endpoint;
     endpoint.device_path[sizeof(endpoint.device_path) - 1] = '\0';
+    endpoint.stream_id[sizeof(endpoint.stream_id) - 1] = '\0';
+    if (endpoint.stream_id[0] == '\0')
+    {
+        SetEndpointStreamId(&endpoint, nullptr);
+    }
 
     bool ok = false;
     if (request.command == CameraControlCommand::kSubscribe)
     {
+        platform::PlatformLogger::Log(core::LogLevel::kInfo,
+                                      "camera_control_server",
+                                      "subscribe request: client=%s stream=%s camera_id=%u path=%s",
+                                      client_id.c_str(),
+                                      endpoint.stream_id,
+                                      endpoint.camera_id,
+                                      endpoint.device_path);
         ok = session_manager_->Subscribe(client_id, request.role, endpoint);
         if (ok)
         {
@@ -351,6 +363,13 @@ CameraControlResponse CameraControlServer::ProcessRequest(int client_fd,
     }
     else if (request.command == CameraControlCommand::kUnsubscribe)
     {
+        platform::PlatformLogger::Log(core::LogLevel::kInfo,
+                                      "camera_control_server",
+                                      "unsubscribe request: client=%s stream=%s camera_id=%u path=%s",
+                                      client_id.c_str(),
+                                      endpoint.stream_id,
+                                      endpoint.camera_id,
+                                      endpoint.device_path);
         ok = session_manager_->Unsubscribe(client_id, endpoint);
         if (ok)
         {
@@ -426,7 +445,8 @@ bool CameraControlServer::EndpointEquals(const CameraEndpoint& lhs, const Camera
     return lhs.camera_id == rhs.camera_id &&
            lhs.bus_type == rhs.bus_type &&
            lhs.bus_index == rhs.bus_index &&
-           std::strncmp(lhs.device_path, rhs.device_path, sizeof(lhs.device_path)) == 0;
+           std::strncmp(lhs.device_path, rhs.device_path, sizeof(lhs.device_path)) == 0 &&
+           std::strncmp(lhs.stream_id, rhs.stream_id, sizeof(lhs.stream_id)) == 0;
 }
 
 bool CameraControlServer::ReadFull(int fd, void* buffer, size_t length)

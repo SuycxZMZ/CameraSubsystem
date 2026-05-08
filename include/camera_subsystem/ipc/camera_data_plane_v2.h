@@ -82,7 +82,7 @@ struct CameraDataFrameDescriptorV2
     uint32_t reserved1;
 
     CameraDataPlaneDescriptorV2 planes[kCameraDataV2MaxPlanes];
-    uint8_t reserved2[64];
+    char stream_id_text[core::kCameraStreamIdMaxLength];
 };
 
 struct CameraReleaseFrameV2

@@ -49,6 +49,7 @@ uint32_t EffectiveCapabilities(const v4l2_capability& cap)
 
 CameraSource::CameraSource()
     : config_()
+    , stream_identity_(core::MakeDefaultCameraStreamIdentity())
     , device_path_("/dev/video0")
     , device_fd_(-1)
     , streaming_(false)
@@ -234,6 +235,20 @@ std::string CameraSource::GetDevicePath() const
     return device_path_;
 }
 
+void CameraSource::SetStreamIdentity(const core::CameraStreamIdentity& identity)
+{
+    if (is_running_ || !core::IsCameraStreamIdentityValid(identity))
+    {
+        return;
+    }
+    stream_identity_ = identity;
+}
+
+core::CameraStreamIdentity CameraSource::GetStreamIdentity() const
+{
+    return stream_identity_;
+}
+
 core::CameraConfig CameraSource::GetConfig() const
 {
     return config_;
@@ -365,7 +380,7 @@ void CameraSource::HandleDequeuedBufferCopy(struct v4l2_buffer& buf)
 
     const uint64_t frame_id = frame_count_.fetch_add(1);
     frame.frame_id_ = static_cast<uint32_t>(frame_id);
-    frame.camera_id_ = 0;
+    frame.camera_id_ = stream_identity_.camera_id;
     frame.timestamp_ns_ = GetTimestampNs();
     frame.width_ = config_.width_;
     frame.height_ = config_.height_;
@@ -446,7 +461,7 @@ bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf)
     core::FrameHandle frame;
     frame.Reset();
     frame.frame_id_ = static_cast<uint32_t>(frame_id);
-    frame.camera_id_ = 0;
+    frame.camera_id_ = stream_identity_.camera_id;
     frame.timestamp_ns_ = GetTimestampNs();
     frame.width_ = config_.width_;
     frame.height_ = config_.height_;
@@ -461,6 +476,7 @@ bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf)
     core::FrameDescriptor descriptor;
     descriptor.frame_id = frame_id;
     descriptor.camera_id = frame.camera_id_;
+    descriptor.stream_id = stream_identity_.stream_id;
     descriptor.timestamp_ns = frame.timestamp_ns_;
     descriptor.sequence = frame.sequence_;
     descriptor.width = frame.width_;

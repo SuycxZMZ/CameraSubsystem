@@ -414,10 +414,11 @@ int main(int argc, char* argv[])
     }
 
     PlatformLogger::Log(LogLevel::kInfo, "subscriber",
-                        "subscriber started, client_id=%s, output_dir=%s, device=%s, "
+                        "subscriber started, client_id=%s, output_dir=%s, stream=%s, device=%s, "
                         "data_plane=%s, process_delay_ms=%u, release_delay_ms=%u, "
                         "release_disconnect_after_frames=%" PRIu64,
-                        client_id.c_str(), output_dir_path.c_str(), endpoint.device_path,
+                        client_id.c_str(), output_dir_path.c_str(), endpoint.stream_id,
+                        endpoint.device_path,
                         data_plane_mode == DataPlaneMode::kV2DmaBuf ? "v2" : "v1",
                         process_delay_ms, release_delay_ms, release_disconnect_after_frames);
     PlatformLogger::Log(LogLevel::kInfo, "subscriber",

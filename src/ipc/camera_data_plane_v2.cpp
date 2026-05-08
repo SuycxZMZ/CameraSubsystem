@@ -112,6 +112,10 @@ CameraDataFrameDescriptorV2 MakeCameraDataFrameDescriptorV2(
     data.version = kCameraDataV2Version;
     data.header_size = sizeof(CameraDataFrameDescriptorV2);
     data.stream_id = descriptor.camera_id;
+    const size_t stream_id_size =
+        strnlen(descriptor.stream_id.data(), core::kCameraStreamIdMaxLength);
+    const size_t stream_id_copy_size = std::min(stream_id_size, sizeof(data.stream_id_text) - 1);
+    std::memcpy(data.stream_id_text, descriptor.stream_id.data(), stream_id_copy_size);
     data.frame_id = descriptor.frame_id;
     data.buffer_id = descriptor.buffer_id;
     data.timestamp_ns = descriptor.timestamp_ns;
@@ -150,6 +154,11 @@ bool IsCameraDataFrameDescriptorV2Valid(const CameraDataFrameDescriptorV2& descr
         descriptor.fd_count == 0 ||
         descriptor.fd_count > kCameraDataV2MaxFds ||
         descriptor.total_bytes_used == 0)
+    {
+        return false;
+    }
+
+    if (descriptor.stream_id_text[0] == '\0')
     {
         return false;
     }

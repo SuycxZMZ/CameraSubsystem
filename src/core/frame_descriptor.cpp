@@ -6,7 +6,7 @@ namespace core {
 bool FrameDescriptor::IsValid() const
 {
     // 基本字段校验：尺寸、格式、plane 数量、总字节数
-    if (width == 0 || height == 0 || pixel_format == PixelFormat::kUnknown ||
+    if (stream_id[0] == '\0' || width == 0 || height == 0 || pixel_format == PixelFormat::kUnknown ||
         plane_count == 0 || plane_count > kMaxFramePlanes || total_bytes_used == 0)
     {
         return false;

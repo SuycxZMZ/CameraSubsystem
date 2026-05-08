@@ -6,10 +6,30 @@
 
 using namespace camera_subsystem::core;
 
+TEST(CameraStreamIdentityTest, DefaultIdentityUsesStableStreamId)
+{
+    const CameraStreamIdentity identity = MakeDefaultCameraStreamIdentity();
+
+    EXPECT_EQ(identity.camera_id, 0u);
+    EXPECT_EQ(GetCameraStreamId(identity), "default0");
+    EXPECT_TRUE(IsCameraStreamIdentityValid(identity));
+}
+
+TEST(CameraStreamIdentityTest, CustomIdentityPreservesRoutingFields)
+{
+    const CameraStreamIdentity identity = MakeCameraStreamIdentity("usb0", 7, 2, 0);
+
+    EXPECT_EQ(identity.camera_id, 7u);
+    EXPECT_EQ(identity.bus_type, 2u);
+    EXPECT_EQ(identity.bus_index, 0u);
+    EXPECT_EQ(GetCameraStreamId(identity), "usb0");
+}
+
 TEST(FrameDescriptorTest, DmaBufDescriptorValidity)
 {
     FrameDescriptor descriptor;
     descriptor.frame_id = 42;
+    descriptor.stream_id = MakeDefaultCameraStreamIdentity().stream_id;
     descriptor.width = 1920;
     descriptor.height = 1080;
     descriptor.pixel_format = PixelFormat::kNV12;
@@ -26,6 +46,10 @@ TEST(FrameDescriptorTest, DmaBufDescriptorValidity)
     descriptor.total_bytes_used = 1920 * 1080;
 
     EXPECT_TRUE(descriptor.IsValid());
+
+    descriptor.stream_id.fill('\0');
+    EXPECT_FALSE(descriptor.IsValid());
+    descriptor.stream_id = MakeDefaultCameraStreamIdentity().stream_id;
 
     descriptor.fds[0] = -1;
     EXPECT_FALSE(descriptor.IsValid());
@@ -56,6 +80,7 @@ TEST(FrameDescriptorTest, MultiPlaneDmaBufDescriptorValidity)
 {
     FrameDescriptor descriptor;
     descriptor.frame_id = 43;
+    descriptor.stream_id = MakeCameraStreamIdentity("mipi0_main", 1).stream_id;
     descriptor.width = 1920;
     descriptor.height = 1080;
     descriptor.pixel_format = PixelFormat::kNV12;
@@ -93,6 +118,7 @@ TEST(DmaBufSyncHelperTest, InvalidFdFails)
 TEST(FrameDescriptorTest, FramePacketRequiresLease)
 {
     FramePacket packet;
+    packet.descriptor.stream_id = MakeDefaultCameraStreamIdentity().stream_id;
     packet.descriptor.width = 640;
     packet.descriptor.height = 480;
     packet.descriptor.pixel_format = PixelFormat::kMJPEG;

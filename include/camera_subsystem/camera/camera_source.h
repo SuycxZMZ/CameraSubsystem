@@ -10,6 +10,7 @@
 
 #include "camera_subsystem/core/buffer_guard.h"
 #include "camera_subsystem/core/camera_config.h"
+#include "camera_subsystem/core/camera_stream_identity.h"
 #include "camera_subsystem/core/frame_descriptor.h"
 #include "camera_subsystem/core/frame_handle.h"
 
@@ -55,6 +56,8 @@ public:
 
     void SetDevicePath(const std::string& device_path);
     std::string GetDevicePath() const;
+    void SetStreamIdentity(const core::CameraStreamIdentity& identity);
+    core::CameraStreamIdentity GetStreamIdentity() const;
 
     void SetFrameCallback(FrameCallback callback);
     void SetFrameCallbackWithBuffer(FrameCallbackWithBuffer callback);
@@ -102,6 +105,7 @@ private:
     core::PixelFormat FromV4L2PixelFormat(uint32_t format) const;
 
     core::CameraConfig config_;
+    core::CameraStreamIdentity stream_identity_;
     std::string device_path_;
     int device_fd_;
     bool streaming_;

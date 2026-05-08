@@ -86,6 +86,7 @@ protected:
                 std::lock_guard<std::mutex> lock(records_mutex_);
                 ++start_count_;
                 started_paths_.push_back(endpoint.device_path);
+                started_stream_ids_.push_back(endpoint.stream_id);
                 return true;
             },
             [&](const CameraEndpoint& endpoint)
@@ -93,6 +94,7 @@ protected:
                 std::lock_guard<std::mutex> lock(records_mutex_);
                 ++stop_count_;
                 stopped_paths_.push_back(endpoint.device_path);
+                stopped_stream_ids_.push_back(endpoint.stream_id);
             });
 
         ASSERT_TRUE(session_manager_->RegisterCorePublisher("publisher_core_test"));
@@ -147,6 +149,8 @@ protected:
     uint32_t stop_count_ = 0;
     std::vector<std::string> started_paths_;
     std::vector<std::string> stopped_paths_;
+    std::vector<std::string> started_stream_ids_;
+    std::vector<std::string> stopped_stream_ids_;
 };
 
 } // namespace
@@ -178,6 +182,10 @@ TEST_F(CameraControlIpcFixture, SubscribeAndUnsubscribe)
         EXPECT_EQ(stop_count_, 1u);
         EXPECT_EQ(started_paths_[0], "/dev/video0");
         EXPECT_EQ(stopped_paths_[0], "/dev/video0");
+        ASSERT_EQ(started_stream_ids_.size(), 1u);
+        ASSERT_EQ(stopped_stream_ids_.size(), 1u);
+        EXPECT_EQ(started_stream_ids_[0], "usb0");
+        EXPECT_EQ(stopped_stream_ids_[0], "usb0");
     }
 }
 

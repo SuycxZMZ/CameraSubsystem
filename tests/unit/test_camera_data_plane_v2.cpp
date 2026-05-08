@@ -24,6 +24,7 @@ FrameDescriptor MakeTestDescriptor(int fd)
     FrameDescriptor descriptor;
     descriptor.frame_id = 100;
     descriptor.camera_id = 3;
+    descriptor.stream_id = MakeCameraStreamIdentity("usb0", descriptor.camera_id).stream_id;
     descriptor.timestamp_ns = 123456789;
     descriptor.sequence = 77;
     descriptor.width = 640;
@@ -119,6 +120,7 @@ TEST(CameraDataPlaneV2Test, DescriptorMappingPreservesFrameMetadata)
     EXPECT_EQ(descriptor.magic, kCameraDataV2Magic);
     EXPECT_EQ(descriptor.version, kCameraDataV2Version);
     EXPECT_EQ(descriptor.stream_id, source.camera_id);
+    EXPECT_STREQ(descriptor.stream_id_text, "usb0");
     EXPECT_EQ(descriptor.frame_id, source.frame_id);
     EXPECT_EQ(descriptor.buffer_id, source.buffer_id);
     EXPECT_EQ(descriptor.consumer_id, 0u);
@@ -251,6 +253,48 @@ TEST(CameraReleaseTrackerTest, TracksDuplicateReleaseBeforeReclaim)
     const CameraReleaseTrackerStats stats = tracker.GetStats();
     EXPECT_EQ(stats.duplicate_releases, 1u);
     EXPECT_EQ(tracker.PendingFrameCount(), 1u);
+}
+
+TEST(CameraReleaseTrackerTest, SeparatesSameFrameAndBufferAcrossStreams)
+{
+    CameraReleaseTracker tracker(std::chrono::milliseconds(100));
+    ASSERT_TRUE(tracker.RegisterFrame(1, 30, 5, {7}));
+    ASSERT_TRUE(tracker.RegisterFrame(2, 30, 5, {7}));
+
+    const CameraReleaseFrameV2 release_stream_1 =
+        MakeCameraReleaseFrameV2(1, 30, 5, 7, CameraReleaseStatus::kOk, 0);
+    const auto reclaims_stream_1 = tracker.MarkReleased(release_stream_1);
+    ASSERT_EQ(reclaims_stream_1.size(), 1u);
+    EXPECT_EQ(reclaims_stream_1[0].stream_id, 1u);
+    EXPECT_EQ(tracker.PendingFrameCount(), 1u);
+
+    const CameraReleaseFrameV2 release_stream_2 =
+        MakeCameraReleaseFrameV2(2, 30, 5, 7, CameraReleaseStatus::kOk, 0);
+    const auto reclaims_stream_2 = tracker.MarkReleased(release_stream_2);
+    ASSERT_EQ(reclaims_stream_2.size(), 1u);
+    EXPECT_EQ(reclaims_stream_2[0].stream_id, 2u);
+    EXPECT_EQ(tracker.PendingFrameCount(), 0u);
+}
+
+TEST(CameraReleaseTrackerTest, SeparatesSameStreamAndFrameAcrossBuffers)
+{
+    CameraReleaseTracker tracker(std::chrono::milliseconds(100));
+    ASSERT_TRUE(tracker.RegisterFrame(1, 31, 5, {7}));
+    ASSERT_TRUE(tracker.RegisterFrame(1, 31, 6, {7}));
+
+    const CameraReleaseFrameV2 release_buffer_5 =
+        MakeCameraReleaseFrameV2(1, 31, 5, 7, CameraReleaseStatus::kOk, 0);
+    const auto reclaims_buffer_5 = tracker.MarkReleased(release_buffer_5);
+    ASSERT_EQ(reclaims_buffer_5.size(), 1u);
+    EXPECT_EQ(reclaims_buffer_5[0].buffer_id, 5u);
+    EXPECT_EQ(tracker.PendingFrameCount(), 1u);
+
+    const CameraReleaseFrameV2 release_buffer_6 =
+        MakeCameraReleaseFrameV2(1, 31, 6, 7, CameraReleaseStatus::kOk, 0);
+    const auto reclaims_buffer_6 = tracker.MarkReleased(release_buffer_6);
+    ASSERT_EQ(reclaims_buffer_6.size(), 1u);
+    EXPECT_EQ(reclaims_buffer_6[0].buffer_id, 6u);
+    EXPECT_EQ(tracker.PendingFrameCount(), 0u);
 }
 
 TEST(CameraReleaseServerTest, ReceivesReleaseAndEmitsReclaim)

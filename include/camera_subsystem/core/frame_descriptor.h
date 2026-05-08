@@ -16,6 +16,7 @@
 #ifndef CAMERA_SUBSYSTEM_CORE_FRAME_DESCRIPTOR_H
 #define CAMERA_SUBSYSTEM_CORE_FRAME_DESCRIPTOR_H
 
+#include "camera_subsystem/core/camera_stream_identity.h"
 #include "camera_subsystem/core/frame_handle.h"
 #include "camera_subsystem/core/types.h"
 
@@ -73,6 +74,7 @@ struct FrameDescriptor
     // --- 帧标识与时间 ---
     uint64_t frame_id = 0;       ///< 帧序号，全局递增
     uint32_t camera_id = 0;      ///< 摄像头 ID / 流 ID
+    std::array<char, kCameraStreamIdMaxLength> stream_id{}; ///< 稳定流 ID，跨模块路由使用
     uint64_t timestamp_ns = 0;   ///< 采集时间戳（纳秒，来自 V4L2 DQBUF 或 CLOCK_MONOTONIC）
     uint32_t sequence = 0;       ///< V4L2 sequence 号，驱动填充
 

@@ -158,3 +158,52 @@ TEST(CameraSessionManagerTest, EmptyDevicePathFallsBackToDefaultCamera)
     EXPECT_TRUE(manager.Subscribe("sub_0", CameraClientRole::kSubscriber, endpoint));
     EXPECT_EQ(start_count, 1u);
 }
+
+TEST(CameraSessionManagerTest, StreamIdSeparatesSessionsForSameDevice)
+{
+    uint32_t start_count = 0;
+    uint32_t stop_count = 0;
+    std::vector<std::string> started_streams;
+    std::vector<std::string> stopped_streams;
+
+    CameraSessionManager manager(
+        [&](const CameraEndpoint& endpoint)
+        {
+            ++start_count;
+            started_streams.emplace_back(endpoint.stream_id);
+            return true;
+        },
+        [&](const CameraEndpoint& endpoint)
+        {
+            ++stop_count;
+            stopped_streams.emplace_back(endpoint.stream_id);
+        });
+
+    CameraEndpoint main_stream = MakeEndpoint(0, "/dev/video0");
+    camera_subsystem::ipc::SetEndpointStreamId(&main_stream, "usb0_main");
+    CameraEndpoint aux_stream = MakeEndpoint(0, "/dev/video0");
+    camera_subsystem::ipc::SetEndpointStreamId(&aux_stream, "usb0_aux");
+
+    ASSERT_TRUE(manager.RegisterCorePublisher("publisher_core_0"));
+    EXPECT_TRUE(manager.Subscribe("main", CameraClientRole::kSubscriber, main_stream));
+    EXPECT_TRUE(manager.Subscribe("aux", CameraClientRole::kSubscriber, aux_stream));
+
+    EXPECT_EQ(start_count, 2u);
+    EXPECT_EQ(manager.ListSessions().size(), 2u);
+    EXPECT_EQ(manager.GetSubscriberCount(main_stream), 1u);
+    EXPECT_EQ(manager.GetSubscriberCount(aux_stream), 1u);
+
+    EXPECT_TRUE(manager.Unsubscribe("main", main_stream));
+    EXPECT_EQ(stop_count, 1u);
+    EXPECT_EQ(manager.GetSubscriberCount(aux_stream), 1u);
+
+    EXPECT_TRUE(manager.Unsubscribe("aux", aux_stream));
+    EXPECT_EQ(stop_count, 2u);
+
+    ASSERT_EQ(started_streams.size(), 2u);
+    ASSERT_EQ(stopped_streams.size(), 2u);
+    EXPECT_EQ(started_streams[0], "usb0_main");
+    EXPECT_EQ(started_streams[1], "usb0_aux");
+    EXPECT_EQ(stopped_streams[0], "usb0_main");
+    EXPECT_EQ(stopped_streams[1], "usb0_aux");
+}

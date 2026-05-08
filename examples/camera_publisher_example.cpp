@@ -59,6 +59,7 @@ namespace
 using camera_subsystem::camera::CameraSessionManager;
 using camera_subsystem::camera::CameraSource;
 using camera_subsystem::core::CameraConfig;
+using camera_subsystem::core::CameraStreamIdentity;
 using camera_subsystem::core::FrameHandle;
 using camera_subsystem::core::FrameLease;
 using camera_subsystem::core::IoMethod;
@@ -70,6 +71,7 @@ using camera_subsystem::ipc::CameraEndpoint;
 using camera_subsystem::ipc::CameraReleaseStatus;
 using camera_subsystem::ipc::CameraReleaseServer;
 using camera_subsystem::ipc::MakeCameraDataFrameDescriptorV2;
+using camera_subsystem::ipc::MakeCameraStreamIdentityFromEndpoint;
 using camera_subsystem::ipc::SendCameraDataFrameDescriptorV2;
 using camera_subsystem::ipc::kCameraDataMagic;
 using camera_subsystem::ipc::kCameraDataVersion;
@@ -447,6 +449,43 @@ struct PublisherStats
     std::atomic<uint64_t> send_fail_count{0};
 };
 
+struct PendingLeaseKey
+{
+    uint32_t stream_id = 0;
+    uint64_t frame_id = 0;
+    uint32_t buffer_id = 0;
+
+    bool operator==(const PendingLeaseKey& other) const
+    {
+        return stream_id == other.stream_id &&
+               frame_id == other.frame_id &&
+               buffer_id == other.buffer_id;
+    }
+};
+
+struct PendingLeaseKeyHash
+{
+    size_t operator()(const PendingLeaseKey& key) const
+    {
+        size_t seed = std::hash<uint32_t>{}(key.stream_id);
+        seed ^= std::hash<uint64_t>{}(key.frame_id) + 0x9e3779b97f4a7c15ULL +
+                (seed << 6) + (seed >> 2);
+        seed ^= std::hash<uint32_t>{}(key.buffer_id) + 0x9e3779b97f4a7c15ULL +
+                (seed << 6) + (seed >> 2);
+        return seed;
+    }
+};
+
+struct CameraStreamRuntime
+{
+    std::mutex mutex;
+    CameraSource source;
+    CameraStreamIdentity identity;
+    std::unordered_map<PendingLeaseKey, std::shared_ptr<FrameLease>, PendingLeaseKeyHash>
+        pending_leases;
+    bool callbacks_configured = false;
+};
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -559,17 +598,16 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    CameraSource camera_source;
     CameraConfig config = CameraConfig::GetDefault();
     config.fps_ = 30;
     config.buffer_count_ = 4;
     config.io_method_ = static_cast<uint32_t>(io_method);
 
     PublisherStats stats;
-    std::mutex camera_mutex;
+    std::mutex runtimes_mutex;
+    std::unordered_map<std::string, std::shared_ptr<CameraStreamRuntime>> runtimes_by_stream;
+    std::unordered_map<uint32_t, std::weak_ptr<CameraStreamRuntime>> runtimes_by_camera_id;
     CameraReleaseServer release_server(std::chrono::milliseconds(1000));
-    std::mutex lease_mutex;
-    std::unordered_map<uint64_t, std::shared_ptr<FrameLease>> pending_leases;
     if (io_method == IoMethod::kDmaBuf)
     {
         if (!release_server.Start(
@@ -577,13 +615,26 @@ int main(int argc, char* argv[])
                 [&](const camera_subsystem::ipc::CameraReleaseReclaim& reclaim)
                 {
                     std::shared_ptr<FrameLease> lease;
+                    std::shared_ptr<CameraStreamRuntime> runtime;
                     {
-                        std::lock_guard<std::mutex> lock(lease_mutex);
-                        auto it = pending_leases.find(reclaim.frame_id);
-                        if (it != pending_leases.end())
+                        std::lock_guard<std::mutex> lock(runtimes_mutex);
+                        auto it = runtimes_by_camera_id.find(reclaim.stream_id);
+                        if (it != runtimes_by_camera_id.end())
+                        {
+                            runtime = it->second.lock();
+                        }
+                    }
+                    if (runtime)
+                    {
+                        std::lock_guard<std::mutex> lock(runtime->mutex);
+                        const PendingLeaseKey key{reclaim.stream_id,
+                                                  reclaim.frame_id,
+                                                  reclaim.buffer_id};
+                        auto it = runtime->pending_leases.find(key);
+                        if (it != runtime->pending_leases.end())
                         {
                             lease = std::move(it->second);
-                            pending_leases.erase(it);
+                            runtime->pending_leases.erase(it);
                         }
                     }
                     if (lease)
@@ -617,155 +668,235 @@ int main(int argc, char* argv[])
         }
     }
 
-    camera_source.SetFrameCallbackWithBuffer(
-        [&](const FrameHandle& frame,
-            const std::shared_ptr<camera_subsystem::core::BufferGuard>& /*buffer_ref*/)
+    auto configure_runtime_callbacks =
+        [&](const std::shared_ptr<CameraStreamRuntime>& runtime)
         {
-            if (!frame.IsValid() || frame.virtual_address_ == nullptr || frame.buffer_size_ == 0)
+            if (!runtime || runtime->callbacks_configured)
             {
                 return;
             }
 
-            stats.frame_count.fetch_add(1);
-
-            CameraDataFrameHeader header;
-            std::memset(&header, 0, sizeof(header));
-            header.magic = kCameraDataMagic;
-            header.version = kCameraDataVersion;
-            header.width = frame.width_;
-            header.height = frame.height_;
-            header.pixel_format = static_cast<uint32_t>(frame.format_);
-            header.frame_size = static_cast<uint32_t>(frame.buffer_size_);
-            header.frame_id = frame.frame_id_;
-            header.timestamp_ns = frame.timestamp_ns_;
-            header.sequence = frame.sequence_;
-
-            const std::vector<int> clients = data_server.GetClientsSnapshot();
-            for (const int fd : clients)
-            {
-                const bool header_ok = WriteFull(fd, &header, sizeof(header));
-                const bool body_ok = header_ok &&
-                                     WriteFull(fd, frame.virtual_address_, frame.buffer_size_);
-                if (!header_ok || !body_ok)
+            std::weak_ptr<CameraStreamRuntime> weak_runtime = runtime;
+            runtime->source.SetFrameCallbackWithBuffer(
+                [&](const FrameHandle& frame,
+                    const std::shared_ptr<camera_subsystem::core::BufferGuard>& /*buffer_ref*/)
                 {
-                    data_server.RemoveClient(fd);
-                    stats.send_fail_count.fetch_add(1);
-                    continue;
-                }
-                stats.sent_bytes.fetch_add(frame.buffer_size_);
-            }
-        });
-
-    // DMA-BUF 模式：注册 FramePacketCallback 接收零拷贝帧
-    if (io_method == IoMethod::kDmaBuf)
-    {
-        camera_source.SetFramePacketCallback(
-            [&](const camera_subsystem::core::FramePacket& packet)
-            {
-                stats.frame_count.fetch_add(1);
-                stats.dmabuf_frame_count.fetch_add(1);
-
-                const auto& desc = packet.descriptor;
-                if (!use_data_plane_v2)
-                {
-                    PlatformLogger::Log(LogLevel::kDebug, "publisher",
-                                        "dmabuf frame: id=%" PRIu64 " buf=%u fd=%d bytes=%" PRIu64,
-                                        desc.frame_id, desc.buffer_id,
-                                        desc.fd_count > 0 ? desc.fds[0] : -1,
-                                        desc.total_bytes_used);
-                    return;
-                }
-
-                const std::vector<DataPlaneV2SocketServer::Client> clients =
-                    data_v2_server.GetClientsSnapshot();
-                if (clients.empty())
-                {
-                    return;
-                }
-
-                std::vector<uint32_t> consumer_ids;
-                consumer_ids.reserve(clients.size());
-                for (const auto& client : clients)
-                {
-                    consumer_ids.push_back(client.consumer_id);
-                }
-
-                {
-                    std::lock_guard<std::mutex> lock(lease_mutex);
-                    pending_leases[desc.frame_id] = packet.lease;
-                }
-
-                if (!release_server.RegisterFrame(
-                        desc.camera_id,
-                        desc.frame_id,
-                        desc.buffer_id,
-                        consumer_ids))
-                {
-                    std::lock_guard<std::mutex> lock(lease_mutex);
-                    pending_leases.erase(desc.frame_id);
-                    return;
-                }
-
-                auto descriptor_v2 = MakeCameraDataFrameDescriptorV2(desc);
-                for (const auto& client : clients)
-                {
-                    descriptor_v2.consumer_id = client.consumer_id;
-                    if (!SendCameraDataFrameDescriptorV2(
-                            client.fd,
-                            descriptor_v2,
-                            desc.fds.data(),
-                            desc.fd_count))
+                    if (!frame.IsValid() || frame.virtual_address_ == nullptr ||
+                        frame.buffer_size_ == 0)
                     {
-                        data_v2_server.RemoveClient(client.consumer_id);
-                        release_server.ReclaimConsumerDisconnected(client.consumer_id);
-                        stats.v2_send_fail_count.fetch_add(1);
-                        continue;
+                        return;
                     }
-                    stats.v2_sent_frames.fetch_add(1);
-                }
 
-                PlatformLogger::Log(LogLevel::kDebug, "publisher",
-                                    "dmabuf v2 frame: id=%" PRIu64 " buf=%u fd=%d bytes=%" PRIu64,
-                                    desc.frame_id, desc.buffer_id,
-                                    desc.fd_count > 0 ? desc.fds[0] : -1,
-                                    desc.total_bytes_used);
-            });
-    }
+                    stats.frame_count.fetch_add(1);
+
+                    CameraDataFrameHeader header;
+                    std::memset(&header, 0, sizeof(header));
+                    header.magic = kCameraDataMagic;
+                    header.version = kCameraDataVersion;
+                    header.width = frame.width_;
+                    header.height = frame.height_;
+                    header.pixel_format = static_cast<uint32_t>(frame.format_);
+                    header.frame_size = static_cast<uint32_t>(frame.buffer_size_);
+                    header.frame_id = frame.frame_id_;
+                    header.timestamp_ns = frame.timestamp_ns_;
+                    header.sequence = frame.sequence_;
+
+                    const std::vector<int> clients = data_server.GetClientsSnapshot();
+                    for (const int fd : clients)
+                    {
+                        const bool header_ok = WriteFull(fd, &header, sizeof(header));
+                        const bool body_ok = header_ok &&
+                                             WriteFull(fd, frame.virtual_address_, frame.buffer_size_);
+                        if (!header_ok || !body_ok)
+                        {
+                            data_server.RemoveClient(fd);
+                            stats.send_fail_count.fetch_add(1);
+                            continue;
+                        }
+                        stats.sent_bytes.fetch_add(frame.buffer_size_);
+                    }
+                });
+
+            if (io_method == IoMethod::kDmaBuf)
+            {
+                runtime->source.SetFramePacketCallback(
+                    [&, weak_runtime](const camera_subsystem::core::FramePacket& packet)
+                    {
+                        stats.frame_count.fetch_add(1);
+                        stats.dmabuf_frame_count.fetch_add(1);
+
+                        const auto& desc = packet.descriptor;
+                        if (!use_data_plane_v2)
+                        {
+                            PlatformLogger::Log(LogLevel::kDebug, "publisher",
+                                                "dmabuf frame: stream=%s id=%" PRIu64
+                                                " buf=%u fd=%d bytes=%" PRIu64,
+                                                desc.stream_id.data(),
+                                                desc.frame_id,
+                                                desc.buffer_id,
+                                                desc.fd_count > 0 ? desc.fds[0] : -1,
+                                                desc.total_bytes_used);
+                            return;
+                        }
+
+                        const std::vector<DataPlaneV2SocketServer::Client> clients =
+                            data_v2_server.GetClientsSnapshot();
+                        if (clients.empty())
+                        {
+                            return;
+                        }
+
+                        std::vector<uint32_t> consumer_ids;
+                        consumer_ids.reserve(clients.size());
+                        for (const auto& client : clients)
+                        {
+                            consumer_ids.push_back(client.consumer_id);
+                        }
+
+                        auto runtime = weak_runtime.lock();
+                        if (!runtime)
+                        {
+                            return;
+                        }
+
+                        {
+                            std::lock_guard<std::mutex> lock(runtime->mutex);
+                            const PendingLeaseKey key{desc.camera_id,
+                                                      desc.frame_id,
+                                                      desc.buffer_id};
+                            runtime->pending_leases[key] = packet.lease;
+                        }
+
+                        if (!release_server.RegisterFrame(
+                                desc.camera_id,
+                                desc.frame_id,
+                                desc.buffer_id,
+                                consumer_ids))
+                        {
+                            std::lock_guard<std::mutex> lock(runtime->mutex);
+                            const PendingLeaseKey key{desc.camera_id,
+                                                      desc.frame_id,
+                                                      desc.buffer_id};
+                            runtime->pending_leases.erase(key);
+                            return;
+                        }
+
+                        auto descriptor_v2 = MakeCameraDataFrameDescriptorV2(desc);
+                        for (const auto& client : clients)
+                        {
+                            descriptor_v2.consumer_id = client.consumer_id;
+                            if (!SendCameraDataFrameDescriptorV2(
+                                    client.fd,
+                                    descriptor_v2,
+                                    desc.fds.data(),
+                                    desc.fd_count))
+                            {
+                                data_v2_server.RemoveClient(client.consumer_id);
+                                release_server.ReclaimConsumerDisconnected(client.consumer_id);
+                                stats.v2_send_fail_count.fetch_add(1);
+                                continue;
+                            }
+                            stats.v2_sent_frames.fetch_add(1);
+                        }
+
+                        PlatformLogger::Log(LogLevel::kDebug, "publisher",
+                                            "dmabuf v2 frame: stream=%s id=%" PRIu64
+                                            " buf=%u fd=%d bytes=%" PRIu64,
+                                            desc.stream_id.data(),
+                                            desc.frame_id,
+                                            desc.buffer_id,
+                                            desc.fd_count > 0 ? desc.fds[0] : -1,
+                                            desc.total_bytes_used);
+                    });
+            }
+
+            runtime->callbacks_configured = true;
+        };
 
     CameraSessionManager session_manager(
         [&](const CameraEndpoint& endpoint)
         {
-            std::lock_guard<std::mutex> lock(camera_mutex);
+            const CameraStreamIdentity identity = MakeCameraStreamIdentityFromEndpoint(endpoint);
+            const std::string stream_id = identity.stream_id.data();
 
-            camera_source.Stop();
-            camera_source.SetDevicePath(endpoint.device_path);
+            std::shared_ptr<CameraStreamRuntime> runtime;
+            {
+                std::lock_guard<std::mutex> lock(runtimes_mutex);
+                auto it = runtimes_by_stream.find(stream_id);
+                if (it == runtimes_by_stream.end())
+                {
+                    runtime = std::make_shared<CameraStreamRuntime>();
+                    runtime->identity = identity;
+                    configure_runtime_callbacks(runtime);
+                    runtimes_by_stream.emplace(stream_id, runtime);
+                    runtimes_by_camera_id[identity.camera_id] = runtime;
+                }
+                else
+                {
+                    runtime = it->second;
+                }
+            }
 
-            if (!camera_source.Initialize(config))
+            std::lock_guard<std::mutex> lock(runtime->mutex);
+            if (runtime->source.IsRunning())
+            {
+                PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                                    "CameraSource already running, stream=%s camera_id=%u device=%s",
+                                    identity.stream_id.data(),
+                                    identity.camera_id,
+                                    endpoint.device_path);
+                return true;
+            }
+
+            runtime->source.SetStreamIdentity(identity);
+            runtime->source.SetDevicePath(endpoint.device_path);
+
+            if (!runtime->source.Initialize(config))
             {
                 PlatformLogger::Log(LogLevel::kError, "publisher",
-                                    "CameraSource initialize failed, device=%s",
+                                    "CameraSource initialize failed, stream=%s device=%s",
+                                    identity.stream_id.data(),
                                     endpoint.device_path);
                 return false;
             }
 
-            if (!camera_source.Start())
+            if (!runtime->source.Start())
             {
                 PlatformLogger::Log(LogLevel::kError, "publisher",
-                                    "CameraSource start failed, device=%s",
+                                    "CameraSource start failed, stream=%s device=%s",
+                                    identity.stream_id.data(),
                                     endpoint.device_path);
                 return false;
             }
 
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
-                                "CameraSource started, device=%s", endpoint.device_path);
+                                "CameraSource started, stream=%s camera_id=%u device=%s",
+                                identity.stream_id.data(),
+                                identity.camera_id,
+                                endpoint.device_path);
             return true;
         },
         [&](const CameraEndpoint& endpoint)
         {
-            std::lock_guard<std::mutex> lock(camera_mutex);
-            camera_source.Stop();
+            const CameraStreamIdentity identity = MakeCameraStreamIdentityFromEndpoint(endpoint);
+            std::shared_ptr<CameraStreamRuntime> runtime;
+            {
+                std::lock_guard<std::mutex> lock(runtimes_mutex);
+                auto it = runtimes_by_stream.find(identity.stream_id.data());
+                if (it != runtimes_by_stream.end())
+                {
+                    runtime = it->second;
+                }
+            }
+            if (runtime)
+            {
+                std::lock_guard<std::mutex> lock(runtime->mutex);
+                runtime->source.Stop();
+            }
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
-                                "CameraSource stopped, device=%s", endpoint.device_path);
+                                "CameraSource stopped, stream=%s device=%s",
+                                identity.stream_id.data(),
+                                endpoint.device_path);
         });
 
     if (!session_manager.RegisterCorePublisher("camera_publisher_core"))
@@ -816,6 +947,32 @@ int main(int argc, char* argv[])
 
         if (io_method == IoMethod::kDmaBuf)
         {
+            bool dmabuf_enabled = false;
+            uint64_t dmabuf_frames = 0;
+            uint64_t export_failures = 0;
+            uint64_t lease_exhausted = 0;
+            size_t active_leases = 0;
+            size_t lease_in_flight_max = 0;
+            size_t min_queued = 0;
+            {
+                std::lock_guard<std::mutex> lock(runtimes_mutex);
+                for (const auto& item : runtimes_by_stream)
+                {
+                    const auto& runtime = item.second;
+                    if (!runtime)
+                    {
+                        continue;
+                    }
+                    dmabuf_enabled = dmabuf_enabled || runtime->source.IsDmaBufPathEnabled();
+                    dmabuf_frames += runtime->source.GetDmaBufFrameCount();
+                    export_failures += runtime->source.GetDmaBufExportFailureCount();
+                    lease_exhausted += runtime->source.GetDmaBufLeaseExhaustedCount();
+                    active_leases += runtime->source.GetDmaBufActiveLeaseCount();
+                    lease_in_flight_max = std::max(lease_in_flight_max,
+                                                   runtime->source.GetDmaBufLeaseInFlightMax());
+                    min_queued += runtime->source.GetDmaBufMinQueuedCaptureBuffers();
+                }
+            }
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
                                 "sec=%" PRIu64 " | frames=%" PRIu64 " | fps=%" PRIu64
                                 " | clients=%zu | sent_bytes=%" PRIu64 " | send_fail=%" PRIu64
@@ -829,13 +986,13 @@ int main(int argc, char* argv[])
                                 use_data_plane_v2 ? data_v2_server.GetClientCount()
                                                   : data_server.GetClientCount(),
                                 stats.sent_bytes.load(), stats.send_fail_count.load(),
-                                camera_source.IsDmaBufPathEnabled() ? 1U : 0U,
-                                camera_source.GetDmaBufFrameCount(),
-                                camera_source.GetDmaBufExportFailureCount(),
-                                camera_source.GetDmaBufLeaseExhaustedCount(),
-                                camera_source.GetDmaBufActiveLeaseCount(),
-                                camera_source.GetDmaBufLeaseInFlightMax(),
-                                camera_source.GetDmaBufMinQueuedCaptureBuffers(),
+                                dmabuf_enabled ? 1U : 0U,
+                                dmabuf_frames,
+                                export_failures,
+                                lease_exhausted,
+                                active_leases,
+                                lease_in_flight_max,
+                                min_queued,
                                 stats.v2_sent_frames.load(),
                                 stats.v2_send_fail_count.load(),
                                 release_server.PendingFrameCount(),
@@ -860,13 +1017,20 @@ int main(int argc, char* argv[])
     data_v2_server.Stop();
 
     {
-        std::lock_guard<std::mutex> lock(lease_mutex);
-        pending_leases.clear();
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(camera_mutex);
-        camera_source.Stop();
+        std::lock_guard<std::mutex> lock(runtimes_mutex);
+        for (const auto& item : runtimes_by_stream)
+        {
+            const auto& runtime = item.second;
+            if (!runtime)
+            {
+                continue;
+            }
+            std::lock_guard<std::mutex> runtime_lock(runtime->mutex);
+            runtime->source.Stop();
+            runtime->pending_leases.clear();
+        }
+        runtimes_by_camera_id.clear();
+        runtimes_by_stream.clear();
     }
 
     (void)session_manager.UnregisterCorePublisher("camera_publisher_core");

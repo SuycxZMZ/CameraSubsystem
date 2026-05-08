@@ -8,6 +8,9 @@
 #ifndef CAMERA_SUBSYSTEM_IPC_CAMERA_CHANNEL_CONTRACT_H
 #define CAMERA_SUBSYSTEM_IPC_CAMERA_CHANNEL_CONTRACT_H
 
+#include "camera_subsystem/core/camera_stream_identity.h"
+
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 
@@ -48,8 +51,49 @@ struct CameraEndpoint
     CameraBusType bus_type;
     uint32_t bus_index;
     char device_path[kCameraDevicePathMaxLength];
+    char stream_id[core::kCameraStreamIdMaxLength];
     uint8_t reserved[32];
 };
+
+inline const char* CameraBusTypeToStreamPrefix(CameraBusType bus_type)
+{
+    switch (bus_type)
+    {
+        case CameraBusType::kMipi:
+            return "mipi";
+        case CameraBusType::kUsb:
+            return "usb";
+        case CameraBusType::kVirtual:
+            return "virtual";
+        case CameraBusType::kPlatformPrivate:
+            return "platform";
+        case CameraBusType::kDefault:
+            return "default";
+    }
+    return "default";
+}
+
+inline void SetEndpointStreamId(CameraEndpoint* endpoint, const char* stream_id)
+{
+    if (endpoint == nullptr)
+    {
+        return;
+    }
+
+    std::memset(endpoint->stream_id, 0, sizeof(endpoint->stream_id));
+    if (stream_id && stream_id[0] != '\0')
+    {
+        const size_t length = strnlen(stream_id, sizeof(endpoint->stream_id) - 1);
+        std::memcpy(endpoint->stream_id, stream_id, length);
+        return;
+    }
+
+    (void)std::snprintf(endpoint->stream_id,
+                        sizeof(endpoint->stream_id),
+                        "%s%u",
+                        CameraBusTypeToStreamPrefix(endpoint->bus_type),
+                        endpoint->bus_index);
+}
 
 /**
  * @brief 控制面订阅/退订请求（最小定义）
@@ -71,6 +115,7 @@ inline CameraEndpoint MakeDefaultCameraEndpoint(uint32_t camera_id = 0)
     std::memset(endpoint.device_path, 0, sizeof(endpoint.device_path));
     std::strncpy(endpoint.device_path, CAMERA_SUBSYSTEM_DEFAULT_CAMERA,
                  sizeof(endpoint.device_path) - 1);
+    SetEndpointStreamId(&endpoint, nullptr);
     std::memset(endpoint.reserved, 0, sizeof(endpoint.reserved));
     return endpoint;
 }
@@ -96,13 +141,23 @@ inline CameraEndpoint MakeCameraEndpoint(uint32_t camera_id,
                      sizeof(endpoint.device_path) - 1);
     }
 
+    SetEndpointStreamId(&endpoint, nullptr);
     std::memset(endpoint.reserved, 0, sizeof(endpoint.reserved));
     return endpoint;
 }
 
 inline bool IsEndpointValid(const CameraEndpoint& endpoint)
 {
-    return endpoint.device_path[0] != '\0';
+    return endpoint.device_path[0] != '\0' && endpoint.stream_id[0] != '\0';
+}
+
+inline core::CameraStreamIdentity MakeCameraStreamIdentityFromEndpoint(
+    const CameraEndpoint& endpoint)
+{
+    return core::MakeCameraStreamIdentity(endpoint.stream_id,
+                                          endpoint.camera_id,
+                                          static_cast<uint32_t>(endpoint.bus_type),
+                                          endpoint.bus_index);
 }
 
 } // namespace ipc

@@ -141,7 +141,8 @@ bool CameraSessionManager::Subscribe(const std::string& client_id,
                 start_ok = false;
                 platform::PlatformLogger::Log(core::LogLevel::kError,
                                               "camera_session_manager",
-                                              "Start callback exception: %s",
+                                              "Start callback exception: stream=%s error=%s",
+                                              session.endpoint.stream_id,
                                               e.what());
             }
             catch (...)
@@ -149,7 +150,8 @@ bool CameraSessionManager::Subscribe(const std::string& client_id,
                 start_ok = false;
                 platform::PlatformLogger::Log(core::LogLevel::kError,
                                               "camera_session_manager",
-                                              "Start callback exception: unknown");
+                                              "Start callback exception: stream=%s error=unknown",
+                                              session.endpoint.stream_id);
             }
         }
 
@@ -161,7 +163,8 @@ bool CameraSessionManager::Subscribe(const std::string& client_id,
             }
             platform::PlatformLogger::Log(core::LogLevel::kError,
                                           "camera_session_manager",
-                                          "Start callback failed for camera_id=%u path=%s",
+                                          "Start callback failed for stream=%s camera_id=%u path=%s",
+                                          session.endpoint.stream_id,
                                           session.endpoint.camera_id,
                                           session.endpoint.device_path);
             return false;
@@ -217,14 +220,16 @@ bool CameraSessionManager::Unsubscribe(const std::string& client_id,
         {
             platform::PlatformLogger::Log(core::LogLevel::kError,
                                           "camera_session_manager",
-                                          "Stop callback exception: %s",
+                                          "Stop callback exception: stream=%s error=%s",
+                                          session.endpoint.stream_id,
                                           e.what());
         }
         catch (...)
         {
             platform::PlatformLogger::Log(core::LogLevel::kError,
                                           "camera_session_manager",
-                                          "Stop callback exception: unknown");
+                                          "Stop callback exception: stream=%s error=unknown",
+                                          session.endpoint.stream_id);
         }
     }
 
@@ -289,7 +294,8 @@ bool CameraSessionManager::EndpointKey::operator==(const EndpointKey& other) con
     return camera_id == other.camera_id &&
            bus_type == other.bus_type &&
            bus_index == other.bus_index &&
-           device_path == other.device_path;
+           device_path == other.device_path &&
+           stream_id == other.stream_id;
 }
 
 size_t CameraSessionManager::EndpointKeyHasher::operator()(const EndpointKey& key) const
@@ -305,6 +311,7 @@ size_t CameraSessionManager::EndpointKeyHasher::operator()(const EndpointKey& ke
     hash_combine(std::hash<uint32_t>{}(key.bus_type));
     hash_combine(std::hash<uint32_t>{}(key.bus_index));
     hash_combine(std::hash<std::string>{}(key.device_path));
+    hash_combine(std::hash<std::string>{}(key.stream_id));
     return seed;
 }
 
@@ -316,6 +323,7 @@ CameraSessionManager::BuildEndpointKey(const ipc::CameraEndpoint& endpoint)
     key.bus_type = static_cast<uint32_t>(endpoint.bus_type);
     key.bus_index = endpoint.bus_index;
     key.device_path = endpoint.device_path;
+    key.stream_id = endpoint.stream_id;
     return key;
 }
 
@@ -323,6 +331,7 @@ ipc::CameraEndpoint CameraSessionManager::NormalizeEndpoint(const ipc::CameraEnd
 {
     ipc::CameraEndpoint normalized = endpoint;
     normalized.device_path[sizeof(normalized.device_path) - 1] = '\0';
+    normalized.stream_id[sizeof(normalized.stream_id) - 1] = '\0';
 
     if (normalized.device_path[0] == '\0')
     {
@@ -330,6 +339,10 @@ ipc::CameraEndpoint CameraSessionManager::NormalizeEndpoint(const ipc::CameraEnd
                                              endpoint.bus_type,
                                              endpoint.bus_index,
                                              CAMERA_SUBSYSTEM_DEFAULT_CAMERA);
+    }
+    else if (normalized.stream_id[0] == '\0')
+    {
+        ipc::SetEndpointStreamId(&normalized, nullptr);
     }
 
     return normalized;

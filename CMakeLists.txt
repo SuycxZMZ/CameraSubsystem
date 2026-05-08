@@ -47,6 +47,7 @@ set(CAMERA_SUBSYSTEM_WARNING_FLAGS
 # 源文件
 set(CORE_SOURCES
     src/core/types.cpp
+    src/core/camera_stream_identity.cpp
     src/core/dma_buf_sync.cpp
     src/core/frame_handle.cpp
     src/core/frame_descriptor.cpp
