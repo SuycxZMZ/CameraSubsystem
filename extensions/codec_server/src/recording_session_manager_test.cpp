@@ -166,6 +166,45 @@ static void TestMp4ContainerStartStop()
     fs::remove_all(dir);
 }
 
+static void TestMultipleIndependentSessions()
+{
+    const std::string dir = MakeTempDir() + "/multi";
+    RecordingSessionConfig config;
+    config.default_output_dir = dir;
+    RecordingSessionManager manager(config);
+
+    auto cam0_start = MakeRequest(CodecControlCommand::kStartRecording, "cam_multi_0", "");
+    auto cam1_start = MakeRequest(CodecControlCommand::kStartRecording, "cam_multi_1", "");
+
+    auto cam0_status = manager.StartRecording(cam0_start);
+    auto cam1_status = manager.StartRecording(cam1_start);
+    Report("MultipleIndependentSessions: cam0 starts",
+           cam0_status.recording && cam0_status.state == "recording");
+    Report("MultipleIndependentSessions: cam1 starts while cam0 recording",
+           cam1_status.recording && cam1_status.state == "recording");
+    Report("MultipleIndependentSessions: files are per stream",
+           cam0_status.file.find("cam_multi_0") != std::string::npos &&
+               cam1_status.file.find("cam_multi_1") != std::string::npos &&
+               cam0_status.file != cam1_status.file);
+
+    auto cam0_stop = MakeRequest(CodecControlCommand::kStopRecording, "cam_multi_0", "");
+    cam0_status = manager.StopRecording(cam0_stop);
+    Report("MultipleIndependentSessions: stopping cam0 leaves cam0 idle",
+           !cam0_status.recording && cam0_status.state == "idle");
+
+    auto cam1_query = MakeRequest(CodecControlCommand::kStatus, "cam_multi_1", "");
+    cam1_status = manager.GetStatus(cam1_query);
+    Report("MultipleIndependentSessions: cam1 remains recording",
+           cam1_status.recording && cam1_status.state == "recording");
+
+    auto cam1_stop = MakeRequest(CodecControlCommand::kStopRecording, "cam_multi_1", "");
+    cam1_status = manager.StopRecording(cam1_stop);
+    Report("MultipleIndependentSessions: stopping cam1 leaves cam1 idle",
+           !cam1_status.recording && cam1_status.state == "idle");
+
+    fs::remove_all(dir);
+}
+
 static void TestCodecControlProfileProtocol()
 {
     CodecControlRequest request;
@@ -219,6 +258,7 @@ int main()
     TestInvalidStreamId();
     TestProfilePriority();
     TestMp4ContainerStartStop();
+    TestMultipleIndependentSessions();
     TestCodecControlProfileProtocol();
 
     std::cout << "\n====================================\n";

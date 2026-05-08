@@ -10,8 +10,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "camera_subsystem/ipc/camera_data_ipc.h"
@@ -44,41 +46,54 @@ private:
         kMp4,
     };
 
-    CodecControlStatus BuildStatusLocked(const CodecControlRequest& request,
+    struct RecordingSession
+    {
+        mutable std::mutex mutex;
+        mutable std::mutex pipeline_mutex;
+        RecordingFileWriter writer;
+        Mp4FileWriter mp4_writer;
+        CameraStreamSubscriber subscriber;
+        JpegDecodeStage jpeg_decoder;
+        H264MppEncoder h264_encoder;
+        std::string state = "idle";
+        std::string stream_id;
+        std::string file_path;
+        std::string output_dir;
+        ActiveContainer active_container = ActiveContainer::kRawH264;
+        CodecControlProfile active_profile;
+        std::chrono::steady_clock::time_point started_at{};
+        uint64_t last_duration_ms = 0;
+        std::atomic<uint64_t> encoded_frames{0};
+        std::atomic<uint64_t> dropped_frames{0};
+        uint64_t input_frames = 0;
+        std::atomic<uint64_t> decoded_frames{0};
+        std::atomic<uint64_t> decode_failures{0};
+        std::string last_error;
+    };
+
+    using RecordingSessionPtr = std::shared_ptr<RecordingSession>;
+
+    RecordingSessionPtr GetOrCreateSessionLocked(const std::string& stream_id);
+    RecordingSessionPtr FindSessionLocked(const std::string& stream_id) const;
+    CodecControlStatus BuildStatusLocked(RecordingSession& session,
+                                         const CodecControlRequest& request,
                                          const std::string& error) const;
-    void HandleInputFrame(const camera_subsystem::ipc::CameraDataFrameHeader& header,
+    void HandleInputFrame(RecordingSession& session,
+                          const camera_subsystem::ipc::CameraDataFrameHeader& header,
                           const std::vector<uint8_t>& payload);
-    H264EncoderConfig BuildEncoderConfig(const DecodedImageFrame& frame) const;
-    WriterStats GetActiveWriterStatsLocked() const;
-    std::string GetActiveContainerName() const;
-    bool EnsureMp4WriterOpenLocked(const DecodedImageFrame& frame);
-    bool WritePacketLocked(const EncodedPacket& packet);
-    uint64_t GetDurationMsLocked() const;
+    H264EncoderConfig BuildEncoderConfig(const RecordingSession& session,
+                                         const DecodedImageFrame& frame) const;
+    WriterStats GetActiveWriterStatsLocked(const RecordingSession& session) const;
+    static std::string GetActiveContainerName(const RecordingSession& session);
+    bool EnsureMp4WriterOpenLocked(RecordingSession& session, const DecodedImageFrame& frame);
+    bool WritePacketLocked(RecordingSession& session, const EncodedPacket& packet);
+    static uint64_t GetDurationMsLocked(const RecordingSession& session);
     static std::string MapWriterError(WriterResult result);
     static std::string MapMp4WriterError(Mp4WriterResult result);
 
     RecordingSessionConfig config_;
     mutable std::mutex mutex_;
-    mutable std::mutex pipeline_mutex_;
-    RecordingFileWriter writer_;
-    Mp4FileWriter mp4_writer_;
-    CameraStreamSubscriber subscriber_;
-    JpegDecodeStage jpeg_decoder_;
-    H264MppEncoder h264_encoder_;
-    std::string state_ = "idle";
-    std::string stream_id_;
-    std::string file_path_;
-    std::string output_dir_;
-    ActiveContainer active_container_ = ActiveContainer::kRawH264;
-    CodecControlProfile active_profile_;
-    std::chrono::steady_clock::time_point started_at_{};
-    uint64_t last_duration_ms_ = 0;
-    std::atomic<uint64_t> encoded_frames_{0};
-    std::atomic<uint64_t> dropped_frames_{0};
-    uint64_t input_frames_ = 0;
-    std::atomic<uint64_t> decoded_frames_{0};
-    std::atomic<uint64_t> decode_failures_{0};
-    std::string last_error_;
+    std::unordered_map<std::string, RecordingSessionPtr> sessions_;
 };
 
 } // namespace camera_subsystem::extensions::codec_server

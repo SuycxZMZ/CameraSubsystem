@@ -28,227 +28,302 @@ RecordingSessionManager::RecordingSessionManager(RecordingSessionConfig config)
 {
 }
 
+RecordingSessionManager::RecordingSessionPtr
+RecordingSessionManager::GetOrCreateSessionLocked(const std::string& stream_id)
+{
+    auto it = sessions_.find(stream_id);
+    if (it != sessions_.end())
+    {
+        return it->second;
+    }
+
+    auto session = std::make_shared<RecordingSession>();
+    session->stream_id = stream_id;
+    sessions_.emplace(stream_id, session);
+    return session;
+}
+
+RecordingSessionManager::RecordingSessionPtr
+RecordingSessionManager::FindSessionLocked(const std::string& stream_id) const
+{
+    auto it = sessions_.find(stream_id);
+    if (it == sessions_.end())
+    {
+        return nullptr;
+    }
+    return it->second;
+}
+
 CodecControlStatus RecordingSessionManager::StartRecording(
     const CodecControlRequest& request)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    if (state_ == "recording" || state_ == "starting" || state_ == "stopping")
+    RecordingSessionPtr session;
     {
-        return BuildStatusLocked(request, "already_recording");
+        std::lock_guard<std::mutex> lock(mutex_);
+        session = GetOrCreateSessionLocked(request.stream_id);
+    }
+
+    std::lock_guard<std::mutex> lock(session->mutex);
+
+    if (session->state == "recording" || session->state == "starting" ||
+        session->state == "stopping")
+    {
+        return BuildStatusLocked(*session, request, "already_recording");
     }
 
     if (!IsValidStreamId(request.stream_id))
     {
-        state_ = "error";
-        stream_id_ = request.stream_id;
-        last_error_ = "invalid_stream_id";
-        return BuildStatusLocked(request, last_error_);
+        session->state = "error";
+        session->stream_id = request.stream_id;
+        session->last_error = "invalid_stream_id";
+        return BuildStatusLocked(*session, request, session->last_error);
     }
 
-    state_ = "starting";
-    stream_id_ = request.stream_id;
-    active_profile_ = {};
-    active_profile_.fps = request.profile.fps > 0 ? request.profile.fps : config_.fps;
-    active_profile_.bitrate =
+    session->state = "starting";
+    session->stream_id = request.stream_id;
+    session->active_profile = {};
+    session->active_profile.fps = request.profile.fps > 0 ? request.profile.fps : config_.fps;
+    session->active_profile.bitrate =
         request.profile.bitrate > 0 ? request.profile.bitrate : config_.bitrate;
-    active_profile_.gop = request.profile.gop > 0 ? request.profile.gop : config_.gop;
-    started_at_ = std::chrono::steady_clock::now();
-    last_duration_ms_ = 0;
-    encoded_frames_.store(0);
-    dropped_frames_.store(0);
-    input_frames_ = 0;
-    decoded_frames_.store(0);
-    decode_failures_.store(0);
-    last_error_.clear();
-    active_container_ = request.container == "mp4" ? ActiveContainer::kMp4 : ActiveContainer::kRawH264;
+    session->active_profile.gop = request.profile.gop > 0 ? request.profile.gop : config_.gop;
+    session->started_at = std::chrono::steady_clock::now();
+    session->last_duration_ms = 0;
+    session->encoded_frames.store(0);
+    session->dropped_frames.store(0);
+    session->input_frames = 0;
+    session->decoded_frames.store(0);
+    session->decode_failures.store(0);
+    session->last_error.clear();
+    session->active_container =
+        request.container == "mp4" ? ActiveContainer::kMp4 : ActiveContainer::kRawH264;
 
-    output_dir_ =
+    session->output_dir =
         request.output_dir.empty() ? config_.default_output_dir : request.output_dir;
-    if (active_container_ == ActiveContainer::kRawH264)
+    if (session->active_container == ActiveContainer::kRawH264)
     {
         RecordingFileWriterOptions writer_options;
         writer_options.file_extension = ".h264";
-        const WriterResult result = writer_.Open(request.stream_id, output_dir_, writer_options);
+        const WriterResult result =
+            session->writer.Open(request.stream_id, session->output_dir, writer_options);
         if (result != WriterResult::kOk)
         {
-            state_ = "error";
-            last_error_ = MapWriterError(result);
-            file_path_.clear();
-            return BuildStatusLocked(request, last_error_);
+            session->state = "error";
+            session->last_error = MapWriterError(result);
+            session->file_path.clear();
+            return BuildStatusLocked(*session, request, session->last_error);
         }
-        file_path_ = writer_.GetFilePath();
+        session->file_path = session->writer.GetFilePath();
     }
     else
     {
-        file_path_.clear();
+        session->file_path.clear();
     }
     if (config_.enable_camera_subscriber)
     {
         CameraStreamSubscriberConfig subscriber_config = config_.subscriber;
         subscriber_config.client_id = "camera_codec_server_" + request.stream_id;
+        std::weak_ptr<RecordingSession> weak_session = session;
         subscriber_config.frame_callback =
-            [this](const camera_subsystem::ipc::CameraDataFrameHeader& header,
+            [this, weak_session](const camera_subsystem::ipc::CameraDataFrameHeader& header,
                    const std::vector<uint8_t>& payload) {
-                HandleInputFrame(header, payload);
+                if (auto session = weak_session.lock())
+                {
+                    HandleInputFrame(*session, header, payload);
+                }
             };
-        if (!subscriber_.Start(subscriber_config))
+        if (!session->subscriber.Start(subscriber_config))
         {
-            (void)writer_.Close();
-            (void)mp4_writer_.Close();
-            state_ = "error";
-            last_error_ = "stream_not_found";
-            return BuildStatusLocked(request, last_error_);
+            (void)session->writer.Close();
+            (void)session->mp4_writer.Close();
+            session->state = "error";
+            session->last_error = "stream_not_found";
+            return BuildStatusLocked(*session, request, session->last_error);
         }
     }
 
-    state_ = "recording";
-    return BuildStatusLocked(request, std::string());
+    session->state = "recording";
+    return BuildStatusLocked(*session, request, std::string());
 }
 
 CodecControlStatus RecordingSessionManager::StopRecording(
     const CodecControlRequest& request)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    RecordingSessionPtr session;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        session = FindSessionLocked(request.stream_id);
+    }
+    if (!session)
+    {
+        CodecControlStatus status;
+        status.request_id = request.request_id;
+        status.stream_id = request.stream_id;
+        status.state = "idle";
+        status.codec = request.codec.empty() ? "h264" : request.codec;
+        status.container = request.container == "mp4" ? "mp4" : "raw_h264";
+        status.error = "not_recording";
+        return status;
+    }
 
-    if (state_ == "idle")
+    std::lock_guard<std::mutex> lock(session->mutex);
+
+    if (session->state == "idle")
     {
-        return BuildStatusLocked(request, "not_recording");
+        return BuildStatusLocked(*session, request, "not_recording");
     }
-    if (state_ == "error")
+    if (session->state == "error")
     {
-        state_ = "idle";
-        return BuildStatusLocked(request, last_error_);
+        session->state = "idle";
+        return BuildStatusLocked(*session, request, session->last_error);
     }
 
-    state_ = "stopping";
-    last_duration_ms_ = GetDurationMsLocked();
-    subscriber_.Stop();
+    session->state = "stopping";
+    session->last_duration_ms = GetDurationMsLocked(*session);
+    session->subscriber.Stop();
     {
-        std::lock_guard<std::mutex> pipeline_lock(pipeline_mutex_);
-        h264_encoder_.Close();
+        std::lock_guard<std::mutex> pipeline_lock(session->pipeline_mutex);
+        session->h264_encoder.Close();
     }
-    if (active_container_ == ActiveContainer::kMp4)
+    if (session->active_container == ActiveContainer::kMp4)
     {
-        const Mp4WriterResult close_result = mp4_writer_.Close();
+        const Mp4WriterResult close_result = session->mp4_writer.Close();
         if (close_result != Mp4WriterResult::kOk)
         {
-            state_ = "error";
-            last_error_ = MapMp4WriterError(close_result);
-            return BuildStatusLocked(request, last_error_);
+            session->state = "error";
+            session->last_error = MapMp4WriterError(close_result);
+            return BuildStatusLocked(*session, request, session->last_error);
         }
     }
     else
     {
-        const WriterResult close_result = writer_.Close();
+        const WriterResult close_result = session->writer.Close();
         if (close_result != WriterResult::kOk)
         {
-            state_ = "error";
-            last_error_ = MapWriterError(close_result);
-            return BuildStatusLocked(request, last_error_);
+            session->state = "error";
+            session->last_error = MapWriterError(close_result);
+            return BuildStatusLocked(*session, request, session->last_error);
         }
     }
 
-    state_ = "idle";
-    return BuildStatusLocked(request, std::string());
+    session->state = "idle";
+    return BuildStatusLocked(*session, request, std::string());
 }
 
 CodecControlStatus RecordingSessionManager::GetStatus(
     const CodecControlRequest& request) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return BuildStatusLocked(request, std::string());
+    RecordingSessionPtr session;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        session = FindSessionLocked(request.stream_id);
+    }
+    if (!session)
+    {
+        CodecControlStatus status;
+        status.request_id = request.request_id;
+        status.stream_id = request.stream_id;
+        status.state = "idle";
+        status.codec = request.codec.empty() ? "h264" : request.codec;
+        status.container = request.container == "mp4" ? "mp4" : "raw_h264";
+        return status;
+    }
+
+    std::lock_guard<std::mutex> lock(session->mutex);
+    return BuildStatusLocked(*session, request, std::string());
 }
 
 CodecControlStatus RecordingSessionManager::BuildStatusLocked(
+    RecordingSession& session,
     const CodecControlRequest& request,
     const std::string& error) const
 {
-    const CameraStreamSubscriberStats subscriber_stats = subscriber_.GetStats();
-    std::lock_guard<std::mutex> pipeline_lock(pipeline_mutex_);
-    const WriterStats stats = GetActiveWriterStatsLocked();
+    const CameraStreamSubscriberStats subscriber_stats = session.subscriber.GetStats();
+    std::lock_guard<std::mutex> pipeline_lock(session.pipeline_mutex);
+    const WriterStats stats = GetActiveWriterStatsLocked(session);
     CodecControlStatus status;
     status.request_id = request.request_id;
-    status.stream_id = stream_id_.empty() ? request.stream_id : stream_id_;
-    status.recording = state_ == "recording";
-    status.state = state_;
+    status.stream_id = session.stream_id.empty() ? request.stream_id : session.stream_id;
+    status.recording = session.state == "recording";
+    status.state = session.state;
     status.codec = request.codec.empty() ? "h264" : request.codec;
-    status.container = GetActiveContainerName();
-    status.file = file_path_;
-    status.encoded_frames = encoded_frames_.load();
-    status.decoded_frames = decoded_frames_.load();
-    status.dropped_frames = dropped_frames_.load();
+    status.container = GetActiveContainerName(session);
+    status.file = session.file_path;
+    status.encoded_frames = session.encoded_frames.load();
+    status.decoded_frames = session.decoded_frames.load();
+    status.dropped_frames = session.dropped_frames.load();
     status.input_frames = config_.enable_camera_subscriber
                               ? subscriber_stats.input_frames
-                              : input_frames_;
-    status.duration_ms = GetDurationMsLocked();
+                              : session.input_frames;
+    status.duration_ms = GetDurationMsLocked(session);
     status.bytes_written = stats.bytes_written;
     status.packets_written = stats.packets_written;
-    status.decode_failures = decode_failures_.load();
+    status.decode_failures = session.decode_failures.load();
     status.write_failures = stats.write_failures + subscriber_stats.read_failures;
     status.error = error;
-    status.profile = active_profile_;
+    status.profile = session.active_profile;
     return status;
 }
 
 void RecordingSessionManager::HandleInputFrame(
+    RecordingSession& session,
     const camera_subsystem::ipc::CameraDataFrameHeader& header,
     const std::vector<uint8_t>& payload)
 {
     (void)header;
 
-    std::lock_guard<std::mutex> pipeline_lock(pipeline_mutex_);
+    std::lock_guard<std::mutex> pipeline_lock(session.pipeline_mutex);
 
     DecodedImageFrame decoded;
     const JpegDecodeResult decode_result =
-        jpeg_decoder_.Decode(payload.data(), payload.size(), &decoded);
+        session.jpeg_decoder.Decode(payload.data(), payload.size(), &decoded);
     if (decode_result == JpegDecodeResult::kOk)
     {
-        decoded_frames_.fetch_add(1);
+        session.decoded_frames.fetch_add(1);
     }
     else
     {
-        decode_failures_.fetch_add(1);
+        session.decode_failures.fetch_add(1);
         return;
     }
 
-    if (!h264_encoder_.IsOpen())
+    if (!session.h264_encoder.IsOpen())
     {
         const H264EncodeResult open_result =
-            h264_encoder_.Open(BuildEncoderConfig(decoded));
+            session.h264_encoder.Open(BuildEncoderConfig(session, decoded));
         if (open_result != H264EncodeResult::kOk)
         {
-            dropped_frames_.fetch_add(1);
+            session.dropped_frames.fetch_add(1);
             return;
         }
     }
 
     std::vector<EncodedPacket> packets;
-    const H264EncodeResult encode_result = h264_encoder_.EncodeFrame(decoded, &packets);
+    const H264EncodeResult encode_result = session.h264_encoder.EncodeFrame(decoded, &packets);
     if (encode_result != H264EncodeResult::kOk)
     {
-        dropped_frames_.fetch_add(1);
+        session.dropped_frames.fetch_add(1);
         return;
     }
 
     for (const EncodedPacket& packet : packets)
     {
-        if (active_container_ == ActiveContainer::kMp4 &&
-            !EnsureMp4WriterOpenLocked(decoded))
+        if (session.active_container == ActiveContainer::kMp4 &&
+            !EnsureMp4WriterOpenLocked(session, decoded))
         {
-            dropped_frames_.fetch_add(1);
+            session.dropped_frames.fetch_add(1);
             return;
         }
-        if (!WritePacketLocked(packet))
+        if (!WritePacketLocked(session, packet))
         {
-            dropped_frames_.fetch_add(1);
+            session.dropped_frames.fetch_add(1);
             return;
         }
     }
-    encoded_frames_.fetch_add(1);
+    session.encoded_frames.fetch_add(1);
 }
 
 H264EncoderConfig RecordingSessionManager::BuildEncoderConfig(
+    const RecordingSession& session,
     const DecodedImageFrame& frame) const
 {
     H264EncoderConfig config;
@@ -256,29 +331,32 @@ H264EncoderConfig RecordingSessionManager::BuildEncoderConfig(
     config.height = frame.height;
     config.hor_stride = frame.hor_stride;
     config.ver_stride = frame.ver_stride;
-    config.fps = active_profile_.fps > 0 ? active_profile_.fps : config_.fps;
-    config.bitrate = active_profile_.bitrate > 0 ? active_profile_.bitrate : config_.bitrate;
-    config.gop = active_profile_.gop > 0 ? active_profile_.gop : config_.gop;
+    config.fps = session.active_profile.fps > 0 ? session.active_profile.fps : config_.fps;
+    config.bitrate =
+        session.active_profile.bitrate > 0 ? session.active_profile.bitrate : config_.bitrate;
+    config.gop = session.active_profile.gop > 0 ? session.active_profile.gop : config_.gop;
     return config;
 }
 
-WriterStats RecordingSessionManager::GetActiveWriterStatsLocked() const
+WriterStats RecordingSessionManager::GetActiveWriterStatsLocked(
+    const RecordingSession& session) const
 {
-    if (active_container_ == ActiveContainer::kMp4)
+    if (session.active_container == ActiveContainer::kMp4)
     {
-        return mp4_writer_.GetStats();
+        return session.mp4_writer.GetStats();
     }
-    return writer_.GetStats();
+    return session.writer.GetStats();
 }
 
-std::string RecordingSessionManager::GetActiveContainerName() const
+std::string RecordingSessionManager::GetActiveContainerName(const RecordingSession& session)
 {
-    return active_container_ == ActiveContainer::kMp4 ? "mp4" : "raw_h264";
+    return session.active_container == ActiveContainer::kMp4 ? "mp4" : "raw_h264";
 }
 
-bool RecordingSessionManager::EnsureMp4WriterOpenLocked(const DecodedImageFrame& frame)
+bool RecordingSessionManager::EnsureMp4WriterOpenLocked(RecordingSession& session,
+                                                        const DecodedImageFrame& frame)
 {
-    if (!file_path_.empty())
+    if (!session.file_path.empty())
     {
         return true;
     }
@@ -286,54 +364,58 @@ bool RecordingSessionManager::EnsureMp4WriterOpenLocked(const DecodedImageFrame&
     Mp4WriterConfig mp4_config;
     mp4_config.width = frame.width;
     mp4_config.height = frame.height;
-    mp4_config.fps = active_profile_.fps > 0 ? active_profile_.fps : config_.fps;
-    const Mp4WriterResult result = mp4_writer_.Open(stream_id_, output_dir_, mp4_config);
+    mp4_config.fps = session.active_profile.fps > 0 ? session.active_profile.fps : config_.fps;
+    const Mp4WriterResult result =
+        session.mp4_writer.Open(session.stream_id, session.output_dir, mp4_config);
     if (result != Mp4WriterResult::kOk)
     {
-        last_error_ = MapMp4WriterError(result);
+        session.last_error = MapMp4WriterError(result);
         return false;
     }
-    file_path_ = mp4_writer_.GetFilePath();
+    session.file_path = session.mp4_writer.GetFilePath();
     return true;
 }
 
-bool RecordingSessionManager::WritePacketLocked(const EncodedPacket& packet)
+bool RecordingSessionManager::WritePacketLocked(RecordingSession& session,
+                                                const EncodedPacket& packet)
 {
-    if (active_container_ == ActiveContainer::kMp4)
+    if (session.active_container == ActiveContainer::kMp4)
     {
         const Mp4WriterResult write_result =
-            mp4_writer_.WriteAnnexBPacket(packet.payload.data(), packet.payload.size());
+            session.mp4_writer.WriteAnnexBPacket(packet.payload.data(), packet.payload.size());
         if (write_result != Mp4WriterResult::kOk)
         {
-            last_error_ = MapMp4WriterError(write_result);
+            session.last_error = MapMp4WriterError(write_result);
             return false;
         }
         return true;
     }
 
     const WriterResult write_result =
-        writer_.Write(packet.payload.data(), packet.payload.size());
+        session.writer.Write(packet.payload.data(), packet.payload.size());
     if (write_result != WriterResult::kOk)
     {
-        last_error_ = MapWriterError(write_result);
+        session.last_error = MapWriterError(write_result);
         return false;
     }
     return true;
 }
 
-uint64_t RecordingSessionManager::GetDurationMsLocked() const
+uint64_t RecordingSessionManager::GetDurationMsLocked(const RecordingSession& session)
 {
-    if (started_at_ == std::chrono::steady_clock::time_point{})
+    if (session.started_at == std::chrono::steady_clock::time_point{})
     {
-        return last_duration_ms_;
+        return session.last_duration_ms;
     }
-    if (state_ == "recording" || state_ == "starting" || state_ == "stopping")
+    if (session.state == "recording" ||
+        session.state == "starting" ||
+        session.state == "stopping")
     {
-        const auto elapsed = std::chrono::steady_clock::now() - started_at_;
+        const auto elapsed = std::chrono::steady_clock::now() - session.started_at;
         return static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
     }
-    return last_duration_ms_;
+    return session.last_duration_ms;
 }
 
 std::string RecordingSessionManager::MapWriterError(WriterResult result)
