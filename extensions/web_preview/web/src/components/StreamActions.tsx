@@ -10,6 +10,7 @@ import { Play, Square, Circle, ScanSearch, Camera } from 'lucide-react';
 import type { StreamStatus } from '@/types/stream';
 import type { ConnectionState } from '@/types/gateway-command';
 import { useStreamStore } from '@/stores/useStreamStore';
+import { formatRecordError } from '@/utils/record-error';
 
 interface StreamActionsProps {
   streamId: string;
@@ -30,10 +31,20 @@ export function StreamActions({
   const isStreaming = status === 'streaming' || status === 'subscribed';
   const isRecording = Boolean(stream?.recording);
   const isRecordPending = Boolean(stream?.recordPending);
+  const recordError = stream?.recordError ?? '';
   const [recordContainer, setRecordContainer] = useState<'raw_h264' | 'mp4'>('raw_h264');
   const recordButtonClass = isRecording
     ? 'h-8 w-8 border-red-500 bg-red-950 text-red-200 hover:bg-red-900'
     : 'h-8 w-8';
+  const recordTooltip = !isConnected
+    ? '连接断开'
+    : isRecordPending
+      ? '录制状态切换中'
+      : isRecording
+        ? '停止录制'
+        : recordError
+          ? `开始录制，上次失败：${formatRecordError(recordError)}`
+          : '开始录制';
 
   const handleSubscribe = () => {
     sendCommand({ type: 'subscribe_stream', stream_id: streamId });
@@ -147,13 +158,7 @@ export function StreamActions({
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {!isConnected
-              ? '连接断开'
-              : isRecordPending
-                ? '录制状态切换中'
-                : isRecording
-                  ? '停止录制'
-                  : '开始录制'}
+            {recordTooltip}
           </TooltipContent>
         </Tooltip>
 

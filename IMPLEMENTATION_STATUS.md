@@ -276,6 +276,7 @@ flowchart TB
 2. **Web Codec 可用性体验评估**
    - 观察 codec 不可用、重启恢复、MP4 异常退出时前端状态是否足够清晰
    - 已将常见 `record_status.error` 内部错误码映射为前端中文说明，并通过 `title` 保留原始错误码，降低现场调试成本
+   - 已将错误码格式化逻辑收敛为前端公共工具，录制按钮 tooltip 会提示上次失败原因，避免 codec 未启动时只能在状态行排查
    - 如果体验不足，再增加 Gateway codec health 广播和前端能力状态，不提前引入自动续录
 
 3. **MIPI/RKISP 多平面准备**
@@ -442,6 +443,7 @@ flowchart TB
 - [x] 完成 codec server 重启恢复 smoke：录制中终止、Stop 错误收敛、重启后重新录制，raw_h264 / mp4 均通过 ✅ 2026-05-07
 - [x] 板端 smoke suite 拆分为 quick/full/extended 三档 ✅ 2026-05-07
 - [x] Web 录制状态面板补充常见 codec 错误码中文说明 ✅ 2026-05-08
+- [x] Web 录制按钮补充上次失败原因提示 ✅ 2026-05-08
 - [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane
 - [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
 - [ ] 补充 Web 异常恢复长稳：生产化保活、长时间刷新/断线重连

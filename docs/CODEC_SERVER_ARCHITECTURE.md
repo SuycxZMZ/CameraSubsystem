@@ -1022,7 +1022,7 @@ sequenceDiagram
 ### 18.4 实现顺序
 
 1. **验证脚本优先**：已新增 `web-codec-restart-smoke-rk3576.sh`，覆盖录制中杀掉 codec、Stop 错误收敛、重启 codec、再次录制成功。
-2. **前端错误收敛检查**：已确认 `record_status.error` 会清理 pending / recording，并已把常见 codec 错误码映射为中文说明，同时通过 hover title 保留原始错误码。
+2. **前端错误收敛检查**：已确认 `record_status.error` 会清理 pending / recording，并已把常见 codec 错误码映射为中文说明；状态行通过 hover title 保留原始错误码，录制按钮 tooltip 会提示上次失败原因。
 3. **Gateway 能力状态**：如 UI 体验仍不清晰，再增加 codec socket health 状态广播。
 4. **生产启动策略**：沉淀 systemd service 或统一 run script，负责 codec server 拉起和重启。
 
