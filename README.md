@@ -286,7 +286,7 @@ cd /home/luckfox/CameraSubsystem
 
 ```bash
 ./scripts/rk3576-board-smoke-suite.sh
-./scripts/rk3576-board-smoke-suite.sh dataplane-lifecycle codec-mp4 web-record-mp4
+./scripts/rk3576-board-smoke-suite.sh dataplane-lifecycle codec-multi-session-control codec-mp4 web-record-mp4
 ```
 
 Smoke suite 档位：

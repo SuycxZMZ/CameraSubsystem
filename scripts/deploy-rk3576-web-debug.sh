@@ -68,6 +68,7 @@ done
 
 scp \
     "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-v1-smoke-rk3576.sh" \
+    "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-multi-session-control-smoke-rk3576.sh" \
     "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-stability-test-rk3576.sh" \
     "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-mp4-smoke-rk3576.sh" \
     "${PROJECT_ROOT}/extensions/web_preview/scripts/web-record-freeze-smoke-rk3576.sh" \

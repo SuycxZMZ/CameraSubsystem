@@ -24,6 +24,7 @@ struct CodecServerConfig
     uint32_t fps = 30;
     uint32_t bitrate = 4000000;
     uint32_t gop = 60;
+    bool enable_camera_subscriber = true;
 };
 
 enum class ParseResult

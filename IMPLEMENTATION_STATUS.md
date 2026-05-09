@@ -286,14 +286,14 @@ flowchart TB
    - 已完成 M1 基础贯通：新增 `CameraStreamIdentity`，`CameraEndpoint`、`CameraSessionManager`、`CameraSource`、DMA-BUF `FrameDescriptor`、DataPlaneV2 descriptor 和 publisher/subscriber 关键日志已携带稳定字符串 `stream_id`
    - 已开始 M2 第一刀：publisher 示例由单全局 `CameraSource` 改为 `stream_id -> CameraStreamRuntime` map，新 endpoint 不再强制 stop/reinit 已存在的 stream runtime
    - 已完成 M3：publisher pending lease 从裸 `frame_id` 改为 `stream_id/camera_id + frame_id + buffer_id` 多字段 key；ReleaseFrame tracker 已按 stream/frame/buffer 隔离，并用 consumer set 跟踪每个消费者 release
-   - 已完成 codec server 多 session 第一阶段：`RecordingSessionManager` 改为 `stream_id -> RecordingSession`，同一进程可同时管理多路录制状态，单路 stop 不影响其他 stream 状态
+   - 已完成 codec server 多 session 第一阶段：`RecordingSessionManager` 改为 `stream_id -> RecordingSession`，同一进程可同时管理多路录制状态，单路 stop 不影响其他 stream 状态；RK3576 `codec-multi-session-control` 已验证两路控制面 session 隔离
    - 已补齐 Web Gateway 与 codec server 的显式 `--stream-id` 订阅配置，`/status` 与 record fallback 不再硬编码 `usb_camera_0`；USB-only 默认保持 `stream_id=0`，与当前 Web 二进制帧协议和前端 store 对齐
    - 已完成 Web 多 stream 状态设计入口：WebFrameHeader V1 继续保留 numeric stream index，短期通过 sideband status 映射 `stream_index -> stream_id`，后续先实现 W1-W2 再讨论 WebFrameHeader V2
    - 当前剩余主偏差是 Web/gateway 多 stream UX 实现和真实多 camera 板端联合 smoke 仍未完成；后续不能直接扩大 MIPI live，应先补板端多 stream smoke 或 Web 多 stream 状态
    - USB-only smoke 可以继续保留单 `DEVICE=/dev/video45` 默认入口；生产化配置需要显式声明 stream topology，保证 USB 与 MIPI 可以同时存在
 
 2. **板端 smoke 与启动方式固化**
-   - 已新增 `scripts/rk3576-board-smoke-suite.sh` 作为 RK3576 统一自检入口，默认串联 DataPlaneV2 lifecycle、codec MP4、Web MP4 record 和 Web codec restart MP4 smoke
+   - 已新增 `scripts/rk3576-board-smoke-suite.sh` 作为 RK3576 统一自检入口，默认串联 DataPlaneV2 lifecycle、codec multi-session control、codec MP4、Web MP4 record 和 Web codec restart MP4 smoke
    - 已新增 `scripts/rk3576-run-web-stack.sh` 管理 `camera_publisher_example` / `camera_codec_server` / `web_preview_gateway` 的 start / stop / restart / status / logs
    - 已完成 smoke suite quick/full/extended 三档拆分（`TIER` 环境变量选择，默认 `full`）
 
@@ -486,6 +486,7 @@ flowchart TB
 - [x] 将 publisher app 运行时改为 `stream_id -> CameraStreamRuntime` map，避免新 endpoint stop/reinit 已存在 stream runtime ✅ 2026-05-08
 - [x] 将 DataPlaneV2 pending lease 和 ReleaseFrame tracker key 从裸 `frame_id` 纠偏为 stream/frame/buffer/consumer 多字段语义，补同帧跨流和跨 buffer 隔离测试 ✅ 2026-05-08
 - [x] 完成 codec server 多 recording session 第一阶段：`RecordingSessionManager` 改为 `stream_id -> RecordingSession`，补多 stream 独立 start/stop/status 测试，并在 RK3576 上通过 27/27 验证 ✅ 2026-05-08
+- [x] 新增 RK3576 `codec-multi-session-control` smoke：`--disable-camera-subscriber` 控制面模式下验证两路 session 文件隔离、单路 stop 不影响另一路、重复 stop 返回 `not_recording` ✅ 2026-05-09
 - [x] 为 `web_preview_gateway` 与 `camera_codec_server` 增加显式 `--stream-id` 订阅配置，消除 Web status/record fallback 的硬编码流 ID；RK3576 quick smoke 通过 `codec-mp4`、`web-record-mp4`、`web-codec-restart-mp4`，日志确认 publisher/control/codec/gateway 均使用 `stream_id=0` ✅ 2026-05-09
 - [x] 完成 Web 多 stream 状态设计：短期采用 sideband status 映射 numeric `stream_index` 到字符串 `stream_id`，避免直接破坏 WebFrameHeader V1 ✅ 2026-05-09
 - [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane

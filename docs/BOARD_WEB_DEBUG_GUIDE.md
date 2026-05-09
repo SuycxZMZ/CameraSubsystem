@@ -250,7 +250,7 @@ BOARD_PASSWORD=luckfox \
 ./scripts/rk3576-board-smoke-suite.sh
 ```
 
-默认套件覆盖 `dataplane-lifecycle`、`codec-mp4`、`web-record-mp4` 和 `web-codec-restart-mp4`（即 `full` 档位）。
+默认套件覆盖 `dataplane-lifecycle`、`codec-multi-session-control`、`codec-mp4`、`web-record-mp4` 和 `web-codec-restart-mp4`（即 `full` 档位）。
 
 Smoke suite 档位（通过 `TIER` 环境变量选择）：
 

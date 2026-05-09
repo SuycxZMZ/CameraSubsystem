@@ -34,7 +34,7 @@ CodecServerApp::CodecServerApp(CodecServerConfig config)
               0,
               64U * 1024U * 1024U,
               nullptr},
-          true,
+          config_.enable_camera_subscriber,
           config_.fps,
           config_.bitrate,
           config_.gop})
@@ -54,6 +54,8 @@ int CodecServerApp::Run()
               << "  output_dir=" << config_.output_dir << "\n"
               << "  input_format=" << config_.input_format << "\n"
               << "  data_plane=" << config_.data_plane << "\n"
+              << "  camera_subscriber="
+              << (config_.enable_camera_subscriber ? "enabled" : "disabled") << "\n"
               << "  codec=" << config_.codec << "\n"
               << "  width=" << config_.width << "\n"
               << "  height=" << config_.height << "\n"

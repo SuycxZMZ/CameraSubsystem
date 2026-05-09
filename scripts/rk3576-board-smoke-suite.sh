@@ -10,8 +10,8 @@ REMOTE_ROOT="${REMOTE_ROOT:-/home/luckfox/CameraSubsystem}"
 DEVICE="${DEVICE:-/dev/video45}"
 # --- Tier definitions ---
 readonly TIER_QUICK="codec-mp4 web-record-mp4 web-codec-restart-mp4"
-readonly TIER_FULL="dataplane-lifecycle codec-mp4 web-record-mp4 web-codec-restart-mp4"
-readonly TIER_EXTENDED="dataplane-lifecycle dataplane-failover dataplane-release-disconnect codec-v1 codec-mp4 codec-stability web-record-raw web-record-mp4 web-codec-restart-raw web-codec-restart-mp4 mplane-readiness"
+readonly TIER_FULL="dataplane-lifecycle codec-multi-session-control codec-mp4 web-record-mp4 web-codec-restart-mp4"
+readonly TIER_EXTENDED="dataplane-lifecycle dataplane-failover dataplane-release-disconnect codec-v1 codec-multi-session-control codec-mp4 codec-stability web-record-raw web-record-mp4 web-codec-restart-raw web-codec-restart-mp4 mplane-readiness"
 
 TIER="${TIER:-}"
 SUITES="${SUITES:-}"
@@ -39,7 +39,7 @@ Usage: $0 [suite ...]
 
 Tiers (select via TIER environment variable):
   quick     (~60s)  codec-mp4 web-record-mp4 web-codec-restart-mp4
-  full      (~135s) dataplane-lifecycle codec-mp4 web-record-mp4 web-codec-restart-mp4  [default]
+  full      (~135s) dataplane-lifecycle codec-multi-session-control codec-mp4 web-record-mp4 web-codec-restart-mp4  [default]
   extended  (~5-8m) all suites, including optional MIPI/RKISP MPLANE readiness
 
 Available suites:
@@ -47,6 +47,7 @@ Available suites:
   dataplane-failover
   dataplane-release-disconnect
   codec-v1
+  codec-multi-session-control
   codec-mp4
   codec-stability
   web-record-raw
@@ -124,6 +125,9 @@ run_suite()
             ;;
         codec-v1)
             run_ssh "cd '${REMOTE_ROOT}' && DEVICE='${DEVICE}' sh scripts/codec-v1-smoke-rk3576.sh"
+            ;;
+        codec-multi-session-control)
+            run_ssh "cd '${REMOTE_ROOT}' && sh scripts/codec-multi-session-control-smoke-rk3576.sh"
             ;;
         codec-mp4)
             run_ssh "cd '${REMOTE_ROOT}' && DEVICE='${DEVICE}' DURATION_SEC='${CODEC_MP4_DURATION_SEC:-5}' sh scripts/codec-mp4-smoke-rk3576.sh"

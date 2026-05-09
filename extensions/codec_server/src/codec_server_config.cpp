@@ -61,6 +61,7 @@ void PrintCodecServerUsage(const char* program_name)
         << "  --fps <fps>               Target fps, default 30\n"
         << "  --bitrate <bps>           Target bitrate, default 4000000\n"
         << "  --gop <frames>            GOP length, default 60\n"
+        << "  --disable-camera-subscriber  Control-plane mode without subscribing frames\n"
         << "  --help                    Show this help\n";
 }
 
@@ -218,6 +219,10 @@ ParseResult ParseCodecServerConfig(int argc, char* argv[], CodecServerConfig* co
                 std::cerr << "invalid --gop value\n";
                 return ParseResult::kError;
             }
+        }
+        else if (arg == "--disable-camera-subscriber")
+        {
+            config->enable_camera_subscriber = false;
         }
         else
         {
