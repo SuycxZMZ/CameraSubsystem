@@ -15,6 +15,7 @@ import {
 
 interface StreamStore {
   streams: Record<string, StreamState>;
+  streamIndexMap: Record<string, string>;
   connectionState: ConnectionState;
   gatewayUrl: string;
   lastCommandResult: CommandResult | null;
@@ -29,6 +30,7 @@ interface StreamStore {
   handleCommandResult: (result: CommandResult) => void;
   handleGatewayStatus: (status: GatewayStatus) => void;
   handleRecordStatus: (status: RecordStatus) => void;
+  resolveStreamId: (streamIndex: number) => string;
   setSendTextFn: (fn: ((data: string) => void) | null) => void;
 }
 
@@ -36,6 +38,7 @@ let sendTextFn: ((data: string) => void) | null = null;
 
 export const useStreamStore = create<StreamStore>((set, get) => ({
   streams: {},
+  streamIndexMap: {},
   connectionState: 'disconnected',
   gatewayUrl: '',
   lastCommandResult: null,
@@ -153,11 +156,63 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
 
   handleGatewayStatus: (status) => {
     const streamId = status.stream_id;
+    const streamIndex = status.stream_index;
     const store = get();
+    const aliasId = typeof streamIndex === 'number' ? String(streamIndex) : '';
 
-    // Ensure stream exists
-    if (!store.streams[streamId]) {
-      store.addStream(streamId);
+    if (aliasId && aliasId !== streamId && store.streams[aliasId]) {
+      set((state) => {
+        if (!state.streams[aliasId]) return state;
+        const aliasStream = state.streams[aliasId];
+        const targetStream = state.streams[streamId];
+        const { [aliasId]: _, ...rest } = state.streams;
+        const mergedStream = {
+          ...(targetStream ?? aliasStream),
+          ...aliasStream,
+          ...(targetStream
+            ? {
+                recording: targetStream.recording,
+                recordPending: targetStream.recordPending,
+                recordState: targetStream.recordState,
+                recordFile: targetStream.recordFile,
+                encodedFrames: targetStream.encodedFrames,
+                decodedFrames: targetStream.decodedFrames,
+                recordInputFrames: targetStream.recordInputFrames,
+                recordDroppedFrames: targetStream.recordDroppedFrames,
+                recordDurationMs: targetStream.recordDurationMs,
+                recordStartedAtMs: targetStream.recordStartedAtMs,
+                recordBytesWritten: targetStream.recordBytesWritten,
+                recordPacketsWritten: targetStream.recordPacketsWritten,
+                recordDecodeFailures: targetStream.recordDecodeFailures,
+                recordWriteFailures: targetStream.recordWriteFailures,
+                recordProfile: targetStream.recordProfile,
+                recordContainer: targetStream.recordContainer,
+                recordError: targetStream.recordError,
+              }
+            : {}),
+          streamId,
+          streamIndex,
+        };
+        return {
+          streams: {
+            ...rest,
+            [streamId]: mergedStream,
+          },
+        };
+      });
+    } else if (!store.streams[streamId]) {
+      get().addStream(streamId);
+    } else if (typeof streamIndex === 'number') {
+      get().updateStream(streamId, { streamIndex });
+    }
+
+    if (typeof streamIndex === 'number') {
+      set((state) => ({
+        streamIndexMap: {
+          ...state.streamIndexMap,
+          [String(streamIndex)]: streamId,
+        },
+      }));
     }
 
     // Map Gateway status to StreamStatus
@@ -189,6 +244,7 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
       status: streamStatus,
       width: status.width,
       height: status.height,
+      streamIndex,
       pixelFormat,
       pixelFormatName: pixelFormatToName(pixelFormat),
       isFormatSupported: isFormatSupported(pixelFormat),
@@ -197,7 +253,7 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
   },
 
   handleRecordStatus: (status) => {
-    const streamId = status.stream_id || 'usb_camera_0';
+    const streamId = status.stream_id || '0';
     const store = get();
 
     if (!store.streams[streamId]) {
@@ -226,6 +282,11 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
       recordError: status.error ?? '',
       dropCount: status.dropped_frames ?? store.streams[streamId]?.dropCount ?? 0,
     });
+  },
+
+  resolveStreamId: (streamIndex) => {
+    const key = String(streamIndex);
+    return get().streamIndexMap[key] ?? key;
   },
 
   setSendTextFn: (fn) => {

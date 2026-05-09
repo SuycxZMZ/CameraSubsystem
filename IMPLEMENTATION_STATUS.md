@@ -1,6 +1,6 @@
 # CameraSubsystem 实现状态
 
-**更新日期:** 2026-05-08
+**更新日期:** 2026-05-09
 
 > **文档硬规范**
 >
@@ -288,8 +288,8 @@ flowchart TB
    - 已完成 M3：publisher pending lease 从裸 `frame_id` 改为 `stream_id/camera_id + frame_id + buffer_id` 多字段 key；ReleaseFrame tracker 已按 stream/frame/buffer 隔离，并用 consumer set 跟踪每个消费者 release
    - 已完成 codec server 多 session 第一阶段：`RecordingSessionManager` 改为 `stream_id -> RecordingSession`，同一进程可同时管理多路录制状态，单路 stop 不影响其他 stream 状态；RK3576 `codec-multi-session-control` 已验证两路控制面 session 隔离
    - 已补齐 Web Gateway 与 codec server 的显式 `--stream-id` 订阅配置，`/status` 与 record fallback 不再硬编码 `usb_camera_0`；USB-only 默认保持 `stream_id=0`，与当前 Web 二进制帧协议和前端 store 对齐
-   - 已完成 Web 多 stream 状态设计入口：WebFrameHeader V1 继续保留 numeric stream index，短期通过 sideband status 映射 `stream_index -> stream_id`，后续先实现 W1-W2 再讨论 WebFrameHeader V2
-   - 当前剩余主偏差是 Web/gateway 多 stream UX 实现和真实多 camera 板端联合 smoke 仍未完成；后续不能直接扩大 MIPI live，应先补板端多 stream smoke 或 Web 多 stream 状态
+   - 已完成 Web W1-W2：Gateway status 携带 `stream_index`，前端建立 `stream_index -> stream_id` sideband 映射，预览帧、录制状态和错误状态统一归并到同一个 stream card；WebFrameHeader V1 继续保留 numeric stream index
+   - 当前剩余主偏差是真实多 camera 板端联合 smoke 仍未完成；Web W3/W4 仅在 topology 配置和真实多路输入需要时推进，不能先于主链路继续扩张 UI/协议面
    - USB-only smoke 可以继续保留单 `DEVICE=/dev/video45` 默认入口；生产化配置需要显式声明 stream topology，保证 USB 与 MIPI 可以同时存在
 
 2. **板端 smoke 与启动方式固化**
@@ -297,11 +297,12 @@ flowchart TB
    - 已新增 `scripts/rk3576-run-web-stack.sh` 管理 `camera_publisher_example` / `camera_codec_server` / `web_preview_gateway` 的 start / stop / restart / status / logs
    - 已完成 smoke suite quick/full/extended 三档拆分（`TIER` 环境变量选择，默认 `full`）
 
-3. **Web Codec 可用性体验评估**
-   - 观察 codec 不可用、重启恢复、MP4 异常退出时前端状态是否足够清晰
+3. **Web / Codec 扩展能力收敛**
+   - Web Preview 与 `camera_codec_server` 当前定位为调试预览、录制 smoke 和主链路验证辅助，不再作为短期主线长期展开
+   - 后续只处理影响板端 smoke、录制闭环、错误收敛或多路身份正确性的必要改动；新的 UI 体验、容器格式、推流和自动续录能力暂缓
    - 已将常见 `record_status.error` 内部错误码映射为前端中文说明，并通过 `title` 保留原始错误码，降低现场调试成本
    - 已将错误码格式化逻辑收敛为前端公共工具，录制按钮 tooltip 会提示上次失败原因，避免 codec 未启动时只能在状态行排查
-   - 如果体验不足，再增加 Gateway codec health 广播和前端能力状态，不提前引入自动续录
+   - 如果 smoke 需要，再增加 Gateway codec health 广播和前端能力状态；不提前引入自动续录、复杂多路控制台或新的封装格式
 
 4. **MIPI/RKISP 多平面准备**
    - 当前调试条件只有 USB 摄像头，不能把真实 MIPI/RKISP sensor 出帧验证标记为完成
@@ -489,9 +490,10 @@ flowchart TB
 - [x] 新增 RK3576 `codec-multi-session-control` smoke：`--disable-camera-subscriber` 控制面模式下验证两路 session 文件隔离、单路 stop 不影响另一路、重复 stop 返回 `not_recording` ✅ 2026-05-09
 - [x] 为 `web_preview_gateway` 与 `camera_codec_server` 增加显式 `--stream-id` 订阅配置，消除 Web status/record fallback 的硬编码流 ID；RK3576 quick smoke 通过 `codec-mp4`、`web-record-mp4`、`web-codec-restart-mp4`，日志确认 publisher/control/codec/gateway 均使用 `stream_id=0` ✅ 2026-05-09
 - [x] 完成 Web 多 stream 状态设计：短期采用 sideband status 映射 numeric `stream_index` 到字符串 `stream_id`，避免直接破坏 WebFrameHeader V1 ✅ 2026-05-09
+- [x] 完成 Web W1-W2 小步接入：Gateway status 增加 `stream_index`，前端按 `stream_index -> stream_id` 归并预览帧、录制状态和错误状态 ✅ 2026-05-09
 - [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane
 - [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
-- [ ] 补充 Web 异常恢复长稳：生产化保活、长时间刷新/断线重连
+- [ ] 按真实多 camera topology 补板端联合 smoke，必要时再扩展 Web W3 多 stream status list
 - [ ] 背压策略参数化（延迟阈值/优先级规则）
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 

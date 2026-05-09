@@ -339,12 +339,14 @@ flowchart LR
 
 | 阶段 | 内容 | 兼容性 |
 |------|------|--------|
-| W1 | Gateway status 增加 `stream_index`，前端建立 index -> string 映射 | 兼容现有 WebFrameHeader V1 |
-| W2 | 前端帧接收时先查映射，找不到时 fallback 到 numeric string | 兼容旧 Gateway |
-| W3 | Gateway 支持多 stream status list，每路有 `stream_id`、`stream_index`、format、fps、record capability | 不破坏现有单路 |
-| W4 | 设计 WebFrameHeader V2 或 metadata envelope，二进制帧直接携带字符串身份 | 需要协议版本升级 |
+| W1 | Gateway status 增加 `stream_index`，前端建立 index -> string 映射 | 已完成，兼容现有 WebFrameHeader V1 |
+| W2 | 前端帧接收时先查映射，找不到时 fallback 到 numeric string | 已完成，兼容旧 Gateway |
+| W3 | Gateway 支持多 stream status list，每路有 `stream_id`、`stream_index`、format、fps、record capability | 暂缓，等待 topology 配置和真实多路输入 |
+| W4 | 设计 WebFrameHeader V2 或 metadata envelope，二进制帧直接携带字符串身份 | 暂缓，属于协议版本升级 |
 
-第一阶段代码应优先做 W1-W2。W3 需要 topology 配置；W4 等 USB + MIPI 基础链路稳定后再做，避免过早扩大协议面。
+第一阶段 W1-W2 已完成。W3 需要 topology 配置；W4 等 USB + MIPI 基础链路稳定后再做，避免过早扩大协议面。
+
+Web Preview 是调试预览和板端 smoke 辅助扩展，不是当前主线。后续前端开发只处理影响预览可用性、录制闭环、错误收敛和多路身份正确性的必要问题；复杂控制台、自动续录、推流 UI 和大范围协议升级必须等核心多路 Camera topology、DataPlaneV2 和 MIPI/RKISP 链路稳定后再评估。
 
 ## 12. 前端工程设计
 

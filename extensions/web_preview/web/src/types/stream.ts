@@ -10,6 +10,7 @@ export type StreamStatus =
 
 export interface StreamState {
   streamId: string;
+  streamIndex?: number;
   status: StreamStatus;
   width: number;
   height: number;

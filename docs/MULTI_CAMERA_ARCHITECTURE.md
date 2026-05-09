@@ -1,7 +1,7 @@
 # 多路摄像头架构纠偏
 
 **文档版本:** v0.1<br>
-**最后更新:** 2026-05-08<br>
+**最后更新:** 2026-05-09<br>
 **适用范围:** CameraSubsystem 同时接入 USB/UVC 与 MIPI/RKISP 多路摄像头的目标架构、当前偏差、迁移顺序和验收口径<br>
 **关联文档:** [README.md](../README.md)、[ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)、[DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)、[CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)
 
@@ -169,11 +169,11 @@ Web Preview 和板端脚本当前以单路调试为主，这个阶段是合理�
 | M2 | P0 | publisher 改为 `stream_id -> CameraStreamRuntime` | 已完成第一刀：publisher 示例已使用 runtime map，两个 stream 不再共享同一个全局 `CameraSource`；多路 release key 仍归 M3 |
 | M3 | P0 | DataPlaneV2/release key 多路化 | 已完成：publisher pending lease 使用 stream/frame/buffer key，ReleaseFrame tracker 以 stream/frame/buffer 隔离并跟踪 consumer release set |
 | M4 | P1 | codec server 多 `RecordingSession` | 已完成第一阶段：`RecordingSessionManager` 使用 `stream_id -> RecordingSession`，同一进程可同时管理多路录制状态，单路 stop 不影响其他路 |
-| M5 | P1 | Web/gateway 多 stream 状态 | 已完成设计入口：短期采用 sideband status 映射 `stream_index -> stream_id`，避免立即破坏 WebFrameHeader V1；下一步实现 W1-W2 |
+| M5 | P1 | Web/gateway 多 stream 状态 | 已完成 W1-W2：Gateway status 携带 `stream_index`，前端用 sideband 映射把 numeric frame index 归并到字符串 `stream_id`；W3/W4 暂缓 |
 | M6 | P1 | USB + MIPI 板端联合 smoke | USB live + MIPI live 或 MIPI probe 同时运行，互不影响 |
 | M7 | P2 | MIPI DataPlaneV2 -> MPP 低拷贝录制 | NV12 DMA-BUF descriptor import 编码，并完成 release 闭环 |
 
-阶段 M1-M3 是真正的架构纠偏主线。MIPI live、低拷贝录制、多路 Web UI 都不应绕过这三步直接实现，否则会把单路假设继续固化到更多模块里。
+阶段 M1-M3 是真正的架构纠偏主线。MIPI live、低拷贝录制、多路 Web UI 都不应绕过这三步直接实现，否则会把单路假设继续固化到更多模块里。Web 与 Codec 只作为调试预览、录制 smoke 和主链路验证辅助能力推进；除必要 bugfix、身份贯通和 smoke 支撑外，不继续扩大前端体验和编码容器功能面。
 
 ## 10. 验收标准
 

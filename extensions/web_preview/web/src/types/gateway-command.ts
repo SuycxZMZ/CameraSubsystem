@@ -42,6 +42,7 @@ export interface RecordStatus {
 export interface GatewayStatus {
   type: 'status';
   stream_id: string;
+  stream_index?: number;
   status: string;
   width: number;
   height: number;

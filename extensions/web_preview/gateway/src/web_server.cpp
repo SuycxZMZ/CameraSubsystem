@@ -822,6 +822,7 @@ std::string WebServer::BuildStatusJson() const
 
     std::ostringstream ss;
     ss << "{\"type\":\"status\",\"stream_id\":\"" << config_.stream_id << "\","
+       << "\"stream_index\":0,"
        << "\"status\":\"" << stats.status << "\","
        << "\"width\":" << stats.width << ","
        << "\"height\":" << stats.height << ","

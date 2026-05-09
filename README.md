@@ -3,7 +3,7 @@
 **目标平台:** Linux / 嵌入式边缘设备（当前已接入 RK3576 / Debian 验证链路，预留 Android 迁移）<br>
 **开发语言:** C++17 / C POD 数据结构<br>
 **核心方向:** Camera 采集后端 -> Publish/Subscribe -> AI / 编码 / 录制<br>
-**最后更新:** 2026-05-08
+**最后更新:** 2026-05-09
 
 > **文档硬规范**
 >
@@ -62,7 +62,7 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 | 控制面 IPC | 基础落地 | Subscribe / Unsubscribe / Ping |
 | 数据面 IPC | 示例落地 | 默认保留 Unix Socket 复制链路；DMA-BUF 模式已支持 DataPlaneV2 + `SCM_RIGHTS` fd 传递 |
 | Buffer 生命周期治理 | 基础落地 | `BufferPool` / `BufferGuard` / 状态机 / 泄漏检测 |
-| Web Preview 扩展 | 已落地并完成板端录制联调 | Gateway + React 前端，浏览器实时预览 Camera 画面；Record start/stop 后预览与 8080 服务保持可用，录制状态面板展示时长、文件统计、profile 和错误；已暴露 H.264 裸流 / MP4 录制格式选择 |
+| Web Preview 扩展 | 已落地并完成板端录制联调 | Gateway + React 前端，浏览器实时预览 Camera 画面；Record start/stop 后预览与 8080 服务保持可用，录制状态面板展示时长、文件统计、profile 和错误；已支持 `stream_index -> stream_id` 状态映射，预览帧和录制状态归并到同一 stream card |
 | DMA-BUF 零拷贝主链路 | Phase 2 冒烟通过 | 已新增 `FrameDescriptor` / `FrameLease` 与 V4L2 `VIDIOC_EXPBUF` 尝试路径；RK3576 `/dev/video45` 已通过 `dmabuf_smoke_test` 和跨进程 DataPlaneV2 smoke |
 | H.264 录制编码 | 已打通 Web 控制闭环 | 独立 `camera_codec_server` 订阅原始流并使用 Rockchip MPP 编码；状态回传包含录制时长、文件统计、有效编码 profile 和错误信息；已支持 `container=mp4` 主链路并完成 RK3576 live 验证 |
 | 板端运行验证 | 阶段完成 | 已在 RK3576 Debian 12 上完成 publisher/subscriber copy、DataPlaneV2 smoke、Web 录制 start/stop smoke |
@@ -337,6 +337,6 @@ Smoke suite 档位：
 下一步建议按以下顺序推进，并与 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 的 P0/P1 风险项对齐：
 
 1. **板端 smoke 与启动方式固化**：沉淀一键上传、运行、采集日志、校验关键 counters 的 RK3576 自检脚本，并整理 `camera_codec_server` / `web_preview_gateway` 的生产化启动方式。
-2. **Web Codec 可用性体验评估**：Web 录制异常恢复 smoke 已覆盖 raw_h264 / mp4；后续按体验决定是否增加 Gateway codec health 广播和前端能力状态。
+2. **Web / Codec 扩展能力收敛**：Web 录制异常恢复 smoke 已覆盖 raw_h264 / mp4；当前阶段只继续处理影响 smoke、错误收敛和多路身份正确性的必要问题，新的 UI、推流、自动续录和容器扩展暂缓。
 3. **MIPI/RKISP 多平面验证**：接入 MPLANE 节点，验证 per-plane fd / offset / stride，并为 DataPlaneV2 -> MPP 低拷贝编码路径做准备。
 4. **DataPlaneV2 低拷贝录制架构设计**：`camera_codec_server` 接入 DataPlaneV2 前，先明确 copy path / fd path 选择、fallback、MPP import 输入契约和 release 时序；大范围接口调整先文档评审再写代码。

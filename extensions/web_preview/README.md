@@ -13,13 +13,14 @@
 
 ## 当前进度
 
-截至 2026-05-05，Web Preview 已完成 RK3576 正式目录联调：
+截至 2026-05-09，Web Preview 已完成 RK3576 正式目录联调：
 
 | 能力 | 状态 | 验证 |
 |------|------|------|
 | HTTP + WebSocket 预览 | 已完成 | `/status` 返回 `format=JPEG`、`width=1920`、`height=1080`，浏览器实时预览可用。 |
 | React 前端渲染 | 已完成 | Canvas 按 DPR-aware backing store 渲染，单路预览可持续显示。 |
 | Web Record 控制 | 已完成 | Record start/stop 转发到 `camera_codec_server`，可选择 H.264 裸流或 MP4，前端处理 `record_status` 并维护 pending 状态。 |
+| 多 stream 状态归并 | 已完成 W1-W2 | Gateway status 携带 `stream_index`，前端建立 `stream_index -> stream_id` 映射，预览帧、录制状态和错误状态归并到同一个 stream card。 |
 | 录制状态面板 | 已完成当前切片 | 展示录制时长、文件统计、输入/编码/解码计数、有效 profile 和错误提示。 |
 | 停止录制后预览保持 | 已验证 | RK3576 正式目录验证 `LIVE_WS_COUNTS before=15 during=25 after=25`，8080 保持监听。 |
 | 板端 smoke | 已补充 | `scripts/web-record-freeze-smoke-rk3576.sh` 默认使用 `/home/luckfox/CameraSubsystem`，支持多轮录制、停止后重连和 MP4 输出校验；`scripts/web-codec-restart-smoke-rk3576.sh` 已验证 raw_h264 / mp4 codec 重启恢复。 |
@@ -340,6 +341,6 @@ Gateway → 浏览器：
 
 ## 下一步计划
 
-1. 跟随全局板端 smoke 固化任务，把 Web 录制和 codec restart smoke 纳入统一部署流程，保证正式目录脚本和二进制同步更新。
-2. 根据 codec 不可用、重启恢复和 MP4 异常退出时的 UI 表现，决定是否增加 Gateway codec health 广播和前端能力状态。
-3. 配合 MIPI/RKISP 验证，为非 JPEG 输入预留前端格式提示和 Gateway transform pipeline 的板端验证入口。
+1. Web Preview 当前作为调试预览与板端 smoke 辅助扩展收敛，后续只处理影响预览可用性、录制闭环、错误收敛和多路身份正确性的必要问题。
+2. 等真实多 camera topology 进入板端联合 smoke 后，再决定是否扩展 Gateway 多 stream status list；暂不推进 WebFrameHeader V2、复杂控制台和自动续录。
+3. 配合 MIPI/RKISP 验证，为非 JPEG 输入保留格式提示和 Gateway transform pipeline 的验证入口，但不先于主链路投入大范围前端开发。

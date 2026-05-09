@@ -25,7 +25,7 @@ export function useFrameReceiver() {
     }
 
     const { header, payload } = result;
-    const streamId = String(header.streamId);
+    const streamId = store.getState().resolveStreamId(header.streamId);
     const now = performance.now();
 
     // Ensure stream exists in store
