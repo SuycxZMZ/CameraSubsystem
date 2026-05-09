@@ -11,7 +11,7 @@ DEVICE="${DEVICE:-/dev/video45}"
 # --- Tier definitions ---
 readonly TIER_QUICK="codec-mp4 web-record-mp4 web-codec-restart-mp4"
 readonly TIER_FULL="dataplane-lifecycle codec-multi-session-control codec-mp4 web-record-mp4 web-codec-restart-mp4"
-readonly TIER_EXTENDED="dataplane-lifecycle dataplane-failover dataplane-release-disconnect codec-v1 codec-multi-session-control codec-mp4 codec-stability web-record-raw web-record-mp4 web-codec-restart-raw web-codec-restart-mp4 mplane-readiness"
+readonly TIER_EXTENDED="dataplane-lifecycle dataplane-failover dataplane-release-disconnect codec-v1 codec-multi-session-control codec-mp4 codec-stability web-record-raw web-record-mp4 web-codec-restart-raw web-codec-restart-mp4 multi-camera-topology"
 
 TIER="${TIER:-}"
 SUITES="${SUITES:-}"
@@ -40,7 +40,7 @@ Usage: $0 [suite ...]
 Tiers (select via TIER environment variable):
   quick     (~60s)  codec-mp4 web-record-mp4 web-codec-restart-mp4
   full      (~135s) dataplane-lifecycle codec-multi-session-control codec-mp4 web-record-mp4 web-codec-restart-mp4  [default]
-  extended  (~5-8m) all suites, including optional MIPI/RKISP MPLANE readiness
+  extended  (~5-8m) all suites, including multi-camera topology smoke
 
 Available suites:
   dataplane-lifecycle
@@ -55,6 +55,7 @@ Available suites:
   web-codec-restart-raw
   web-codec-restart-mp4
   mplane-readiness
+  multi-camera-topology
 
 Environment:
   TIER=${TIER:-<not set, defaults to full>}
@@ -151,6 +152,12 @@ run_suite()
             BOARD_HOST="${BOARD_HOST}" BOARD_USER="${BOARD_USER}" BOARD_PASSWORD="${BOARD_PASSWORD}" \
             SKIP_BUILD="${SKIP_BUILD}" \
                 "${PROJECT_ROOT}/scripts/rk3576-mplane-readiness-probe.sh"
+            ;;
+        multi-camera-topology)
+            BOARD_HOST="${BOARD_HOST}" BOARD_USER="${BOARD_USER}" BOARD_PASSWORD="${BOARD_PASSWORD}" \
+            USB_DEVICE="${USB_DEVICE:-${DEVICE}}" MIPI_DEVICES="${MIPI_DEVICES:-}" \
+            REQUIRE_MIPI="${REQUIRE_MIPI:-0}" SKIP_BUILD="${SKIP_BUILD}" \
+                "${PROJECT_ROOT}/scripts/rk3576-multi-camera-topology-smoke.sh"
             ;;
         -h|--help|help)
             usage

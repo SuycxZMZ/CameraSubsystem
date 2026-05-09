@@ -287,6 +287,7 @@ cd /home/luckfox/CameraSubsystem
 ```bash
 ./scripts/rk3576-board-smoke-suite.sh
 ./scripts/rk3576-board-smoke-suite.sh dataplane-lifecycle codec-multi-session-control codec-mp4 web-record-mp4
+./scripts/rk3576-board-smoke-suite.sh multi-camera-topology
 ```
 
 Smoke suite 档位：
@@ -295,7 +296,7 @@ Smoke suite 档位：
 |------|------|------|
 | quick | 每次提交/PR 快速检查 (~60s) | `TIER=quick ./scripts/rk3576-board-smoke-suite.sh` |
 | full | 合入 main / 版本发布 (~135s) | `./scripts/rk3576-board-smoke-suite.sh` |
-| extended | 夜间回归 / 重大变更 (~5-8min) | `TIER=extended ./scripts/rk3576-board-smoke-suite.sh` |
+| extended | 夜间回归 / 重大变更，包含多 camera topology smoke (~5-8min) | `TIER=extended ./scripts/rk3576-board-smoke-suite.sh` |
 
 ### 7.4 示例参数
 

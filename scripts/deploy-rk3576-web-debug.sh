@@ -78,6 +78,7 @@ scp \
     "${PROJECT_ROOT}/scripts/rk3576-dataplane-v2-slow-consumer-smoke.sh" \
     "${PROJECT_ROOT}/scripts/rk3576-board-smoke-suite.sh" \
     "${PROJECT_ROOT}/scripts/rk3576-mplane-readiness-probe.sh" \
+    "${PROJECT_ROOT}/scripts/rk3576-multi-camera-topology-smoke.sh" \
     "${PROJECT_ROOT}/scripts/rk3576-run-web-stack.sh" \
     "${BOARD_USER}@${BOARD_HOST}:${remote_scripts}/"
 

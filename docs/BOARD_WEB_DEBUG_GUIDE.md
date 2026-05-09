@@ -258,7 +258,7 @@ Smoke suite 档位（通过 `TIER` 环境变量选择）：
 |------|------|----------|------|
 | quick | 每次提交/PR 快速检查 | ~60s | `TIER=quick ./scripts/rk3576-board-smoke-suite.sh` |
 | full | 合入 main / 版本发布 | ~135s | `./scripts/rk3576-board-smoke-suite.sh` |
-| extended | 夜间回归 / 重大变更，包含可选 MPLANE readiness | ~5-8min | `TIER=extended ./scripts/rk3576-board-smoke-suite.sh` |
+| extended | 夜间回归 / 重大变更，包含多 camera topology smoke | ~5-8min | `TIER=extended ./scripts/rk3576-board-smoke-suite.sh` |
 
 按需缩小范围（命令行显式指定 suite 优先级最高）：
 
@@ -285,6 +285,18 @@ BOARD_PASSWORD=luckfox \
 ```bash
 REQUIRE_MPLANE=1 DEVICES="/dev/video22 /dev/video23" ./scripts/rk3576-mplane-readiness-probe.sh
 ```
+
+USB + MIPI 多 camera topology smoke 入口：
+
+```bash
+BOARD_HOST=192.168.31.9 \
+BOARD_USER=luckfox \
+BOARD_PASSWORD=luckfox \
+USB_DEVICE=/dev/video45 \
+./scripts/rk3576-board-smoke-suite.sh multi-camera-topology
+```
+
+该入口把 USB live DataPlaneV2 生命周期验证和 MIPI/RKISP MPLANE readiness 放到同一个 topology 口径下。当前只有 USB 摄像头时，USB live 必须通过，MIPI readiness 可以是 `SKIP`；接入真实 MIPI/RKISP sensor 后，使用 `REQUIRE_MIPI=1 MIPI_DEVICES="/dev/video22 /dev/video23"` 把 MPLANE readiness 提升为强校验。该入口仍不宣称完成 MIPI live STREAMON，只用于提前固化 USB + MIPI 可以共存的板端 smoke 结构。
 
 短 smoke：
 

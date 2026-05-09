@@ -25,6 +25,7 @@ MAX_ACTIVE_LEASES="${MAX_ACTIVE_LEASES:-0}"
 MAX_RELEASE_TIMEOUT="${MAX_RELEASE_TIMEOUT:-0}"
 MAX_LEASE_EXHAUSTED="${MAX_LEASE_EXHAUSTED:-0}"
 MAX_EXPORT_FAIL="${MAX_EXPORT_FAIL:-0}"
+CHECK_CLEANUP="${CHECK_CLEANUP:-1}"
 
 CONTROL_SOCKET="/tmp/camera_subsystem_control.sock"
 DATA_SOCKET="/tmp/camera_subsystem_data_v2.sock"
@@ -158,19 +159,33 @@ fi
 mkdir -p "${LOCAL_LOG_DIR}"
 
 run_ssh "mkdir -p '${BOARD_DIR}'"
-run_scp \
-    "${OUTPUT_DIR}/camera_publisher_example" \
-    "${OUTPUT_DIR}/camera_subscriber_example" \
-    "${TARGET}:${BOARD_DIR}/" >/dev/null
-
 run_ssh "set -e; \
     cd '${BOARD_DIR}'; \
     pkill -f '[c]amera_publisher_example' 2>/dev/null || true; \
     pkill -f '[c]amera_subscriber_example' 2>/dev/null || true; \
+    for _ in 1 2 3 4 5; do \
+        if ! pgrep -f '[c]amera_publisher_example|[c]amera_subscriber_example' >/dev/null 2>&1; then \
+            break; \
+        fi; \
+        sleep 1; \
+    done; \
+    pkill -9 -f '[c]amera_publisher_example' 2>/dev/null || true; \
+    pkill -9 -f '[c]amera_subscriber_example' 2>/dev/null || true; \
     rm -f '${CONTROL_SOCKET}' '${DATA_SOCKET}' '${RELEASE_SOCKET}'; \
     rm -f publisher.log fd_samples.log lifecycle_status.log subscriber-*.log *.pid; \
     rm -rf frames-*; \
     mkdir -p frames"
+run_scp \
+    "${OUTPUT_DIR}/camera_publisher_example" \
+    "${TARGET}:${BOARD_DIR}/camera_publisher_example.upload" >/dev/null
+run_scp \
+    "${OUTPUT_DIR}/camera_subscriber_example" \
+    "${TARGET}:${BOARD_DIR}/camera_subscriber_example.upload" >/dev/null
+run_ssh "set -e; \
+    cd '${BOARD_DIR}'; \
+    mv camera_publisher_example.upload camera_publisher_example; \
+    mv camera_subscriber_example.upload camera_subscriber_example; \
+    chmod +x camera_publisher_example camera_subscriber_example"
 
 run_ssh "set -e; \
     cd '${BOARD_DIR}'; \
@@ -226,6 +241,9 @@ run_ssh "set +e; \
     echo \"sockets_left=\${sockets_left}\" >> lifecycle_status.log; \
     pkill -f '[c]amera_publisher_example' 2>/dev/null; \
     pkill -f '[c]amera_subscriber_example' 2>/dev/null; \
+    sleep 1; \
+    pkill -9 -f '[c]amera_publisher_example' 2>/dev/null; \
+    pkill -9 -f '[c]amera_subscriber_example' 2>/dev/null; \
     true"
 
 run_scp \
@@ -317,9 +335,13 @@ done
 remaining_publishers="$(extract_counter "$(cat "${LOCAL_LOG_DIR}/lifecycle_status.log")" "remaining_publishers")"
 remaining_subscribers="$(extract_counter "$(cat "${LOCAL_LOG_DIR}/lifecycle_status.log")" "remaining_subscribers")"
 sockets_left="$(extract_counter "$(cat "${LOCAL_LOG_DIR}/lifecycle_status.log")" "sockets_left")"
-check_eq "cleanup.remaining_publishers" "${remaining_publishers:-missing}" "0" || failures=$((failures + 1))
-check_eq "cleanup.remaining_subscribers" "${remaining_subscribers:-missing}" "0" || failures=$((failures + 1))
-check_eq "cleanup.sockets_left" "${sockets_left:-missing}" "0" || failures=$((failures + 1))
+if [[ "${CHECK_CLEANUP}" == "1" ]]; then
+    check_eq "cleanup.remaining_publishers" "${remaining_publishers:-missing}" "0" || failures=$((failures + 1))
+    check_eq "cleanup.remaining_subscribers" "${remaining_subscribers:-missing}" "0" || failures=$((failures + 1))
+    check_eq "cleanup.sockets_left" "${sockets_left:-missing}" "0" || failures=$((failures + 1))
+else
+    echo "INFO: cleanup check skipped remaining_publishers=${remaining_publishers:-missing} remaining_subscribers=${remaining_subscribers:-missing} sockets_left=${sockets_left:-missing}"
+fi
 
 if (( failures > 0 )); then
     echo

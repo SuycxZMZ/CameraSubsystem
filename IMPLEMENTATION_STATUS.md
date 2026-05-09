@@ -289,13 +289,15 @@ flowchart TB
    - 已完成 codec server 多 session 第一阶段：`RecordingSessionManager` 改为 `stream_id -> RecordingSession`，同一进程可同时管理多路录制状态，单路 stop 不影响其他 stream 状态；RK3576 `codec-multi-session-control` 已验证两路控制面 session 隔离
    - 已补齐 Web Gateway 与 codec server 的显式 `--stream-id` 订阅配置，`/status` 与 record fallback 不再硬编码 `usb_camera_0`；USB-only 默认保持 `stream_id=0`，与当前 Web 二进制帧协议和前端 store 对齐
    - 已完成 Web W1-W2：Gateway status 携带 `stream_index`，前端建立 `stream_index -> stream_id` sideband 映射，预览帧、录制状态和错误状态统一归并到同一个 stream card；WebFrameHeader V1 继续保留 numeric stream index
-   - 当前剩余主偏差是真实多 camera 板端联合 smoke 仍未完成；Web W3/W4 仅在 topology 配置和真实多路输入需要时推进，不能先于主链路继续扩张 UI/协议面
+   - 当前剩余主偏差是真实 MIPI live STREAMON 尚未完成；Web W3/W4 仅在 topology 配置和真实多路输入需要时推进，不能先于主链路继续扩张 UI/协议面
    - USB-only smoke 可以继续保留单 `DEVICE=/dev/video45` 默认入口；生产化配置需要显式声明 stream topology，保证 USB 与 MIPI 可以同时存在
 
 2. **板端 smoke 与启动方式固化**
    - 已新增 `scripts/rk3576-board-smoke-suite.sh` 作为 RK3576 统一自检入口，默认串联 DataPlaneV2 lifecycle、codec multi-session control、codec MP4、Web MP4 record 和 Web codec restart MP4 smoke
    - 已新增 `scripts/rk3576-run-web-stack.sh` 管理 `camera_publisher_example` / `camera_codec_server` / `web_preview_gateway` 的 start / stop / restart / status / logs
    - 已完成 smoke suite quick/full/extended 三档拆分（`TIER` 环境变量选择，默认 `full`）
+   - 已新增 `multi-camera-topology` suite：USB live DataPlaneV2 生命周期与 MIPI/RKISP MPLANE readiness 使用同一个 topology smoke 入口；当前 USB-only 环境允许 MIPI readiness SKIP，接入真实 sensor 后用 `REQUIRE_MIPI=1` 强校验
+   - 2026-05-09 板端短 smoke 结果：USB `/dev/video45` DataPlaneV2 live `v2_sent=254`、`release_pending=0`、subscriber `frames=254`；RKISP/RKVpss MPLANE readiness `pass=10`、`fail=0`
 
 3. **Web / Codec 扩展能力收敛**
    - Web Preview 与 `camera_codec_server` 当前定位为调试预览、录制 smoke 和主链路验证辅助，不再作为短期主线长期展开
@@ -491,9 +493,10 @@ flowchart TB
 - [x] 为 `web_preview_gateway` 与 `camera_codec_server` 增加显式 `--stream-id` 订阅配置，消除 Web status/record fallback 的硬编码流 ID；RK3576 quick smoke 通过 `codec-mp4`、`web-record-mp4`、`web-codec-restart-mp4`，日志确认 publisher/control/codec/gateway 均使用 `stream_id=0` ✅ 2026-05-09
 - [x] 完成 Web 多 stream 状态设计：短期采用 sideband status 映射 numeric `stream_index` 到字符串 `stream_id`，避免直接破坏 WebFrameHeader V1 ✅ 2026-05-09
 - [x] 完成 Web W1-W2 小步接入：Gateway status 增加 `stream_index`，前端按 `stream_index -> stream_id` 归并预览帧、录制状态和错误状态 ✅ 2026-05-09
+- [x] 新增 RK3576 `multi-camera-topology` smoke 入口：USB live DataPlaneV2 生命周期与 MIPI/RKISP readiness 共用 topology 口径，真实 MIPI 接入后可切换为强校验 ✅ 2026-05-09
 - [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane
 - [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
-- [ ] 按真实多 camera topology 补板端联合 smoke，必要时再扩展 Web W3 多 stream status list
+- [ ] 接入真实 MIPI sensor 后，把 `multi-camera-topology` 从 readiness 升级为 USB live + MIPI live 联合 smoke
 - [ ] 背压策略参数化（延迟阈值/优先级规则）
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 
