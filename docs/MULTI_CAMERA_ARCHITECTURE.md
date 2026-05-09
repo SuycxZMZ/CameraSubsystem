@@ -169,7 +169,7 @@ Web Preview 和板端脚本当前以单路调试为主，这个阶段是合理�
 | M2 | P0 | publisher 改为 `stream_id -> CameraStreamRuntime` | 已完成第一刀：publisher 示例已使用 runtime map，两个 stream 不再共享同一个全局 `CameraSource`；多路 release key 仍归 M3 |
 | M3 | P0 | DataPlaneV2/release key 多路化 | 已完成：publisher pending lease 使用 stream/frame/buffer key，ReleaseFrame tracker 以 stream/frame/buffer 隔离并跟踪 consumer release set |
 | M4 | P1 | codec server 多 `RecordingSession` | 已完成第一阶段：`RecordingSessionManager` 使用 `stream_id -> RecordingSession`，同一进程可同时管理多路录制状态，单路 stop 不影响其他路 |
-| M5 | P1 | Web/gateway 多 stream 状态 | 前端可选择流并显示每路 fps/record/status |
+| M5 | P1 | Web/gateway 多 stream 状态 | 已完成设计入口：短期采用 sideband status 映射 `stream_index -> stream_id`，避免立即破坏 WebFrameHeader V1；下一步实现 W1-W2 |
 | M6 | P1 | USB + MIPI 板端联合 smoke | USB live + MIPI live 或 MIPI probe 同时运行，互不影响 |
 | M7 | P2 | MIPI DataPlaneV2 -> MPP 低拷贝录制 | NV12 DMA-BUF descriptor import 编码，并完成 release 闭环 |
 
@@ -180,7 +180,7 @@ Web Preview 和板端脚本当前以单路调试为主，这个阶段是合理�
 多路摄像头架构纠偏完成时，至少满足：
 
 1. 单 publisher 进程中可以配置两路以上 stream，启动一路不会 stop 另一路。
-2. 所有 frame、descriptor、release、record status、Web event、metrics 和关键日志都能追溯到稳定 `stream_id`。
+2. 所有 frame、descriptor、release、record status、Web event、metrics 和关键日志都能追溯到稳定 `stream_id`；WebFrameHeader V1 的 numeric stream index 必须能通过 status 映射回字符串身份。
 3. DataPlaneV2 pending lease 不存在跨 stream `frame_id` 碰撞风险。
 4. codec server 能表达多路 session 状态，即使实际并发路数受硬件能力限制也要返回明确错误。
 5. USB copy path 和 MIPI MPLANE/DMA-BUF path 可以共存于同一 topology。

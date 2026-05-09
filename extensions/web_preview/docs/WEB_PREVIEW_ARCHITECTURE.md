@@ -311,7 +311,42 @@ sequenceDiagram
 | `stride_y` / `stride_uv` | 当前示例数据面头未提供 | JPEG 可为 0，原始 YUV/RGB 支持前需补充 |
 | `transform_flags` | Gateway 内部生成 | 第一阶段 JPEG 透传应标记为未转换 |
 
-## 11. 前端工程设计
+## 11. 多 Stream 状态设计
+
+当前 `WebFrameHeader::stream_id` 是 `uint32_t`，前端用 `String(header.streamId)` 得到 `"0"` 作为预览流 key。CameraSubsystem 主链路已经开始使用字符串 `stream_id`，例如 `usb0`、`mipi0_main`。这两者不能直接混用，否则会出现预览帧属于 `"0"`，录制状态属于 `"usb0"` 的 UI 分裂。
+
+短期策略采用 **sideband stream status 映射**，不立即破坏二进制帧协议：
+
+```mermaid
+flowchart LR
+    Publisher["camera_publisher<br/>stream_id 字符串"] --> Gateway["web_preview_gateway"]
+    Gateway -->|Binary frame<br/>numeric_stream_index| Browser["Web UI"]
+    Gateway -->|Status message<br/>stream_id + stream_index| Browser
+    Browser --> Store["streams[stream_id]"]
+    Store --> Actions["record/status/fps/error"]
+```
+
+设计约束：
+
+1. `WebFrameHeader::stream_id` 在 V1 中继续表示 numeric stream index，用于兼容当前前端解析和 smoke。
+2. Gateway 必须通过文本 status 消息发布字符串 `stream_id`，并同时给出 `stream_index`。单路 USB 默认 `stream_id="0"`、`stream_index=0`。
+3. 前端 store 的长期主 key 必须是字符串 `stream_id`，numeric index 只作为帧协议兼容字段。
+4. Record / status / error / fps 必须归并到同一个字符串 `stream_id` 下，不能让预览帧和录制状态生成两个 stream card。
+5. 多路 UI 落地前，Gateway 不应同时广播多个无法区分字符串身份的二进制帧；如果必须广播，应先补 status 映射缓存。
+6. WebFrameHeader V2 可以新增固定长度 `stream_id_text` 或引入 frame metadata envelope，但这属于协议升级，需要前后端同时改版。
+
+推荐迁移顺序：
+
+| 阶段 | 内容 | 兼容性 |
+|------|------|--------|
+| W1 | Gateway status 增加 `stream_index`，前端建立 index -> string 映射 | 兼容现有 WebFrameHeader V1 |
+| W2 | 前端帧接收时先查映射，找不到时 fallback 到 numeric string | 兼容旧 Gateway |
+| W3 | Gateway 支持多 stream status list，每路有 `stream_id`、`stream_index`、format、fps、record capability | 不破坏现有单路 |
+| W4 | 设计 WebFrameHeader V2 或 metadata envelope，二进制帧直接携带字符串身份 | 需要协议版本升级 |
+
+第一阶段代码应优先做 W1-W2。W3 需要 topology 配置；W4 等 USB + MIPI 基础链路稳定后再做，避免过早扩大协议面。
+
+## 12. 前端工程设计
 
 前端工程放置在：
 
@@ -375,7 +410,7 @@ UI 风格说明：
 | 7-9 | 3x3 |
 | 更多 | 滚动网格，默认低帧率 |
 
-## 12. 硬件加速与 AI 扩展边界
+## 13. 硬件加速与 AI 扩展边界
 
 RK3576 等边缘平台可能具备 GPU / NPU / RGA 等能力，但第一版不强行绑定具体硬件接口，也不能把硬件转换写成已实现事实。Gateway 内部只预留 `HardwareFrameTransformer`，后续可适配 RGA、GPU、OpenCL、OpenGL ES、Vulkan 或厂商媒体接口。
 
@@ -412,7 +447,7 @@ AI 检测由外部 AI 订阅端实现，不塞进 Gateway 主链路。Gateway �
 2. 如果 AI 结果滞后，前端可以根据策略选择显示最近结果或丢弃过期结果。
 3. 第一版 Detect 按钮可以返回 `not_supported` 或 `external_ai_not_connected`。
 
-## 13. 第一版实现决策
+## 14. 第一版实现决策
 
 本节用于把影响第一版代码编写的决策从 TODO 中前移，避免实现阶段反复摇摆。除非后续遇到明确阻塞，第一版按以下边界启动编码。
 
@@ -482,7 +517,7 @@ AI 检测由外部 AI 订阅端实现，不塞进 Gateway 主链路。Gateway �
 4. 示例数据面头暂不包含 stride / plane metadata，因此第一版不承诺原始 YUV / RGB 完整支持。
 5. Gateway 作为普通订阅端接入，不直接打开 `/dev/videoX`。
 
-## 14. 第一阶段 MVP 范围
+## 15. 第一阶段 MVP 范围
 
 必须做：
 
@@ -514,7 +549,7 @@ AI 检测由外部 AI 订阅端实现，不塞进 Gateway 主链路。Gateway �
 | systemd service | 后续补充 |
 | Gateway 内编码保存 | 不在 Gateway 内实现；录制编码由独立 `camera_codec_server` 承担 |
 
-## 15. TODO 与待确认项
+## 16. TODO 与待确认项
 
 以下事项不阻塞第一版 JPEG 透传 Gateway 开始编码，但会影响后续格式扩展、部署固化和生产化能力。
 
