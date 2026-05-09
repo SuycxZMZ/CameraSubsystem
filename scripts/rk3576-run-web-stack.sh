@@ -7,6 +7,7 @@ BOARD_USER="${BOARD_USER:-luckfox}"
 BOARD_PASSWORD="${BOARD_PASSWORD:-luckfox}"
 REMOTE_ROOT="${REMOTE_ROOT:-/home/luckfox/CameraSubsystem}"
 DEVICE="${DEVICE:-/dev/video45}"
+STREAM_ID="${STREAM_ID:-0}"
 HTTP_PORT="${HTTP_PORT:-8080}"
 MAX_PREVIEW_FPS="${MAX_PREVIEW_FPS:-30}"
 
@@ -33,6 +34,7 @@ Environment:
   BOARD_USER=${BOARD_USER}
   REMOTE_ROOT=${REMOTE_ROOT}
   DEVICE=${DEVICE}
+  STREAM_ID=${STREAM_ID}
   HTTP_PORT=${HTTP_PORT}
 EOF
 }
@@ -104,6 +106,7 @@ sleep 1
   --codec-socket '${CODEC_SOCKET}' \
   --output-dir '${OUTPUT_DIR}' \
   --device '${DEVICE}' \
+  --stream-id '${STREAM_ID}' \
   > '${remote_logs}/codec_server.log' 2>&1 &
 echo \$! > '${remote_run}/codec.pid'
 sleep 1
@@ -114,6 +117,7 @@ sleep 1
   --codec-socket '${CODEC_SOCKET}' \
   --output-dir '${OUTPUT_DIR}' \
   --device '${DEVICE}' \
+  --stream-id '${STREAM_ID}' \
   --static-root '${STATIC_ROOT}' \
   --port '${HTTP_PORT}' \
   --max-fps '${MAX_PREVIEW_FPS}' \

@@ -64,6 +64,7 @@ int main(int argc, char* argv[])
     std::cout << "web_preview_gateway listening on " << config.bind_host << ":"
               << config.http_port << "\n";
     std::cout << "device=" << config.device_path
+              << " stream_id=" << config.stream_id
               << " static_root=" << config.static_root << "\n";
 
     while (g_running.load())

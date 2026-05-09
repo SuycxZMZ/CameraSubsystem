@@ -50,7 +50,8 @@ void PrintCodecServerUsage(const char* program_name)
         << "  --release-socket <path>   DataPlaneV2 release socket path\n"
         << "  --codec-socket <path>     Codec control socket path\n"
         << "  --device <path>           Camera subscribe request device path, default /dev/video45\n"
-        << "  --camera-id <id>          Camera stream id, default default_camera\n"
+        << "  --stream-id <id>          Camera subscribe request stream id, default 0\n"
+        << "  --camera-id <id>          Logical camera id label, default default_camera\n"
         << "  --output-dir <path>       Recording output directory\n"
         << "  --input-format <format>   auto|mjpeg|jpeg|yuyv|nv12, default auto\n"
         << "  --codec <codec>           h264, default h264\n"
@@ -122,6 +123,14 @@ ParseResult ParseCodecServerConfig(int argc, char* argv[], CodecServerConfig* co
         {
             if (!require_value(&config->device_path))
             {
+                return ParseResult::kError;
+            }
+        }
+        else if (arg == "--stream-id")
+        {
+            if (!require_value(&config->stream_id) || config->stream_id.empty())
+            {
+                std::cerr << "invalid --stream-id value\n";
                 return ParseResult::kError;
             }
         }

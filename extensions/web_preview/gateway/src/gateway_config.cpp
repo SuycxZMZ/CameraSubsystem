@@ -55,6 +55,7 @@ void PrintUsage(const char* program_name)
         << "  --data-socket <path>      Camera data socket path\n"
         << "  --codec-socket <path>     Codec server control socket path\n"
         << "  --device <path>           Camera device path requested via control IPC\n"
+        << "  --stream-id <id>          Camera stream id requested via control IPC, default 0\n"
         << "  --static-root <path>      Frontend dist directory\n"
         << "  --client-id <id>          Control IPC client id\n"
         << "  --output-dir <path>       Recording output directory\n"
@@ -130,6 +131,14 @@ bool ParseGatewayConfig(int argc, char* argv[], GatewayConfig* config)
         {
             if (!require_value(&config->device_path))
             {
+                return false;
+            }
+        }
+        else if (arg == "--stream-id")
+        {
+            if (!require_value(&config->stream_id) || config->stream_id.empty())
+            {
+                std::cerr << "invalid --stream-id value\n";
                 return false;
             }
         }

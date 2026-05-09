@@ -29,6 +29,7 @@ CodecServerApp::CodecServerApp(CodecServerConfig config)
               config_.control_socket,
               config_.data_socket,
               config_.device_path,
+              config_.stream_id,
               "camera_codec_server",
               0,
               64U * 1024U * 1024U,
@@ -48,6 +49,7 @@ int CodecServerApp::Run()
               << "  release_socket=" << config_.release_socket << "\n"
               << "  codec_socket=" << config_.codec_socket << "\n"
               << "  device=" << config_.device_path << "\n"
+              << "  stream_id=" << config_.stream_id << "\n"
               << "  camera_id=" << config_.camera_id << "\n"
               << "  output_dir=" << config_.output_dir << "\n"
               << "  input_format=" << config_.input_format << "\n"

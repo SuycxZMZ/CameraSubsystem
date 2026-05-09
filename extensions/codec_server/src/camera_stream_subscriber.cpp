@@ -164,11 +164,12 @@ bool CameraStreamSubscriber::SendControlRequest(uint32_t command)
         return false;
     }
 
-    const CameraEndpoint endpoint =
+    CameraEndpoint endpoint =
         MakeCameraEndpoint(config_.camera_id,
                            CameraBusType::kDefault,
                            0,
                            config_.device_path.c_str());
+    SetEndpointStreamId(&endpoint, config_.stream_id.c_str());
     const auto request =
         MakeControlRequest(static_cast<CameraControlCommand>(command),
                            CameraClientRole::kSubscriber,

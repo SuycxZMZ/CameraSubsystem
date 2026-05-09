@@ -262,11 +262,15 @@ cd /home/luckfox/CameraSubsystem
 ./bin/camera_publisher_example /dev/video45 &
 
 # 2. 启动编码录制服务（Record 按钮需要）
-./bin/camera_codec_server --device /dev/video45 --output-dir /home/luckfox/CameraSubsystem/recordings &
+./bin/camera_codec_server \
+  --device /dev/video45 \
+  --stream-id 0 \
+  --output-dir /home/luckfox/CameraSubsystem/recordings &
 
 # 3. 启动 Gateway
 ./bin/web_preview_gateway \
   --device /dev/video45 \
+  --stream-id 0 \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
   --output-dir /home/luckfox/CameraSubsystem/recordings

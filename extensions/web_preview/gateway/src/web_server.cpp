@@ -407,7 +407,7 @@ std::string WebServer::HandleRecordCommand(const std::string& payload)
 
     if (stream_id.empty())
     {
-        stream_id = "usb_camera_0";
+        stream_id = config_.stream_id;
     }
 
     std::string codec_cmd;
@@ -821,7 +821,7 @@ std::string WebServer::BuildStatusJson() const
     }
 
     std::ostringstream ss;
-    ss << "{\"type\":\"status\",\"stream_id\":\"usb_camera_0\","
+    ss << "{\"type\":\"status\",\"stream_id\":\"" << config_.stream_id << "\","
        << "\"status\":\"" << stats.status << "\","
        << "\"width\":" << stats.width << ","
        << "\"height\":" << stats.height << ","

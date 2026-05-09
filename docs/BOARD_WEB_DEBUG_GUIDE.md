@@ -179,6 +179,7 @@ rm -f /tmp/camera_subsystem_control.sock \
   --data-socket /tmp/camera_subsystem_data.sock \
   --codec-socket /tmp/camera_subsystem_codec.sock \
   --device /dev/video45 \
+  --stream-id 0 \
   --output-dir /home/luckfox/CameraSubsystem/recordings \
   > logs/codec_server.log 2>&1 &
 ```
@@ -189,6 +190,7 @@ rm -f /tmp/camera_subsystem_control.sock \
   --data-socket /tmp/camera_subsystem_data.sock \
   --codec-socket /tmp/camera_subsystem_codec.sock \
   --device /dev/video45 \
+  --stream-id 0 \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
   --output-dir /home/luckfox/CameraSubsystem/recordings \

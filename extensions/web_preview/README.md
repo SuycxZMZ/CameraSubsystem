@@ -74,11 +74,13 @@ cd /home/luckfox/CameraSubsystem
 # 启动编码录制服务（Record 按钮需要）
 ./bin/camera_codec_server \
   --device /dev/video45 \
+  --stream-id 0 \
   --output-dir /home/luckfox/CameraSubsystem/recordings &
 
 # 启动 Gateway（绑定 0.0.0.0:8080，允许局域网访问）
 ./bin/web_preview_gateway \
   --device /dev/video45 \
+  --stream-id 0 \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
   --output-dir /home/luckfox/CameraSubsystem/recordings \
@@ -164,11 +166,13 @@ cd /home/luckfox/CameraSubsystem
 # 启动编码录制服务
 ./bin/camera_codec_server \
   --device /dev/video45 \
+  --stream-id 0 \
   --output-dir /home/luckfox/CameraSubsystem/recordings &
 
 # 启动 Gateway，指定前端静态文件目录
 ./bin/web_preview_gateway \
   --device /dev/video45 \
+  --stream-id 0 \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
   --output-dir /home/luckfox/CameraSubsystem/recordings \
@@ -204,6 +208,7 @@ http://192.168.31.9:8080
 | `--data-socket <path>` | `/tmp/camera_subsystem_data.sock` | 数据面 IPC socket 路径 |
 | `--codec-socket <path>` | `/tmp/camera_subsystem_codec.sock` | 编码服务控制 socket 路径 |
 | `--device <path>` | `/dev/video0` | 摄像头设备节点 |
+| `--stream-id <id>` | `0` | 控制面订阅和状态上报使用的稳定流 ID |
 | `--static-root <path>` | `../web/dist` | 前端静态文件目录 |
 | `--client-id <id>` | `web_preview_gateway` | 控制面 IPC 客户端 ID |
 | `--output-dir <path>` | `/home/luckfox/CameraSubsystem/recordings` | 录制文件输出目录 |

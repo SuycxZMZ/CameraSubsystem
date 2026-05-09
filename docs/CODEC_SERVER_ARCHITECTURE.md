@@ -532,6 +532,7 @@ extensions/codec_server/scripts/run-camera-codec-server-rk3576.sh
   --release-socket /tmp/camera_subsystem_release_v2.sock \
   --codec-socket /tmp/camera_subsystem_codec.sock \
   --device /dev/video45 \
+  --stream-id 0 \
   --camera-id default_camera \
   --output-dir /home/luckfox/CameraSubsystem/recordings \
   --input-format mjpeg \
@@ -550,7 +551,8 @@ extensions/codec_server/scripts/run-camera-codec-server-rk3576.sh
 3. `--codec h264` 第一版只接受 `h264`。
 4. 如果输出目录不存在，服务可以尝试创建；创建失败则启动失败或 start recording 返回 `output_dir_not_writable`。
 5. `--device` 是向当前 CameraSubsystem 发布端发起订阅时使用的设备标识或请求参数，不表示 `camera_codec_server` 直接打开 `/dev/video*`。编码服务仍必须通过 `camera_publisher` 获取帧。
-6. `--codec-socket` 是 `web_preview_gateway` 与 `camera_codec_server` 之间的录制控制 socket，不是 CameraSubsystem 现有控制面 socket。
+6. `--stream-id` 是编码服务订阅 CameraSubsystem 流时使用的稳定身份，必须与 Gateway/Web 前端状态中的 stream identity 对齐；USB-only smoke 默认使用 `0`。
+7. `--codec-socket` 是 `web_preview_gateway` 与 `camera_codec_server` 之间的录制控制 socket，不是 CameraSubsystem 现有控制面 socket。
 
 ### 14.2 内部帧输入契约
 
@@ -695,10 +697,12 @@ stateDiagram-v2
   --control-socket /tmp/camera_subsystem_control.sock \
   --data-socket /tmp/camera_subsystem_data.sock \
   --codec-socket /tmp/camera_subsystem_codec.sock \
+  --stream-id 0 \
   --output-dir /home/luckfox/CameraSubsystem/recordings
 
 ./web_preview_gateway \
   --device /dev/video45 \
+  --stream-id 0 \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
   --codec-socket /tmp/camera_subsystem_codec.sock \
@@ -751,7 +755,8 @@ sleep 1
   --data-socket /tmp/camera_subsystem_data.sock \
   --codec-socket /tmp/camera_subsystem_codec.sock \
   --output-dir /home/luckfox/CameraSubsystem/recordings \
-  --device /dev/video45 &
+  --device /dev/video45 \
+  --stream-id 0 &
 
 sleep 1
 
@@ -763,6 +768,7 @@ sleep 1
   --codec-socket /tmp/camera_subsystem_codec.sock \
   --output-dir /home/luckfox/CameraSubsystem/recordings \
   --device /dev/video45 \
+  --stream-id 0 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist &
 ```
 
@@ -924,7 +930,7 @@ RK3576 60 秒录制稳定性结果：
 下一步按 [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md) 的全局优先级推进；与 `camera_codec_server` 直接相关的任务如下：
 
 1. **多路录制架构纠偏**：✅ 已按 [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md) 将当前单 `RecordingSessionManager` 状态演进为 `stream_id -> RecordingSession`，避免后续 USB + MIPI 同时录制时共享 writer、encoder 和错误状态；RK3576 `recording_session_manager_test` 27/27 通过。
-2. **统一板端 smoke 回归**：`scripts/rk3576-board-smoke-suite.sh` 已把 `codec-mp4`、`web-record-mp4` 和 `web-codec-restart-mp4` 纳入默认套件；后续 codec 相关改动必须至少跑对应单项 smoke。
+2. **统一板端 smoke 回归**：`scripts/rk3576-board-smoke-suite.sh` 已把 `codec-mp4`、`web-record-mp4` 和 `web-codec-restart-mp4` 纳入默认套件；Gateway 和 codec server 已支持显式 `--stream-id`，后续 codec 相关改动必须至少跑对应单项 smoke。
 3. **DataPlaneV2 低拷贝录制设计**：接入 DataPlaneV2 前，先明确 copy path 与 fd path 的选择条件、fallback 行为、MPP import 输入契约和 release 时序；多路场景下所有 lease/release/status key 必须包含稳定 `stream_id`。
 4. **MIPI/RKISP 输入准备**：MPLANE readiness 已通过 RKISP/RKVpss `REQBUFS + QUERYBUF + EXPBUF` 探测；等待真实 sensor/media pipeline 出帧后，优先验证 MPLANE `bytesused`、stride、plane fd 和 timestamp，再进入 MPP import。
 5. **Web 异常恢复体验补充**：已覆盖短 smoke 的 WebSocket 停止后重连和 codec server 重启恢复；后续按实际 UI 体验决定是否增加 Gateway codec health 广播。

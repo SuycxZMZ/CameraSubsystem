@@ -18,6 +18,7 @@ struct CodecServerConfig
     std::string input_format = "auto";
     std::string codec = "h264";
     std::string data_plane = "v1";
+    std::string stream_id = "0";
     uint32_t width = 1920;
     uint32_t height = 1080;
     uint32_t fps = 30;

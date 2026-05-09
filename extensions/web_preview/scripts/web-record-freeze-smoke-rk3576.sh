@@ -6,6 +6,7 @@ PUBLISHER_BIN="${PUBLISHER_BIN:-${REMOTE_ROOT}/bin/camera_publisher_example}"
 CODEC_BIN="${CODEC_BIN:-${REMOTE_ROOT}/bin/camera_codec_server}"
 GATEWAY_BIN="${GATEWAY_BIN:-${REMOTE_ROOT}/bin/web_preview_gateway}"
 DEVICE="${DEVICE:-/dev/video45}"
+STREAM_ID="${STREAM_ID:-0}"
 CONTROL_SOCKET="${CONTROL_SOCKET:-/tmp/camera_subsystem_control.sock}"
 DATA_SOCKET="${DATA_SOCKET:-/tmp/camera_subsystem_data.sock}"
 CODEC_SOCKET="${CODEC_SOCKET:-/tmp/camera_subsystem_codec.sock}"
@@ -84,6 +85,7 @@ PORT = int(os.environ.get('PORT', '8080'))
 RECORD_CONTAINER = os.environ.get('RECORD_CONTAINER', 'raw_h264')
 RECORD_CYCLES = int(os.environ.get('RECORD_CYCLES', '1'))
 RECONNECT_AFTER_STOP = os.environ.get('RECONNECT_AFTER_STOP', '1') not in ('0', 'false', 'False')
+STREAM_ID = os.environ.get('STREAM_ID', '0')
 
 def recv_exact(sock, n):
     data = b''
@@ -178,13 +180,17 @@ for cycle in range(1, RECORD_CYCLES + 1):
     before, text_before = count_binary_frames(sock, 2.0)
     start_cmd = {
         'type': 'set_record_enabled',
-        'stream_id': '0',
+        'stream_id': STREAM_ID,
         'enabled': True,
         'container': RECORD_CONTAINER,
     }
     send_text(sock, json.dumps(start_cmd, separators=(',', ':')))
     during, text_during = count_binary_frames(sock, 3.0)
-    send_text(sock, '{"type":"set_record_enabled","stream_id":"0","enabled":false}')
+    send_text(sock, json.dumps({
+        'type': 'set_record_enabled',
+        'stream_id': STREAM_ID,
+        'enabled': False,
+    }, separators=(',', ':')))
     after, text_after = count_binary_frames(sock, 3.0)
 
     statuses = record_status_items(text_before + text_during + text_after)
@@ -225,6 +231,7 @@ sleep 1
     --codec-socket "$CODEC_SOCKET" \
     --output-dir "$OUTPUT_DIR" \
     --device "$DEVICE" \
+    --stream-id "$STREAM_ID" \
     > "$CODEC_LOG" 2>&1 &
 echo "$!" > "$CODEC_PID_FILE"
 sleep 1
@@ -234,6 +241,7 @@ sleep 1
     --data-socket "$DATA_SOCKET" \
     --codec-socket "$CODEC_SOCKET" \
     --device "$DEVICE" \
+    --stream-id "$STREAM_ID" \
     --static-root "$STATIC_ROOT" \
     --output-dir "$OUTPUT_DIR" \
     --port "$PORT" \

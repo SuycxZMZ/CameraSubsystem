@@ -181,10 +181,11 @@ bool CameraSubscriberClient::SendControlRequest(uint32_t command, std::string* m
         return false;
     }
 
-    const CameraEndpoint endpoint = MakeCameraEndpoint(config_.camera_id,
-                                                       CameraBusType::kDefault,
-                                                       0,
-                                                       config_.device_path.c_str());
+    CameraEndpoint endpoint = MakeCameraEndpoint(config_.camera_id,
+                                                 CameraBusType::kDefault,
+                                                 0,
+                                                 config_.device_path.c_str());
+    SetEndpointStreamId(&endpoint, config_.stream_id.c_str());
     const CameraControlRequest request = MakeControlRequest(
         static_cast<CameraControlCommand>(command),
         CameraClientRole::kSubscriber,

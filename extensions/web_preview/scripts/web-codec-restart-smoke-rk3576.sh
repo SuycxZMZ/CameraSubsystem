@@ -6,6 +6,7 @@ PUBLISHER_BIN="${PUBLISHER_BIN:-${REMOTE_ROOT}/bin/camera_publisher_example}"
 CODEC_BIN="${CODEC_BIN:-${REMOTE_ROOT}/bin/camera_codec_server}"
 GATEWAY_BIN="${GATEWAY_BIN:-${REMOTE_ROOT}/bin/web_preview_gateway}"
 DEVICE="${DEVICE:-/dev/video45}"
+STREAM_ID="${STREAM_ID:-0}"
 CONTROL_SOCKET="${CONTROL_SOCKET:-/tmp/camera_subsystem_control.sock}"
 DATA_SOCKET="${DATA_SOCKET:-/tmp/camera_subsystem_data.sock}"
 CODEC_SOCKET="${CODEC_SOCKET:-/tmp/camera_subsystem_codec.sock}"
@@ -61,6 +62,7 @@ start_codec()
         --codec-socket "$CODEC_SOCKET" \
         --output-dir "$OUTPUT_DIR" \
         --device "$DEVICE" \
+        --stream-id "$STREAM_ID" \
         >> "$CODEC_LOG" 2>&1 &
     echo "$!" > "$CODEC_PID_FILE"
     sleep 1
@@ -87,6 +89,7 @@ import time
 HOST = '127.0.0.1'
 PORT = int(os.environ.get('PORT', '8080'))
 RECORD_CONTAINER = os.environ.get('RECORD_CONTAINER', 'raw_h264')
+STREAM_ID = os.environ.get('STREAM_ID', '0')
 CODEC_PID_FILE = os.environ.get('CODEC_PID_FILE', '')
 PHASE = os.environ.get('PHASE', 'failover')
 
@@ -180,14 +183,18 @@ def record_status_items(items):
 def start_recording(sock):
     cmd = {
         'type': 'set_record_enabled',
-        'stream_id': '0',
+        'stream_id': STREAM_ID,
         'enabled': True,
         'container': RECORD_CONTAINER,
     }
     send_text(sock, json.dumps(cmd, separators=(',', ':')))
 
 def stop_recording(sock):
-    send_text(sock, '{"type":"set_record_enabled","stream_id":"0","enabled":false}')
+    send_text(sock, json.dumps({
+        'type': 'set_record_enabled',
+        'stream_id': STREAM_ID,
+        'enabled': False,
+    }, separators=(',', ':')))
 
 def dump_status(prefix, statuses):
     for item in statuses:
@@ -267,6 +274,7 @@ start_codec
     --data-socket "$DATA_SOCKET" \
     --codec-socket "$CODEC_SOCKET" \
     --device "$DEVICE" \
+    --stream-id "$STREAM_ID" \
     --static-root "$STATIC_ROOT" \
     --output-dir "$OUTPUT_DIR" \
     --port "$PORT" \
