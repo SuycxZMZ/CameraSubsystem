@@ -583,6 +583,7 @@ bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf, struct v4
         descriptor.total_bytes_used = total_bytes_used;
         frame.buffer_size_ = total_bytes_used;
         frame.buffer_fd_ = (unique_fd_count > 0) ? unique_fds[0] : -1;
+        FillFrameLayout(frame, total_bytes_used);
     }
     else
     {
@@ -595,6 +596,7 @@ bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf, struct v4
 
         frame.buffer_fd_ = buffer.dma_buf_fd;
         frame.buffer_size_ = used_size;
+        FillFrameLayout(frame, used_size);
 
         descriptor.plane_count = frame.plane_count_;
         descriptor.fd_count = 1;

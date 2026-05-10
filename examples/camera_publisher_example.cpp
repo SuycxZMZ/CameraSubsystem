@@ -890,7 +890,6 @@ int main(int argc, char* argv[])
             }
             if (runtime)
             {
-                std::lock_guard<std::mutex> lock(runtime->mutex);
                 runtime->source.Stop();
             }
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
@@ -1025,9 +1024,11 @@ int main(int argc, char* argv[])
             {
                 continue;
             }
-            std::lock_guard<std::mutex> runtime_lock(runtime->mutex);
             runtime->source.Stop();
-            runtime->pending_leases.clear();
+            {
+                std::lock_guard<std::mutex> runtime_lock(runtime->mutex);
+                runtime->pending_leases.clear();
+            }
         }
         runtimes_by_camera_id.clear();
         runtimes_by_stream.clear();
