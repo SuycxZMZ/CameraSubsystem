@@ -321,6 +321,107 @@ MPLANE descriptor 映射规则：
 4. 在具备 live sensor 后再打开 MPLANE STREAMON/DQBUF/QBUF，并验证 `bytesused > 0`、timestamp、sequence 和 release 后可持续采集。
 5. 最后再让 DataPlaneV2 subscriber / `camera_codec_server` 消费 MPLANE descriptor，进入 MPP import 低拷贝录制。
 
+#### MPLANE live 最小状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> Init: OpenDevice + S_FMT + REQBUFS + QUERYBUF
+    Init --> Export: VIDIOC_EXPBUF per-plane (optional)
+    Export --> Ready: all fd cached / or copy path ready
+    Init --> Error: REQBUFS/QUERYBUF/EXPBUF failed
+    Ready --> Streaming: VIDIOC_STREAMON ok
+    Streaming --> Dequeued: VIDIOC_DQBUF ok
+    Dequeued --> Leased: build FrameDescriptor + FrameLease
+    Leased --> Requeued: all consumers released or timeout
+    Requeued --> Streaming: VIDIOC_QBUF ok
+    Streaming --> Error: DQBUF fatal / STREAMOFF
+    Error --> Ready: recover (re-init buffers + STREAMON)
+    Error --> [*]: unrecoverable / cleanup
+    Streaming --> [*]: Stop -> STREAMOFF -> cleanup
+```
+
+状态含义：
+
+| 状态 | 含义 |
+|------|------|
+| `Init` | 设备已打开，格式已协商，buffer 已分配和查询 |
+| `Export` | 对每个 plane 执行 `VIDIOC_EXPBUF`，缓存 DMA-BUF fd；失败时仍可走 copy path（但 MPLANE 第一版不保留 copy fallback） |
+| `Ready` | buffer、fd cache、descriptor 模板和 lease 策略准备完成，等待 STREAMON |
+| `Streaming` | 正常 DQBUF，构造 `FramePacket` 并投递 |
+| `Dequeued` | 一帧已成功从驱动出队，获取 `v4l2_buffer` + `v4l2_plane[]` |
+| `Leased` | `FrameDescriptor` 和 `FrameLease` 已创建，底层 V4L2 buffer 暂不可复用 |
+| `Requeued` | lease release 或超时后由生产端执行 QBUF 归还驱动 |
+| `Error` | STREAMON/DQBUF/QBUF 持续失败，或 `bytesused == 0` 表示 sensor/media pipeline 未就绪 |
+
+#### STREAMON / DQBUF / QBUF 错误边界
+
+**STREAMON：**
+
+| 错误码 | 含义 | 处理策略 |
+|--------|------|----------|
+| `EINVAL` | buffer 未初始化或格式不匹配 | 记录错误，返回初始化失败，不自动重试 |
+| `EIO` | 硬件或驱动内部错误 | 记录错误，尝试 STREAMOFF 后重新 STREAMON（限 3 次），仍失败则标记设备 Error |
+| `ENODEV` | 设备已断开 | 记录错误，进入 Error 状态，等待设备恢复或手动重启 |
+
+**DQBUF：**
+
+| 错误码 | 含义 | 处理策略 |
+|--------|------|----------|
+| `EAGAIN` | 无可用帧（非阻塞模式） | 正常继续，select/epoll 会再次触发 |
+| `EIO` | 采集硬件错误 | 记录错误，连续 3 次则 STREAMOFF 并尝试恢复 |
+| `ENODEV` | 设备已断开 | 记录错误，进入 Error 状态 |
+| `EINVAL` | buffer 类型或 index 非法 | 记录致命错误，停止采集线程 |
+
+**QBUF：**
+
+| 错误码 | 含义 | 处理策略 |
+|--------|------|----------|
+| `EINVAL` | buffer index 或 type 非法 | 记录致命错误，该 buffer 可能已泄漏 |
+| `EIO` | 驱动内部错误 | 记录警告，继续尝试 QBUF 其他 buffer |
+| `ENODEV` | 设备已断开 | 记录错误，进入 Error 状态 |
+
+**每帧 `bytesused` 校验：**
+
+真实 MIPI sensor STREAMON 后，`v4l2_plane.bytesused` 必须非 0。若出现 `bytesused == 0`：
+
+1. 记录警告日志，包含 `buffer_id`、`sequence`、`timestamp`。
+2. 若连续多帧 `bytesused == 0`，视为 sensor/media pipeline 未就绪或配置错误。
+3. 不投递该帧，直接 QBUF 归还驱动，避免消费者收到空 payload。
+4. 若持续 10 帧以上，标记该 stream 为 Error 并停止采集。
+
+#### Descriptor 契约时序
+
+从 DQBUF 到 `FrameDescriptor` 的字段映射必须在采集线程内完成，不能延迟到消费者线程：
+
+```mermaid
+sequenceDiagram
+    participant Driver as V4L2 Driver
+    participant Source as CameraSource
+    participant Lease as FrameLeaseManager
+    participant Broker as FrameBroker
+
+    Source->>Driver: VIDIOC_DQBUF + v4l2_plane[VIDEO_MAX_PLANES]
+    Driver-->>Source: buf.index, buf.sequence, buf.timestamp, planes[].bytesused
+    Source->>Source: Validate bytesused > 0
+    Source->>Source: Map to FrameDescriptor<br/>buffer_id, plane_count, per-plane fd_index/offset/stride/length/bytes_used
+    Source->>Source: Fill FrameHandle for compatibility<br/>width, height, format, timestamp_ns, sequence
+    Source->>Lease: CreateLease(buffer_index, per-plane fd refs, metadata)
+    Source->>Broker: Publish(FramePacket = Descriptor + Handle + Lease)
+    Broker->>Consumer: OnFrame(FrameDescriptor)
+    Consumer-->>Lease: ReleaseFrame(...)
+    Lease->>Lease: All released or timeout
+    Lease->>Driver: VIDIOC_QBUF + v4l2_plane[]
+```
+
+关键契约：
+
+1. `FrameDescriptor` 中的 `timestamp_ns` 优先使用 `v4l2_buffer.timestamp`（由驱动提供），其次回退到采集线程本地 `CLOCK_MONOTONIC`。
+2. `sequence` 必须原样传递 `v4l2_buffer.sequence`，用于跨进程乱序和丢帧诊断。
+3. `stream_id` 来自初始化时绑定的 `CameraStreamIdentity`，不能由采集线程临时生成。
+4. `buffer_id` 就是 `v4l2_buffer.index`，QBUF 时必须原样填回。
+5. `fd_count` 和 `planes[].fd_index` 在初始化阶段根据 EXPBUF 结果确定，DQBUF 时只做索引引用，不再重新 export。
+6. 若驱动行为是"多 plane 共享同一 fd"，`fd_count < plane_count`，`fd_index` 去重后相同；QBUF 时仍按 per-plane 结构归还。
+
 ### 4.5 Phase 4：外部分配与硬件链路
 
 最后再考虑外部分配：

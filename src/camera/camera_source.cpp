@@ -109,36 +109,48 @@ bool CameraSource::Initialize(const core::CameraConfig& config)
         return false;
     }
 
-    if (!ConfigureDevice())
+    if (capture_buffer_type_ == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
     {
-        CloseDevice();
-        return false;
+        if (!InitMPlaneBuffers())
+        {
+            CleanupMPlaneProbeBuffers();
+            CloseDevice();
+            return false;
+        }
     }
+    else
+    {
+        if (!ConfigureDevice())
+        {
+            CloseDevice();
+            return false;
+        }
 
-    if (!InitMMap())
-    {
-        CleanupDmaBufExports();
-        CleanupBuffers();
-        CloseDevice();
-        return false;
-    }
+        if (!InitMMap())
+        {
+            CleanupDmaBufExports();
+            CleanupBuffers();
+            CloseDevice();
+            return false;
+        }
 
-    pool_buffer_size_ = 0;
-    if (!buffers_.empty())
-    {
-        pool_buffer_size_ = buffers_[0].length;
-    }
-    if (pool_buffer_size_ == 0)
-    {
-        pool_buffer_size_ = CalculateBufferSize(config_);
-    }
+        pool_buffer_size_ = 0;
+        if (!buffers_.empty())
+        {
+            pool_buffer_size_ = buffers_[0].length;
+        }
+        if (pool_buffer_size_ == 0)
+        {
+            pool_buffer_size_ = CalculateBufferSize(config_);
+        }
 
-    if (!buffer_pool_.Initialize(config_.buffer_count_, pool_buffer_size_))
-    {
-        CleanupDmaBufExports();
-        CleanupBuffers();
-        CloseDevice();
-        return false;
+        if (!buffer_pool_.Initialize(config_.buffer_count_, pool_buffer_size_))
+        {
+            CleanupDmaBufExports();
+            CleanupBuffers();
+            CloseDevice();
+            return false;
+        }
     }
 
     return true;
@@ -328,9 +340,16 @@ void CameraSource::CaptureLoop()
         }
 
         struct v4l2_buffer buf;
+        struct v4l2_plane planes[VIDEO_MAX_PLANES];
         memset(&buf, 0, sizeof(buf));
+        memset(planes, 0, sizeof(planes));
         buf.type = static_cast<v4l2_buf_type>(CaptureBufferType());
         buf.memory = V4L2_MEMORY_MMAP;
+        if (capture_buffer_type_ == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+        {
+            buf.length = mplane_probe_plane_count_;
+            buf.m.planes = planes;
+        }
 
         if (Xioctl(device_fd_, VIDIOC_DQBUF, &buf) < 0)
         {
@@ -343,13 +362,16 @@ void CameraSource::CaptureLoop()
             break;
         }
 
-        HandleDequeuedBuffer(buf);
+        HandleDequeuedBuffer(buf, planes);
     }
 }
 
-void CameraSource::HandleDequeuedBuffer(struct v4l2_buffer& buf)
+void CameraSource::HandleDequeuedBuffer(struct v4l2_buffer& buf, struct v4l2_plane* planes)
 {
-    if (buf.index >= buffers_.size())
+    const size_t buffer_count = (capture_buffer_type_ == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+                                    ? mplane_probe_buffers_.size()
+                                    : buffers_.size();
+    if (buf.index >= buffer_count)
     {
         dropped_frames_.fetch_add(1);
         platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
@@ -357,16 +379,17 @@ void CameraSource::HandleDequeuedBuffer(struct v4l2_buffer& buf)
         return;
     }
 
-    if (ShouldUseDmaBufPath() && HandleDequeuedBufferDmaBuf(buf))
+    if (ShouldUseDmaBufPath() && HandleDequeuedBufferDmaBuf(buf, planes))
     {
         return;
     }
 
-    HandleDequeuedBufferCopy(buf);
+    HandleDequeuedBufferCopy(buf, planes);
 }
 
-void CameraSource::HandleDequeuedBufferCopy(struct v4l2_buffer& buf)
+void CameraSource::HandleDequeuedBufferCopy(struct v4l2_buffer& buf, struct v4l2_plane* planes)
 {
+    (void)planes;
     auto buffer_ref = buffer_pool_.Acquire();
     if (!buffer_ref)
     {
@@ -388,14 +411,23 @@ void CameraSource::HandleDequeuedBufferCopy(struct v4l2_buffer& buf)
     frame.sequence_ = static_cast<uint32_t>(buf.sequence);
     frame.memory_type_ = core::MemoryType::kHeap;
 
+    if (capture_buffer_type_ == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+    {
+        // MPLANE 第一版不做 copy fallback，直接丢帧
+        dropped_frames_.fetch_add(1);
+        RequeueBuffer(buf.index);
+        return;
+    }
+
     size_t used_size = static_cast<size_t>(buf.bytesused);
     if (used_size == 0)
     {
         used_size = buffers_[buf.index].length;
     }
+    void* src_data = buffers_[buf.index].start;
 
     const size_t copy_size = std::min(used_size, buffer_ref->Size());
-    std::memcpy(buffer_ref->Data(), buffers_[buf.index].start, copy_size);
+    std::memcpy(buffer_ref->Data(), src_data, copy_size);
 
     frame.virtual_address_ = buffer_ref->Data();
     frame.buffer_size_ = copy_size;
@@ -422,12 +454,32 @@ void CameraSource::HandleDequeuedBufferCopy(struct v4l2_buffer& buf)
     RequeueBuffer(buf.index);
 }
 
-bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf)
+bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf, struct v4l2_plane* planes)
 {
-    Buffer& buffer = buffers_[buf.index];
-    if (!buffer.dma_buf_exported || buffer.dma_buf_fd < 0)
+    const bool is_mplane = (capture_buffer_type_ == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
+
+    if (is_mplane)
     {
-        return false;
+        if (buf.index >= mplane_probe_buffers_.size())
+        {
+            return false;
+        }
+        MPlaneProbeBuffer& mplane_buffer = mplane_probe_buffers_[buf.index];
+        for (auto& plane : mplane_buffer.planes)
+        {
+            if (!plane.dma_buf_exported || plane.dma_buf_fd < 0)
+            {
+                return false;
+            }
+        }
+    }
+    else
+    {
+        Buffer& buffer = buffers_[buf.index];
+        if (!buffer.dma_buf_exported || buffer.dma_buf_fd < 0)
+        {
+            return false;
+        }
     }
 
     const size_t active_leases = requeue_context_->active_leases.load();
@@ -449,12 +501,6 @@ bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf)
         return false;
     }
 
-    size_t used_size = static_cast<size_t>(buf.bytesused);
-    if (used_size == 0)
-    {
-        used_size = buffer.length;
-    }
-
     const uint64_t frame_id = frame_count_.fetch_add(1);
     dma_buf_frame_count_.fetch_add(1);
 
@@ -468,10 +514,8 @@ bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf)
     frame.format_ = config_.format_;
     frame.sequence_ = static_cast<uint32_t>(buf.sequence);
     frame.memory_type_ = core::MemoryType::kDmaBuf;
-    frame.buffer_fd_ = buffer.dma_buf_fd;
     frame.virtual_address_ = nullptr;
-    frame.buffer_size_ = used_size;
-    FillFrameLayout(frame, used_size);
+    FillFrameLayout(frame, 0);
 
     core::FrameDescriptor descriptor;
     descriptor.frame_id = frame_id;
@@ -484,18 +528,86 @@ bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf)
     descriptor.pixel_format = frame.format_;
     descriptor.memory_type = core::MemoryType::kDmaBuf;
     descriptor.buffer_id = buf.index;
-    descriptor.plane_count = frame.plane_count_;
-    descriptor.fd_count = 1;
-    descriptor.fds[0] = buffer.dma_buf_fd;
-    descriptor.total_bytes_used = used_size;
     descriptor.flags = frame.flags_;
-    for (uint32_t i = 0; i < frame.plane_count_ && i < core::kMaxFramePlanes; ++i)
+
+    if (is_mplane)
     {
-        descriptor.planes[i].fd_index = 0;
-        descriptor.planes[i].offset = frame.plane_offset_[i];
-        descriptor.planes[i].stride = frame.line_stride_[i];
-        descriptor.planes[i].length = frame.plane_size_[i];
-        descriptor.planes[i].bytes_used = frame.plane_size_[i];
+        MPlaneProbeBuffer& mplane_buffer = mplane_probe_buffers_[buf.index];
+        descriptor.plane_count = static_cast<uint32_t>(mplane_buffer.planes.size());
+
+        // fd 去重：如果多个 plane 共享同一个 fd，只填一次
+        int unique_fds[core::kMaxFrameFds];
+        uint32_t fd_index_map[core::kMaxFramePlanes];
+        uint32_t unique_fd_count = 0;
+        for (size_t p = 0; p < mplane_buffer.planes.size() && p < core::kMaxFramePlanes; ++p)
+        {
+            int fd = mplane_buffer.planes[p].dma_buf_fd;
+            uint32_t idx = 0;
+            for (; idx < unique_fd_count && idx < core::kMaxFrameFds; ++idx)
+            {
+                if (unique_fds[idx] == fd)
+                {
+                    break;
+                }
+            }
+            if (idx == unique_fd_count && unique_fd_count < core::kMaxFrameFds)
+            {
+                unique_fds[unique_fd_count] = fd;
+                ++unique_fd_count;
+            }
+            fd_index_map[p] = idx;
+        }
+        descriptor.fd_count = unique_fd_count;
+        for (uint32_t i = 0; i < unique_fd_count && i < core::kMaxFrameFds; ++i)
+        {
+            descriptor.fds[i] = unique_fds[i];
+        }
+
+        size_t total_bytes_used = 0;
+        for (size_t p = 0; p < mplane_buffer.planes.size() && p < core::kMaxFramePlanes; ++p)
+        {
+            descriptor.planes[p].fd_index = fd_index_map[p];
+            descriptor.planes[p].offset = mplane_buffer.planes[p].data_offset;
+            descriptor.planes[p].stride = mplane_buffer.planes[p].bytes_per_line;
+            descriptor.planes[p].length = mplane_buffer.planes[p].length;
+            if (planes)
+            {
+                descriptor.planes[p].bytes_used = planes[p].bytesused;
+            }
+            else
+            {
+                descriptor.planes[p].bytes_used = mplane_buffer.planes[p].length;
+            }
+            total_bytes_used += descriptor.planes[p].bytes_used;
+        }
+        descriptor.total_bytes_used = total_bytes_used;
+        frame.buffer_size_ = total_bytes_used;
+        frame.buffer_fd_ = (unique_fd_count > 0) ? unique_fds[0] : -1;
+    }
+    else
+    {
+        Buffer& buffer = buffers_[buf.index];
+        size_t used_size = static_cast<size_t>(buf.bytesused);
+        if (used_size == 0)
+        {
+            used_size = buffer.length;
+        }
+
+        frame.buffer_fd_ = buffer.dma_buf_fd;
+        frame.buffer_size_ = used_size;
+
+        descriptor.plane_count = frame.plane_count_;
+        descriptor.fd_count = 1;
+        descriptor.fds[0] = buffer.dma_buf_fd;
+        descriptor.total_bytes_used = used_size;
+        for (uint32_t i = 0; i < frame.plane_count_ && i < core::kMaxFramePlanes; ++i)
+        {
+            descriptor.planes[i].fd_index = 0;
+            descriptor.planes[i].offset = frame.plane_offset_[i];
+            descriptor.planes[i].stride = frame.line_stride_[i];
+            descriptor.planes[i].length = frame.plane_size_[i];
+            descriptor.planes[i].bytes_used = frame.plane_size_[i];
+        }
     }
 
     std::weak_ptr<RequeueContext> weak_context = requeue_context_;
@@ -518,15 +630,39 @@ bool CameraSource::HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf)
                     return;
                 }
 
-                struct v4l2_buffer qbuf;
-                std::memset(&qbuf, 0, sizeof(qbuf));
-                qbuf.type = static_cast<v4l2_buf_type>(context->buffer_type);
-                qbuf.memory = V4L2_MEMORY_MMAP;
-                qbuf.index = buffer_index;
-                if (Xioctl(context->device_fd, VIDIOC_QBUF, &qbuf) < 0)
+                if (context->buffer_type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
                 {
-                    platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
-                                                  "VIDIOC_QBUF failed: %s", strerror(errno));
+                    struct v4l2_buffer qbuf;
+                    struct v4l2_plane qplanes[VIDEO_MAX_PLANES];
+                    std::memset(&qbuf, 0, sizeof(qbuf));
+                    std::memset(qplanes, 0, sizeof(qplanes));
+                    qbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+                    qbuf.memory = V4L2_MEMORY_MMAP;
+                    qbuf.index = buffer_index;
+                    qbuf.length = context->plane_count;
+                    qbuf.m.planes = qplanes;
+                    for (uint32_t p = 0; p < context->plane_count && p < VIDEO_MAX_PLANES; ++p)
+                    {
+                        qplanes[p].length = context->plane_lengths[p];
+                    }
+                    if (Xioctl(context->device_fd, VIDIOC_QBUF, &qbuf) < 0)
+                    {
+                        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                                      "VIDIOC_QBUF failed: %s", strerror(errno));
+                    }
+                }
+                else
+                {
+                    struct v4l2_buffer qbuf;
+                    std::memset(&qbuf, 0, sizeof(qbuf));
+                    qbuf.type = static_cast<v4l2_buf_type>(context->buffer_type);
+                    qbuf.memory = V4L2_MEMORY_MMAP;
+                    qbuf.index = buffer_index;
+                    if (Xioctl(context->device_fd, VIDIOC_QBUF, &qbuf) < 0)
+                    {
+                        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                                      "VIDIOC_QBUF failed: %s", strerror(errno));
+                    }
                 }
             }
         });
@@ -608,10 +744,14 @@ bool CameraSource::SelectCaptureBufferType(uint32_t capabilities)
 
     if (supports_mplane)
     {
-        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
-                                      "Device supports only V4L2 MPLANE capture; "
-                                      "MPLANE backend is designed but not enabled yet");
-        return false;
+        capture_buffer_type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+        if (requeue_context_)
+        {
+            requeue_context_->buffer_type = capture_buffer_type_;
+        }
+        platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                      "selected V4L2 MPLANE capture backend");
+        return true;
     }
 
     platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
@@ -1005,6 +1145,95 @@ bool CameraSource::ShouldRunMPlaneProbeOnly() const
            std::strcmp(value, "ON") == 0;
 }
 
+bool CameraSource::InitMPlaneBuffers()
+{
+    CleanupMPlaneProbeBuffers();
+
+    if (!ConfigureMPlaneFormatForProbe())
+    {
+        return false;
+    }
+
+    if (!InitMPlaneBuffersForProbe())
+    {
+        CleanupMPlaneProbeBuffers();
+        return false;
+    }
+
+    if (config_.io_method_ == static_cast<uint32_t>(core::IoMethod::kDmaBuf))
+    {
+        if (!ExportMPlaneDmaBufsForProbe())
+        {
+            CleanupMPlaneProbeBuffers();
+            return false;
+        }
+        dma_buf_path_enabled_ = true;
+        min_queued_capture_buffers_ = mplane_probe_buffers_.size() >= 4 ? 2 : 1;
+        if (mplane_probe_buffers_.size() <= min_queued_capture_buffers_)
+        {
+            global_lease_in_flight_max_ = 1;
+        }
+        else
+        {
+            global_lease_in_flight_max_ =
+                mplane_probe_buffers_.size() - min_queued_capture_buffers_;
+        }
+    }
+    else
+    {
+        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                      "MPLANE path requires IoMethod::kDmaBuf");
+        CleanupMPlaneProbeBuffers();
+        return false;
+    }
+
+    if (requeue_context_)
+    {
+        requeue_context_->buffer_type = capture_buffer_type_;
+        requeue_context_->plane_count = mplane_probe_plane_count_;
+        for (uint32_t p = 0; p < mplane_probe_plane_count_ && p < VIDEO_MAX_PLANES; ++p)
+        {
+            requeue_context_->plane_lengths[p] = mplane_probe_buffers_[0].planes[p].length;
+        }
+    }
+
+    for (auto& buffer : mplane_probe_buffers_)
+    {
+        struct v4l2_buffer qbuf;
+        struct v4l2_plane qplanes[VIDEO_MAX_PLANES];
+        std::memset(&qbuf, 0, sizeof(qbuf));
+        std::memset(qplanes, 0, sizeof(qplanes));
+        qbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+        qbuf.memory = V4L2_MEMORY_MMAP;
+        qbuf.index = buffer.index;
+        qbuf.length = mplane_probe_plane_count_;
+        qbuf.m.planes = qplanes;
+        for (uint32_t p = 0; p < mplane_probe_plane_count_; ++p)
+        {
+            qplanes[p].length = buffer.planes[p].length;
+        }
+
+        if (Xioctl(device_fd_, VIDIOC_QBUF, &qbuf) < 0)
+        {
+            platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                          "MPLANE VIDIOC_QBUF failed: index=%u error=%s",
+                                          buffer.index, strerror(errno));
+            CleanupMPlaneProbeBuffers();
+            return false;
+        }
+    }
+
+    platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                  "MPLANE live initialized: buffers=%zu planes=%u "
+                                  "dma_buf_enabled=%u min_queued=%zu lease_max=%zu",
+                                  mplane_probe_buffers_.size(),
+                                  mplane_probe_plane_count_,
+                                  dma_buf_path_enabled_ ? 1U : 0U,
+                                  min_queued_capture_buffers_,
+                                  global_lease_in_flight_max_);
+    return true;
+}
+
 void CameraSource::CleanupDmaBufExports()
 {
     if (requeue_context_ && requeue_context_->active_leases.load() > 0)
@@ -1085,16 +1314,44 @@ bool CameraSource::ShouldUseDmaBufPath() const
 
 void CameraSource::RequeueBuffer(uint32_t buffer_index)
 {
-    struct v4l2_buffer qbuf;
-    std::memset(&qbuf, 0, sizeof(qbuf));
-    qbuf.type = static_cast<v4l2_buf_type>(CaptureBufferType());
-    qbuf.memory = V4L2_MEMORY_MMAP;
-    qbuf.index = buffer_index;
-
-    if (Xioctl(device_fd_, VIDIOC_QBUF, &qbuf) < 0)
+    if (capture_buffer_type_ == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
     {
-        platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
-                                      "VIDIOC_QBUF failed: %s", strerror(errno));
+        struct v4l2_buffer qbuf;
+        struct v4l2_plane qplanes[VIDEO_MAX_PLANES];
+        std::memset(&qbuf, 0, sizeof(qbuf));
+        std::memset(qplanes, 0, sizeof(qplanes));
+        qbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+        qbuf.memory = V4L2_MEMORY_MMAP;
+        qbuf.index = buffer_index;
+        qbuf.length = mplane_probe_plane_count_;
+        qbuf.m.planes = qplanes;
+        for (uint32_t p = 0; p < mplane_probe_plane_count_ && p < VIDEO_MAX_PLANES; ++p)
+        {
+            if (buffer_index < mplane_probe_buffers_.size())
+            {
+                qplanes[p].length = mplane_probe_buffers_[buffer_index].planes[p].length;
+            }
+        }
+
+        if (Xioctl(device_fd_, VIDIOC_QBUF, &qbuf) < 0)
+        {
+            platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                          "VIDIOC_QBUF failed: %s", strerror(errno));
+        }
+    }
+    else
+    {
+        struct v4l2_buffer qbuf;
+        std::memset(&qbuf, 0, sizeof(qbuf));
+        qbuf.type = static_cast<v4l2_buf_type>(CaptureBufferType());
+        qbuf.memory = V4L2_MEMORY_MMAP;
+        qbuf.index = buffer_index;
+
+        if (Xioctl(device_fd_, VIDIOC_QBUF, &qbuf) < 0)
+        {
+            platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                          "VIDIOC_QBUF failed: %s", strerror(errno));
+        }
     }
 }
 

@@ -190,7 +190,7 @@ flowchart TB
 
 **待实现:**
 
-- ⏳ V4L2 多平面 STREAMON、RKISP/MIPI sensor pipeline 与多 fd import 验证
+- 🚧 V4L2 多平面 STREAMON、RKISP/MIPI sensor pipeline 与多 fd import 验证：MPLANE live 初始化骨架已完成，待真实 sensor 接入验证
 - ⏳ DataPlaneV2 板端长稳、真实 subscriber 崩溃/断连、慢消费者与多订阅者压测
 - ⏳ 高级 Buffer 管理机制与慢消费者隔离
 
@@ -312,8 +312,11 @@ flowchart TB
    - 2026-05-08 板端 readiness 结果：`pass=10`、`mplane_candidates=10`、`fail=0`、`mplane_readiness_result=PASS`；当前只证明 RKISP/RKVpss `REQBUFS + QUERYBUF + EXPBUF` readiness，不代表真实 sensor live frame
    - 已在 [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md) 固化 `CameraSource` 内部 backend 拆分、MPLANE descriptor 映射、release QBUF 边界和实现顺序
    - 已完成 `CameraSource` single-planar buffer type 依赖收敛，并新增有效 V4L2 capability 解析与内部 backend selector；当前行为仍固定为 `V4L2_BUF_TYPE_VIDEO_CAPTURE`，MPLANE-only 设备会明确失败
-   - 已新增 `CameraSource` 内部 MPLANE format/query/export 初始化骨架和清理逻辑；`CAMERA_SUBSYSTEM_ENABLE_MPLANE_PROBE=1` 时 `Initialize()` 只跑 probe-only 并立即 cleanup，不接入 `StartStream()`、`DQBUF/QBUF` 主循环
-   - 后续接入 MPLANE live sensor 后验证 per-plane fd / offset / stride / bytesused
+   - 已完成 `CameraSource` MPLANE live 初始化骨架：`SelectCaptureBufferType` 支持 MPLANE-only 设备，`Initialize()` 按 `capture_buffer_type_` 分流，`InitMPlaneBuffers()` 完成 `S_FMT -> REQBUFS -> QUERYBUF -> EXPBUF -> QBUF` 完整闭环
+   - 已完成 `CaptureLoop`、`HandleDequeuedBuffer`、`RequeueBuffer` 和 release callback 的 MPLANE 适配，支持 per-plane fd 去重和 `v4l2_plane[]` DQBUF/QBUF
+   - 已更新 `docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md` Phase 3，补充 MPLANE live 最小状态机、STREAMON/DQBUF/QBUF 错误边界和 descriptor 契约时序
+   - `CAMERA_SUBSYSTEM_ENABLE_MPLANE_PROBE=1` 仍保留 probe-only 路径用于 readiness 验证
+   - 后续接入真实 MIPI sensor 后验证 `bytesused > 0`、timestamp、sequence 和 release 后可持续采集
    - 为 DataPlaneV2 -> MPP 低拷贝录制路径准备真实 NV12 输入验证
 
 5. **DataPlaneV2 低拷贝录制架构设计**
@@ -482,6 +485,7 @@ flowchart TB
 - [x] 固化 V4L2 MPLANE 采集路径架构拆分设计 ✅ 2026-05-08
 - [x] 收敛 `CameraSource` 内部 single-planar buffer type 依赖，补有效 capability 解析和 backend selector 准备 ✅ 2026-05-08
 - [x] 新增 `CameraSource` 内部 MPLANE format/query/export 初始化骨架，不接入 STREAMON 主循环 ✅ 2026-05-08
+- [x] 完成 `CameraSource` MPLANE live 初始化与采集主循环适配：`InitMPlaneBuffers`、STREAMON、DQBUF、QBUF、per-plane fd 去重和 release callback ✅ 2026-05-10
 - [x] 增加 `CAMERA_SUBSYSTEM_ENABLE_MPLANE_PROBE=1` 受控开关，支持 `Initialize()` 只跑 MPLANE probe-only 并立即 cleanup ✅ 2026-05-08
 - [x] 固化 USB + MIPI 多路摄像头架构纠偏文档，明确 `CameraStreamIdentity`、多 `CameraStreamRuntime`、DataPlaneV2/release 多路 key 和 codec 多 session 迁移顺序 ✅ 2026-05-08
 - [x] 引入 `CameraStreamIdentity` 基础模型，`CameraSource`、`FrameDescriptor` 和 DataPlaneV2 descriptor 开始携带稳定字符串 `stream_id` ✅ 2026-05-08

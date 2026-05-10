@@ -23,7 +23,7 @@
 #include <thread>
 #include <vector>
 
-struct v4l2_buffer;
+#include <linux/videodev2.h>
 
 namespace camera_subsystem {
 namespace camera {
@@ -75,9 +75,9 @@ public:
 
 private:
     void CaptureLoop();
-    void HandleDequeuedBuffer(struct v4l2_buffer& buf);
-    void HandleDequeuedBufferCopy(struct v4l2_buffer& buf);
-    bool HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf);
+    void HandleDequeuedBuffer(struct v4l2_buffer& buf, struct v4l2_plane* planes = nullptr);
+    void HandleDequeuedBufferCopy(struct v4l2_buffer& buf, struct v4l2_plane* planes = nullptr);
+    bool HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf, struct v4l2_plane* planes = nullptr);
     bool OpenDevice();
     void CloseDevice();
     bool SelectCaptureBufferType(uint32_t capabilities);
@@ -88,6 +88,7 @@ private:
     bool InitMPlaneBuffersForProbe();
     bool ExportMPlaneDmaBufsForProbe();
     bool InitMPlaneDmaBufExportSkeleton();
+    bool InitMPlaneBuffers();
     bool ShouldRunMPlaneProbeOnly() const;
     void CleanupDmaBufExports();
     void CleanupMPlaneProbeBuffers();
@@ -149,6 +150,8 @@ private:
         std::mutex mutex;
         int device_fd = -1;
         uint32_t buffer_type = 0;
+        uint32_t plane_count = 0;
+        uint32_t plane_lengths[8];
         bool active = false;
         std::atomic<size_t> active_leases{0};
     };
