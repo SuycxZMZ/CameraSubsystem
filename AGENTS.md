@@ -1,6 +1,7 @@
 # CameraSubsystem Agent 工作指南
 
 **最后更新:** 2026-05-10  
+**开发路线:** [docs/DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md)  
 **适用范围:** 本文件面向在 `CameraSubsystem/` 目录内执行开发、评审、验证和文档维护任务的 AI Coding Agent。  
 **上级指南:** 仓库根目录 `../AGENTS.md` 提供全景导航、跨子项目关系和通用构建命令；本文档只补充 CameraSubsystem 特有的**当前上下文、决策树和检查清单**。
 
@@ -53,7 +54,35 @@
 - [ ] 检查 `git status --short`，确认没有覆盖用户未提交改动
 - [ ] 确认修改范围：只改必要的文件，不顺带格式化无关代码
 
-### 2.2 修改中约束
+### 2.2 写代码前置规则（硬性约束）
+
+**任何代码开发前必须先完成文档迭代，禁止直接动手写代码。** 这是为了避免在全局状态未理清时产生垃圾代码、污染仓库。
+
+1. **需求必须收敛到一句话**
+   - 本次修改解决的具体问题是什么？禁止模糊表述如"优化性能"。
+   - 不修改的边界是什么？明确哪些模块、哪些场景不在本次范围内。
+   - 修改后如何验证？列出具体指标、命令、预期输出。
+
+2. **架构文档必须先读、先引用、先更新**
+   - 如涉及接口变更，先更新 `API_REFERENCE.md`。
+   - 如涉及 DMA-BUF/DataPlaneV2，先读并引用 `DMA_BUF_ZERO_COPY_ARCHITECTURE.md`。
+   - 如涉及多路摄像头，先读并引用 `MULTI_CAMERA_ARCHITECTURE.md`。
+   - 如涉及录制/编码，先读并引用 `CODEC_SERVER_ARCHITECTURE.md`。
+   - 如涉及架构评审风险，先读并引用 `ARCHITECTURE_REVIEW.md` 对应 ARCH-* 编号。
+
+3. **风险清单必须闭合**
+   - 是否存在新的死锁窗口？（锁顺序、join 时机、callback 持锁）
+   - 是否影响现有板端 smoke？列出受影响的脚本和预期行为变化。
+   - 是否引入向后不兼容的协议或接口变更？
+   - 是否在无硬件条件下无法验证？标注"待 MIPI sensor 验证"或提供模拟方案。
+   - 多路并发下是否可能出现 frame_id 碰撞、lease 泄漏或 fd drift？
+   - **风险清单中不允许存在 "TODO"、"后续再定"、"先写代码再看"。**
+
+4. **文档就绪标准**
+   - ✅ 可以编码：所有相关架构文档已阅读并确认不冲突；如需更新架构文档，草稿已完成且无未闭合项；风险清单每项都有明确缓解策略；验证方案已明确。
+   - ❌ 禁止编码：架构文档中存在 TODO/FIXME/后续再评估；无法回答 "如果真实 MIPI sensor 行为与预期不同，代码如何表现"；接口变更未同步到 API_REFERENCE；风险清单中存在 "先写代码再看"。
+
+### 2.3 修改中约束
 
 1. **多路身份强制规则**
    - 任何新增跨进程/跨模块对象（ReleaseFrame、DataPlaneV2 descriptor、record status、Web event、关键日志）必须能追溯到 `stream_id`
@@ -78,7 +107,7 @@
    - 生成文件、日志、构建产物、node_modules 不要加入提交
    - `.claude/` `.codeartsdoer/` 等外部助手目录是否提交由用户决定，不要默认整理或删除
 
-### 2.3 修改后验证清单
+### 2.4 修改后验证清单
 
 | 修改范围 | 必做验证 |
 |----------|----------|
@@ -130,12 +159,19 @@
 
 ## 4. 当前主线优先级
 
-开发重心按以下顺序推进，**不要偏离主线去扩展外围功能**：
+开发重心按以下顺序推进，**不要偏离主线去扩展外围功能**。详细分析见 [docs/DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md)。
 
-1. **真实 MIPI/RKISP live STREAMON** — 在已有 MPLANE readiness 和 probe-only 骨架基础上，进入 `V4L2MPlaneBackend` live 初始化、DQBUF/QBUF、per-plane descriptor 映射
-2. **多 camera topology 强校验** — 把 `multi-camera-topology` 从 USB live + MIPI readiness 升级为 USB live + MIPI live 联合 smoke
-3. **DataPlaneV2 -> MPP 低拷贝录制设计与接入** — 先文档明确 copy path / fd path 选择、MPP import 输入契约和 release 时序，再写代码
-4. **Web / Codec 保持收敛** — 只处理影响 smoke、错误收敛、多路身份正确性和低拷贝输入适配的问题
+### 第一阶段（不依赖 MIPI sensor，可立即开始）
+
+1. **CameraSessionManager 回调持锁重构** — ARCHITECTURE_REVIEW P0 风险。将 Subscribe/Unsubscribe 中的"状态决策"与"callback 执行"拆开：锁内只更新 session 状态，锁外执行 start/stop，再锁内回滚。补充并发订阅/退订单测。
+2. **multi-camera-topology 强校验** — 在现有 USB live + MIPI readiness smoke 基础上，增加 identity 冲突检测、lease 跨 stream 隔离验证、并发启停独立性验证。
+3. **DataPlaneV2 -> MPP 低拷贝录制设计（仅文档）** — 明确 copy path / fd path 选择条件、MPP import 输入契约、release 时序、fallback 策略。真实 MIPI 帧到位前只做设计文档，不编码 fd path。
+4. **FrameBroker 背压参数化** — ARCH-004。定义 `BackpressureConfig`、DropPolicy、慢消费者检测与隔离。
+5. **统一 Metrics 接口** — ARCH-009。`core` 层最小 Metrics 结构，按 `stream_id` 标签聚合采集 FPS、队列深度、丢帧数、lease 统计。
+
+### 第二阶段（硬件阻塞，待 sensor 到位）
+
+6. **真实 MIPI/RKISP live STREAMON** — MPLANE 骨架已就绪，需验证 STREAMON 后 DQBUF/QBUF 帧率稳定性、per-plane `bytesused` 真实性、timestamp 正确性、per-plane fd 端到端路径。
 
 **明确暂缓项：** 复杂 UI 体验、自动续录、RTSP 推流、H.265、MKV 容器、分段录制、断电恢复
 
