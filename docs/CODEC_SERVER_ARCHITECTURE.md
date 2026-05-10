@@ -932,7 +932,7 @@ RK3576 60 秒录制稳定性结果：
 
 1. **多路录制架构纠偏**：✅ 已按 [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md) 将当前单 `RecordingSessionManager` 状态演进为 `stream_id -> RecordingSession`，避免后续 USB + MIPI 同时录制时共享 writer、encoder 和错误状态；RK3576 `recording_session_manager_test` 27/27 通过。
 2. **统一板端 smoke 回归**：`scripts/rk3576-board-smoke-suite.sh` 已把 `codec-multi-session-control`、`codec-mp4`、`web-record-mp4` 和 `web-codec-restart-mp4` 纳入默认套件；Gateway 和 codec server 已支持显式 `--stream-id`，后续 codec 相关改动必须至少跑对应单项 smoke。
-3. **DataPlaneV2 低拷贝录制设计**：接入 DataPlaneV2 前，先明确 copy path 与 fd path 的选择条件、fallback 行为、MPP import 输入契约和 release 时序；多路场景下所有 lease/release/status key 必须包含稳定 `stream_id`。
+3. **DataPlaneV2 低拷贝录制设计**：✅ 已完成设计文档 [DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md)。明确了 copy path / fd path 选择条件、MPP import 输入契约、ReleaseFrame 时序、fallback 策略和多路并发约束；真实 MIPI sensor 到位前不编码 fd path 生产实现。
 4. **MIPI/RKISP 输入准备**：MPLANE readiness 已通过 RKISP/RKVpss `REQBUFS + QUERYBUF + EXPBUF` 探测；等待真实 sensor/media pipeline 出帧后，优先验证 MPLANE `bytesused`、stride、plane fd 和 timestamp，再进入 MPP import。
 5. **Web / Codec 扩展收敛**：已覆盖短 smoke 的 WebSocket 停止后重连和 codec server 重启恢复；后续只补影响 smoke、错误收敛和多路身份正确性的必要能力，不继续扩展 MKV/H.265/RTSP/自动续录等非主线功能。
 
