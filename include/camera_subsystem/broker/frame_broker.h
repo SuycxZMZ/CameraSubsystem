@@ -19,7 +19,9 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace camera_subsystem {
@@ -35,6 +37,19 @@ class FrameBroker
 {
 public:
     /**
+     * @brief 单订阅者统计信息
+     */
+    struct SubscriberStats
+    {
+        std::string name;
+        uint64_t dispatched = 0;
+        uint64_t dropped = 0;
+        uint64_t consecutive_drops = 0;
+        bool is_slow_consumer = false;
+        uint64_t slow_consumer_detected_count = 0;
+    };
+
+    /**
      * @brief 分发统计信息
      */
     struct Stats
@@ -44,6 +59,7 @@ public:
         uint64_t dropped_tasks = 0;
         size_t queue_size = 0;
         size_t subscriber_count = 0;
+        std::vector<SubscriberStats> subscriber_stats;
     };
 
     FrameBroker();
@@ -147,6 +163,10 @@ private:
     std::atomic<uint64_t> dispatched_tasks_;
     std::atomic<uint64_t> dropped_tasks_;
     std::atomic<size_t> max_queue_size_;
+
+    // per-subscriber task counts and stats (keyed by raw pointer, stable while subscribed)
+    std::unordered_map<const IFrameSubscriber*, size_t> subscriber_task_counts_;
+    std::unordered_map<const IFrameSubscriber*, SubscriberStats> subscriber_stats_;
 };
 
 } // namespace broker

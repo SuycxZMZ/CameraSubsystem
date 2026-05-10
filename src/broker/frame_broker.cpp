@@ -182,9 +182,30 @@ void FrameBroker::PublishFrame(const core::FrameHandle& frame,
         std::lock_guard<std::mutex> lock(queue_mutex_);
         for (const auto& sub : subscribers)
         {
-            if (task_queue_.size() >= max_queue_size_.load())
+            const BackpressureConfig config = sub->GetBackpressureConfig();
+            const size_t max_size = (config.max_queue_size > 0)
+                                        ? config.max_queue_size
+                                        : max_queue_size_.load();
+
+            auto& count = subscriber_task_counts_[sub.get()];
+            if (count >= max_size)
             {
                 dropped_tasks_.fetch_add(1);
+
+                auto& stats = subscriber_stats_[sub.get()];
+                stats.name = sub->GetSubscriberName();
+                stats.dropped++;
+                stats.consecutive_drops++;
+                if (stats.consecutive_drops >= config.slow_consumer_threshold &&
+                    !stats.is_slow_consumer)
+                {
+                    stats.is_slow_consumer = true;
+                    stats.slow_consumer_detected_count++;
+                    platform::PlatformLogger::Log(
+                        core::LogLevel::kWarning, "frame_broker",
+                        "Slow consumer detected: %s consecutive_drops=%lu",
+                        sub->GetSubscriberName(), stats.consecutive_drops);
+                }
                 continue;
             }
 
@@ -196,6 +217,10 @@ void FrameBroker::PublishFrame(const core::FrameHandle& frame,
             task.sequence = sequence_.fetch_add(1);
 
             task_queue_.push(std::move(task));
+            count++;
+
+            auto& stats = subscriber_stats_[sub.get()];
+            stats.name = sub->GetSubscriberName();
         }
     }
 
@@ -223,6 +248,12 @@ FrameBroker::Stats FrameBroker::GetStats() const
     {
         std::lock_guard<std::mutex> lock(queue_mutex_);
         stats.queue_size = task_queue_.size();
+
+        stats.subscriber_stats.reserve(subscriber_stats_.size());
+        for (const auto& item : subscriber_stats_)
+        {
+            stats.subscriber_stats.push_back(item.second);
+        }
     }
 
     return stats;
@@ -252,12 +283,38 @@ void FrameBroker::WorkerLoop()
             {
                 task.subscriber->OnFrame(task.frame);
                 dispatched_tasks_.fetch_add(1);
+
+                std::lock_guard<std::mutex> lock(queue_mutex_);
+                auto& stats = subscriber_stats_[task.subscriber.get()];
+                stats.dispatched++;
+                stats.consecutive_drops = 0;
+                if (stats.is_slow_consumer)
+                {
+                    stats.is_slow_consumer = false;
+                    platform::PlatformLogger::Log(
+                        core::LogLevel::kInfo, "frame_broker",
+                        "Slow consumer recovered: %s",
+                        task.subscriber->GetSubscriberName());
+                }
+
+                auto it = subscriber_task_counts_.find(task.subscriber.get());
+                if (it != subscriber_task_counts_.end() && it->second > 0)
+                {
+                    it->second--;
+                }
             }
             catch (const std::exception& e)
             {
                 platform::PlatformLogger::Log(core::LogLevel::kError, "frame_broker",
                                               "Subscriber %s threw exception: %s",
                                               task.subscriber->GetSubscriberName(), e.what());
+
+                std::lock_guard<std::mutex> lock(queue_mutex_);
+                auto it = subscriber_task_counts_.find(task.subscriber.get());
+                if (it != subscriber_task_counts_.end() && it->second > 0)
+                {
+                    it->second--;
+                }
             }
         }
     }
