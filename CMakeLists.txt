@@ -55,6 +55,7 @@ set(CORE_SOURCES
     src/core/camera_config.cpp
     src/core/buffer_pool.cpp
     src/core/buffer_guard.cpp
+    src/core/metrics.cpp
 )
 
 set(PLATFORM_SOURCES

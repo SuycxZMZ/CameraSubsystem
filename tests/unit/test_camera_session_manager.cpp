@@ -21,8 +21,11 @@
 #include "camera_subsystem/camera/camera_session_manager.h"
 #include "camera_subsystem/ipc/camera_channel_contract.h"
 
+#include <atomic>
 #include <string>
+#include <thread>
 #include <vector>
+#include <chrono>
 
 using camera_subsystem::camera::CameraSessionManager;
 using camera_subsystem::ipc::CameraBusType;
@@ -206,4 +209,136 @@ TEST(CameraSessionManagerTest, StreamIdSeparatesSessionsForSameDevice)
     EXPECT_EQ(started_streams[1], "usb0_aux");
     EXPECT_EQ(stopped_streams[0], "usb0_main");
     EXPECT_EQ(stopped_streams[1], "usb0_aux");
+}
+
+TEST(CameraSessionManagerTest, ConcurrentSubscribeDoesNotDuplicateStart)
+{
+    std::atomic<uint32_t> start_count{0};
+    std::atomic<bool> start_in_progress{false};
+
+    CameraSessionManager manager(
+        [&](const CameraEndpoint&)
+        {
+            start_in_progress.store(true);
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            start_in_progress.store(false);
+            start_count.fetch_add(1);
+            return true;
+        },
+        [](const CameraEndpoint&)
+        {
+        });
+
+    const CameraEndpoint endpoint = MakeEndpoint(0, "/dev/video0");
+    ASSERT_TRUE(manager.RegisterCorePublisher("publisher_core_0"));
+
+    std::thread t1([&]()
+    {
+        EXPECT_TRUE(manager.Subscribe("sub_1", CameraClientRole::kSubscriber, endpoint));
+    });
+
+    while (!start_in_progress.load())
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    std::thread t2([&]()
+    {
+        EXPECT_TRUE(manager.Subscribe("sub_2", CameraClientRole::kSubscriber, endpoint));
+    });
+
+    t1.join();
+    t2.join();
+
+    EXPECT_EQ(start_count.load(), 1u);
+    EXPECT_EQ(manager.GetSubscriberCount(endpoint), 2u);
+}
+
+TEST(CameraSessionManagerTest, SubscribeDuringUnsubscribeCleansUp)
+{
+    std::atomic<uint32_t> start_count{0};
+    std::atomic<uint32_t> stop_count{0};
+    std::atomic<bool> start_entered{false};
+
+    CameraSessionManager manager(
+        [&](const CameraEndpoint&)
+        {
+            start_entered.store(true);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            start_count.fetch_add(1);
+            return true;
+        },
+        [&](const CameraEndpoint&)
+        {
+            stop_count.fetch_add(1);
+        });
+
+    const CameraEndpoint endpoint = MakeEndpoint(0, "/dev/video0");
+    ASSERT_TRUE(manager.RegisterCorePublisher("publisher_core_0"));
+
+    std::thread t1([&]()
+    {
+        // Subscribe 可能在 start 期间被并发 Unsubscribe，导致 session 被删除。
+        // 此时 Subscribe 返回 false，因为 subscriber 已不在 session 中。
+        manager.Subscribe("sub_1", CameraClientRole::kSubscriber, endpoint);
+    });
+
+    while (!start_entered.load())
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    std::thread t2([&]()
+    {
+        EXPECT_TRUE(manager.Unsubscribe("sub_1", endpoint));
+    });
+
+    t2.join();
+    t1.join();
+
+    EXPECT_EQ(start_count.load(), 1u);
+    // stop_callback_ 可能被调用两次：
+    // 1. Unsubscribe 删除 session 时调用一次
+    // 2. Subscribe 发现 session 不存在时回滚调用一次
+    // 两次调用都是幂等安全的
+    EXPECT_GE(stop_count.load(), 1u);
+    EXPECT_EQ(manager.GetSubscriberCount(endpoint), 0u);
+    EXPECT_EQ(manager.ListSessions().size(), 0u);
+}
+
+TEST(CameraSessionManagerTest, ConcurrentUnsubscribeIsIdempotent)
+{
+    std::atomic<uint32_t> stop_count{0};
+    std::atomic<bool> stop_in_progress{false};
+
+    CameraSessionManager manager(
+        [](const CameraEndpoint&) { return true; },
+        [&](const CameraEndpoint&)
+        {
+            stop_in_progress.store(true);
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            stop_in_progress.store(false);
+            stop_count.fetch_add(1);
+        });
+
+    const CameraEndpoint endpoint = MakeEndpoint(0, "/dev/video0");
+    ASSERT_TRUE(manager.RegisterCorePublisher("publisher_core_0"));
+    EXPECT_TRUE(manager.Subscribe("sub_1", CameraClientRole::kSubscriber, endpoint));
+    EXPECT_TRUE(manager.Subscribe("sub_2", CameraClientRole::kSubscriber, endpoint));
+
+    std::thread t1([&]()
+    {
+        EXPECT_TRUE(manager.Unsubscribe("sub_1", endpoint));
+    });
+
+    std::thread t2([&]()
+    {
+        EXPECT_TRUE(manager.Unsubscribe("sub_2", endpoint));
+    });
+
+    t1.join();
+    t2.join();
+
+    EXPECT_EQ(stop_count.load(), 1u);
+    EXPECT_EQ(manager.GetSubscriberCount(endpoint), 0u);
 }

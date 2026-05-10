@@ -11,6 +11,7 @@
 #include "camera_subsystem/broker/frame_subscriber.h"
 #include "camera_subsystem/core/buffer_guard.h"
 #include "camera_subsystem/core/frame_handle.h"
+#include "camera_subsystem/core/metrics.h"
 #include "camera_subsystem/core/types.h"
 
 #include <atomic>
@@ -19,7 +20,9 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace camera_subsystem {
@@ -31,9 +34,22 @@ namespace broker {
  * 负责管理订阅者，并将帧数据分发给订阅者。
  * 支持多线程调度与优先级队列。
  */
-class FrameBroker
+class FrameBroker : public core::IMetricsProvider
 {
 public:
+    /**
+     * @brief 单订阅者统计信息
+     */
+    struct SubscriberStats
+    {
+        std::string name;
+        uint64_t dispatched = 0;
+        uint64_t dropped = 0;
+        uint64_t consecutive_drops = 0;
+        bool is_slow_consumer = false;
+        uint64_t slow_consumer_detected_count = 0;
+    };
+
     /**
      * @brief 分发统计信息
      */
@@ -44,6 +60,7 @@ public:
         uint64_t dropped_tasks = 0;
         size_t queue_size = 0;
         size_t subscriber_count = 0;
+        std::vector<SubscriberStats> subscriber_stats;
     };
 
     FrameBroker();
@@ -108,6 +125,9 @@ public:
      */
     Stats GetStats() const;
 
+    // ---- IMetricsProvider ----
+    void FillMetrics(core::StreamMetrics* metrics) const override;
+
 private:
     struct DispatchTask
     {
@@ -147,6 +167,10 @@ private:
     std::atomic<uint64_t> dispatched_tasks_;
     std::atomic<uint64_t> dropped_tasks_;
     std::atomic<size_t> max_queue_size_;
+
+    // per-subscriber task counts and stats (keyed by raw pointer, stable while subscribed)
+    std::unordered_map<const IFrameSubscriber*, size_t> subscriber_task_counts_;
+    std::unordered_map<const IFrameSubscriber*, SubscriberStats> subscriber_stats_;
 };
 
 } // namespace broker

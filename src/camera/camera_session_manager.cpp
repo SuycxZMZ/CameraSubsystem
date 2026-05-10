@@ -11,6 +11,7 @@
 
 #include <exception>
 #include <functional>
+#include <utility>
 
 namespace camera_subsystem
 {
@@ -88,53 +89,68 @@ bool CameraSessionManager::Subscribe(const std::string& client_id,
     const ipc::CameraEndpoint normalized = NormalizeEndpoint(endpoint);
     const EndpointKey key = BuildEndpointKey(normalized);
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    bool need_start = false;
+    ipc::CameraEndpoint callback_endpoint;
 
-    if (core_publisher_id_.empty())
     {
-        platform::PlatformLogger::Log(core::LogLevel::kWarning,
-                                      "camera_session_manager",
-                                      "Subscribe rejected: core publisher not registered");
-        return false;
-    }
+        std::unique_lock<std::mutex> lock(mutex_);
 
-    auto it = sessions_.find(key);
-    if (it == sessions_.end())
-    {
-        SessionRecord record;
-        record.endpoint = normalized;
-        record.members.clear();
-        record.sub_publisher_count = 0;
-        record.subscriber_count = 0;
-        record.is_streaming = false;
-
-        it = sessions_.emplace(key, std::move(record)).first;
-    }
-
-    SessionRecord& session = it->second;
-
-    auto member_it = session.members.find(client_id);
-    if (member_it != session.members.end())
-    {
-        if (member_it->second == role)
+        if (core_publisher_id_.empty())
         {
+            platform::PlatformLogger::Log(core::LogLevel::kWarning,
+                                          "camera_session_manager",
+                                          "Subscribe rejected: core publisher not registered");
+            return false;
+        }
+
+        auto it = sessions_.find(key);
+        if (it == sessions_.end())
+        {
+            SessionRecord record;
+            record.endpoint = normalized;
+            record.members.clear();
+            record.sub_publisher_count = 0;
+            record.subscriber_count = 0;
+            record.is_streaming = false;
+
+            it = sessions_.emplace(key, std::move(record)).first;
+        }
+
+        SessionRecord& session = it->second;
+
+        auto member_it = session.members.find(client_id);
+        if (member_it != session.members.end())
+        {
+            if (member_it->second == role)
+            {
+                return true;
+            }
+
+            DecrementRoleCount(&session, member_it->second);
+            member_it->second = role;
+            IncrementRoleCount(&session, role);
             return true;
         }
 
-        DecrementRoleCount(&session, member_it->second);
-        member_it->second = role;
+        if (!session.is_streaming)
+        {
+            need_start = true;
+            session.is_streaming = true;
+        }
+
+        session.members.emplace(client_id, role);
         IncrementRoleCount(&session, role);
-        return true;
+        callback_endpoint = session.endpoint;
     }
 
-    if (!session.is_streaming)
+    if (need_start)
     {
         bool start_ok = true;
         if (start_callback_)
         {
             try
             {
-                start_ok = start_callback_(session.endpoint);
+                start_ok = start_callback_(callback_endpoint);
             }
             catch (const std::exception& e)
             {
@@ -142,7 +158,7 @@ bool CameraSessionManager::Subscribe(const std::string& client_id,
                 platform::PlatformLogger::Log(core::LogLevel::kError,
                                               "camera_session_manager",
                                               "Start callback exception: stream=%s error=%s",
-                                              session.endpoint.stream_id,
+                                              callback_endpoint.stream_id,
                                               e.what());
             }
             catch (...)
@@ -151,12 +167,48 @@ bool CameraSessionManager::Subscribe(const std::string& client_id,
                 platform::PlatformLogger::Log(core::LogLevel::kError,
                                               "camera_session_manager",
                                               "Start callback exception: stream=%s error=unknown",
-                                              session.endpoint.stream_id);
+                                              callback_endpoint.stream_id);
             }
         }
 
+        std::unique_lock<std::mutex> lock(mutex_);
+        auto it = sessions_.find(key);
+        if (it == sessions_.end())
+        {
+            if (start_ok && stop_callback_)
+            {
+                lock.unlock();
+                try
+                {
+                    stop_callback_(callback_endpoint);
+                }
+                catch (const std::exception& e)
+                {
+                    platform::PlatformLogger::Log(core::LogLevel::kError,
+                                                  "camera_session_manager",
+                                                  "Stop callback exception during rollback: "
+                                                  "stream=%s error=%s",
+                                                  callback_endpoint.stream_id,
+                                                  e.what());
+                }
+                catch (...)
+                {
+                    platform::PlatformLogger::Log(core::LogLevel::kError,
+                                                  "camera_session_manager",
+                                                  "Stop callback exception during rollback: "
+                                                  "stream=%s error=unknown",
+                                                  callback_endpoint.stream_id);
+                }
+            }
+            return false;
+        }
+
+        SessionRecord& session = it->second;
         if (!start_ok)
         {
+            DecrementRoleCount(&session, role);
+            session.members.erase(client_id);
+            session.is_streaming = false;
             if (session.members.empty())
             {
                 sessions_.erase(it);
@@ -169,11 +221,8 @@ bool CameraSessionManager::Subscribe(const std::string& client_id,
                                           session.endpoint.device_path);
             return false;
         }
-        session.is_streaming = true;
     }
 
-    session.members.emplace(client_id, role);
-    IncrementRoleCount(&session, role);
     return true;
 }
 
@@ -188,40 +237,49 @@ bool CameraSessionManager::Unsubscribe(const std::string& client_id,
     const ipc::CameraEndpoint normalized = NormalizeEndpoint(endpoint);
     const EndpointKey key = BuildEndpointKey(normalized);
 
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = sessions_.find(key);
-    if (it == sessions_.end())
+    bool need_stop = false;
+    ipc::CameraEndpoint callback_endpoint;
+
     {
-        return false;
+        std::unique_lock<std::mutex> lock(mutex_);
+        auto it = sessions_.find(key);
+        if (it == sessions_.end())
+        {
+            return false;
+        }
+
+        SessionRecord& session = it->second;
+        auto member_it = session.members.find(client_id);
+        if (member_it == session.members.end())
+        {
+            return false;
+        }
+
+        DecrementRoleCount(&session, member_it->second);
+        session.members.erase(member_it);
+
+        if (!session.members.empty())
+        {
+            return true;
+        }
+
+        need_stop = session.is_streaming;
+        callback_endpoint = session.endpoint;
+        sessions_.erase(it);
     }
 
-    SessionRecord& session = it->second;
-    auto member_it = session.members.find(client_id);
-    if (member_it == session.members.end())
-    {
-        return false;
-    }
-
-    DecrementRoleCount(&session, member_it->second);
-    session.members.erase(member_it);
-
-    if (!session.members.empty())
-    {
-        return true;
-    }
-
-    if (session.is_streaming && stop_callback_)
+    if (need_stop && stop_callback_)
     {
         try
         {
-            stop_callback_(session.endpoint);
+            stop_callback_(callback_endpoint);
         }
         catch (const std::exception& e)
         {
             platform::PlatformLogger::Log(core::LogLevel::kError,
                                           "camera_session_manager",
                                           "Stop callback exception: stream=%s error=%s",
-                                          session.endpoint.stream_id,
+                                          callback_endpoint.stream_id,
                                           e.what());
         }
         catch (...)
@@ -229,11 +287,10 @@ bool CameraSessionManager::Unsubscribe(const std::string& client_id,
             platform::PlatformLogger::Log(core::LogLevel::kError,
                                           "camera_session_manager",
                                           "Stop callback exception: stream=%s error=unknown",
-                                          session.endpoint.stream_id);
+                                          callback_endpoint.stream_id);
         }
     }
 
-    sessions_.erase(it);
     return true;
 }
 

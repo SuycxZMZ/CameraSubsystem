@@ -10,10 +10,35 @@
 
 #include "../core/frame_handle.h"
 
+#include <cstddef>
+#include <cstdint>
+
 namespace camera_subsystem
 {
 namespace broker
 {
+
+/**
+ * @brief 丢弃策略
+ */
+enum class DropPolicy
+{
+    kDropNewest,
+    kDropOldest,
+    kDropLowPriority
+};
+
+/**
+ * @brief 背压配置
+ *
+ * max_queue_size == 0 表示使用 FrameBroker 全局默认值
+ */
+struct BackpressureConfig
+{
+    size_t max_queue_size = 0;
+    DropPolicy drop_policy = DropPolicy::kDropNewest;
+    uint32_t slow_consumer_threshold = 10;
+};
 
 /**
  * @brief 帧订阅者接口
@@ -52,6 +77,17 @@ class IFrameSubscriber
     virtual uint8_t GetPriority() const
     {
         return 128;
+    }
+
+    /**
+     * @brief 获取背压配置
+     * @return 该订阅者的背压配置
+     *
+     * @note 默认实现返回全局默认配置
+     */
+    virtual BackpressureConfig GetBackpressureConfig() const
+    {
+        return BackpressureConfig{};
     }
 
     /**

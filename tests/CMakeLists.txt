@@ -191,3 +191,31 @@ target_link_libraries(test_buffer_lifecycle
 )
 
 add_test(NAME test_buffer_lifecycle COMMAND test_buffer_lifecycle)
+
+add_executable(test_frame_broker_backpressure
+    unit/test_frame_broker_backpressure.cpp
+)
+
+target_link_libraries(test_frame_broker_backpressure
+    PRIVATE
+        camera_subsystem_broker
+        camera_subsystem_core
+        camera_subsystem_platform
+        ${GTEST_TARGET}
+        ${GTEST_MAIN_TARGET}
+)
+
+add_test(NAME test_frame_broker_backpressure COMMAND test_frame_broker_backpressure)
+
+add_executable(test_metrics_aggregator
+    unit/test_metrics_aggregator.cpp
+)
+
+target_link_libraries(test_metrics_aggregator
+    PRIVATE
+        camera_subsystem_core
+        ${GTEST_TARGET}
+        ${GTEST_MAIN_TARGET}
+)
+
+add_test(NAME test_metrics_aggregator COMMAND test_metrics_aggregator)
