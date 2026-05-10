@@ -13,6 +13,7 @@
 #include "camera_subsystem/core/camera_stream_identity.h"
 #include "camera_subsystem/core/frame_descriptor.h"
 #include "camera_subsystem/core/frame_handle.h"
+#include "camera_subsystem/core/metrics.h"
 
 #include <atomic>
 #include <cstdint>
@@ -37,7 +38,7 @@ namespace camera {
  * FrameDescriptor + FrameLease；如果驱动或板端环境不支持导出，则自动回退
  * 到 MMAP + copy 路径。
  */
-class CameraSource
+class CameraSource : public core::IMetricsProvider
 {
 public:
     using FrameCallback = std::function<void(const core::FrameHandle&)>;
@@ -72,6 +73,9 @@ public:
     size_t GetDmaBufActiveLeaseCount() const;
     size_t GetDmaBufLeaseInFlightMax() const;
     size_t GetDmaBufMinQueuedCaptureBuffers() const;
+
+    // ---- IMetricsProvider ----
+    void FillMetrics(core::StreamMetrics* metrics) const override;
 
 private:
     void CaptureLoop();

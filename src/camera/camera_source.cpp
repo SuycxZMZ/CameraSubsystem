@@ -311,6 +311,20 @@ size_t CameraSource::GetDmaBufMinQueuedCaptureBuffers() const
     return min_queued_capture_buffers_;
 }
 
+void CameraSource::FillMetrics(core::StreamMetrics* metrics) const
+{
+    if (!metrics)
+    {
+        return;
+    }
+
+    metrics->capture_frame_count = frame_count_.load();
+    metrics->capture_dropped_count = dropped_frames_.load();
+    metrics->dma_buf_frame_count = dma_buf_frame_count_.load();
+    metrics->lease_exhausted_count = lease_exhausted_count_.load();
+    metrics->active_lease_count = GetDmaBufActiveLeaseCount();
+}
+
 void CameraSource::CaptureLoop()
 {
     while (is_running_)

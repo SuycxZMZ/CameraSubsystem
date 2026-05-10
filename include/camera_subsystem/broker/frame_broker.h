@@ -11,6 +11,7 @@
 #include "camera_subsystem/broker/frame_subscriber.h"
 #include "camera_subsystem/core/buffer_guard.h"
 #include "camera_subsystem/core/frame_handle.h"
+#include "camera_subsystem/core/metrics.h"
 #include "camera_subsystem/core/types.h"
 
 #include <atomic>
@@ -33,7 +34,7 @@ namespace broker {
  * 负责管理订阅者，并将帧数据分发给订阅者。
  * 支持多线程调度与优先级队列。
  */
-class FrameBroker
+class FrameBroker : public core::IMetricsProvider
 {
 public:
     /**
@@ -123,6 +124,9 @@ public:
      * @brief 获取统计信息
      */
     Stats GetStats() const;
+
+    // ---- IMetricsProvider ----
+    void FillMetrics(core::StreamMetrics* metrics) const override;
 
 private:
     struct DispatchTask

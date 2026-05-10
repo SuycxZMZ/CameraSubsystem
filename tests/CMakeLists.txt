@@ -206,3 +206,16 @@ target_link_libraries(test_frame_broker_backpressure
 )
 
 add_test(NAME test_frame_broker_backpressure COMMAND test_frame_broker_backpressure)
+
+add_executable(test_metrics_aggregator
+    unit/test_metrics_aggregator.cpp
+)
+
+target_link_libraries(test_metrics_aggregator
+    PRIVATE
+        camera_subsystem_core
+        ${GTEST_TARGET}
+        ${GTEST_MAIN_TARGET}
+)
+
+add_test(NAME test_metrics_aggregator COMMAND test_metrics_aggregator)

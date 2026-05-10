@@ -64,6 +64,8 @@ using camera_subsystem::core::FrameHandle;
 using camera_subsystem::core::FrameLease;
 using camera_subsystem::core::IoMethod;
 using camera_subsystem::core::LogLevel;
+using camera_subsystem::core::MetricsAggregator;
+using camera_subsystem::core::StreamMetrics;
 using camera_subsystem::ipc::CameraClientRole;
 using camera_subsystem::ipc::CameraControlServer;
 using camera_subsystem::ipc::CameraDataFrameHeader;
@@ -604,6 +606,7 @@ int main(int argc, char* argv[])
     config.io_method_ = static_cast<uint32_t>(io_method);
 
     PublisherStats stats;
+    MetricsAggregator metrics_aggregator;
     std::mutex runtimes_mutex;
     std::unordered_map<std::string, std::shared_ptr<CameraStreamRuntime>> runtimes_by_stream;
     std::unordered_map<uint32_t, std::weak_ptr<CameraStreamRuntime>> runtimes_by_camera_id;
@@ -830,6 +833,7 @@ int main(int argc, char* argv[])
                     configure_runtime_callbacks(runtime);
                     runtimes_by_stream.emplace(stream_id, runtime);
                     runtimes_by_camera_id[identity.camera_id] = runtime;
+                    metrics_aggregator.RegisterProvider(stream_id, &runtime->source);
                 }
                 else
                 {
@@ -890,6 +894,7 @@ int main(int argc, char* argv[])
             }
             if (runtime)
             {
+                metrics_aggregator.UnregisterProvider(identity.stream_id.data(), &runtime->source);
                 runtime->source.Stop();
             }
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
@@ -953,6 +958,17 @@ int main(int argc, char* argv[])
             size_t active_leases = 0;
             size_t lease_in_flight_max = 0;
             size_t min_queued = 0;
+
+            const auto all_metrics = metrics_aggregator.GetAllStreamMetrics();
+            for (const auto& m : all_metrics)
+            {
+                dmabuf_enabled = dmabuf_enabled || (m.dma_buf_frame_count > 0);
+                dmabuf_frames += m.dma_buf_frame_count;
+                lease_exhausted += m.lease_exhausted_count;
+                active_leases += m.active_lease_count;
+            }
+
+            // 补充全局非 per-stream 指标
             {
                 std::lock_guard<std::mutex> lock(runtimes_mutex);
                 for (const auto& item : runtimes_by_stream)
@@ -963,15 +979,13 @@ int main(int argc, char* argv[])
                         continue;
                     }
                     dmabuf_enabled = dmabuf_enabled || runtime->source.IsDmaBufPathEnabled();
-                    dmabuf_frames += runtime->source.GetDmaBufFrameCount();
                     export_failures += runtime->source.GetDmaBufExportFailureCount();
-                    lease_exhausted += runtime->source.GetDmaBufLeaseExhaustedCount();
-                    active_leases += runtime->source.GetDmaBufActiveLeaseCount();
                     lease_in_flight_max = std::max(lease_in_flight_max,
                                                    runtime->source.GetDmaBufLeaseInFlightMax());
                     min_queued += runtime->source.GetDmaBufMinQueuedCaptureBuffers();
                 }
             }
+
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
                                 "sec=%" PRIu64 " | frames=%" PRIu64 " | fps=%" PRIu64
                                 " | clients=%zu | sent_bytes=%" PRIu64 " | send_fail=%" PRIu64
@@ -998,6 +1012,13 @@ int main(int argc, char* argv[])
                                 release_server.GetServerStats().received_releases,
                                 release_server.GetServerStats().reclaimed_frames,
                                 release_server.GetServerStats().expired_reclaims);
+
+            // 新增：per-stream 指标快照（调试级别）
+            for (const auto& m : all_metrics)
+            {
+                PlatformLogger::Log(LogLevel::kDebug, "publisher",
+                                    "%s", MetricsAggregator::FormatForLog(m).c_str());
+            }
         }
         else
         {

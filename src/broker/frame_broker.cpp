@@ -237,6 +237,22 @@ size_t FrameBroker::GetMaxQueueSize() const
     return max_queue_size_.load();
 }
 
+void FrameBroker::FillMetrics(core::StreamMetrics* metrics) const
+{
+    if (!metrics)
+    {
+        return;
+    }
+
+    metrics->broker_published_count = published_frames_.load();
+    metrics->broker_dispatched_count = dispatched_tasks_.load();
+    metrics->broker_dropped_count = dropped_tasks_.load();
+    metrics->broker_subscriber_count = GetSubscriberCount();
+
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    metrics->broker_queue_depth = task_queue_.size();
+}
+
 FrameBroker::Stats FrameBroker::GetStats() const
 {
     Stats stats;
