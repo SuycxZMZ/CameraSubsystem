@@ -35,10 +35,14 @@
 | **Codec Server** | 多 `RecordingSession`、raw H.264 和最小 MP4 已完成 | **快速收敛**。除 smoke/bugfix/低拷贝输入适配外不扩展新能力 |
 | **MIPI/RKISP** | MPLANE readiness probe 和 probe-only 初始化骨架已完成 | **尚未完成真实 MIPI live STREAMON**。不要标记为已完成 |
 | **板端 smoke** | `quick/full/extended` 三档 + `multi-camera-topology` 已接入 | 平台相关变更应通过 smoke；真实 MIPI 接入后升级为联合 smoke |
+| **背压参数化** | `BackpressureConfig` / `DropPolicy` / 慢消费者检测已完成 | stress test 兼容；新增 4 个单元测试 |
+| **统一 Metrics** | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator` 已完成 | CameraSource / FrameBroker 已接入；publisher 示例已替换手动聚合；10 个单元测试 |
 
-**最近关键板端结果（2026-05-09）：**
+**最近关键板端结果（2026-05-10）：**
 - USB `/dev/video45` DataPlaneV2 live：`v2_sent=254`、`release_pending=0`、subscriber `frames=254`
 - RKISP/RKVpss MPLANE readiness：`pass=10`、`fail=0`
+- 统一 Metrics 接口：本地构建 13/13 测试通过，RK3576 交叉编译通过
+- FrameBroker 背压：本地 4 个单元测试 + stress test 通过
 
 ---
 

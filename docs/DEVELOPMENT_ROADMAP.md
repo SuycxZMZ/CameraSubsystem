@@ -66,7 +66,7 @@
 
 **依赖条件:** 无硬件依赖，纯代码重构
 
-**是否可立即开始:** ✅ **是**
+**是否可立即开始:** ✅ **已完成**（2026-05-10）
 
 ---
 
@@ -93,7 +93,7 @@
 
 **依赖条件:** 无新硬件依赖，但多路并发验证受限于单 USB
 
-**是否可立即开始:** ✅ **是**
+**是否可立即开始:** ✅ **已完成（仅文档）**（2026-05-10）
 
 ---
 
@@ -145,7 +145,7 @@
 
 **依赖条件:** 无硬件依赖
 
-**是否可立即开始:** ✅ **是**
+**是否可立即开始:** ✅ **已完成**（2026-05-10）
 
 ---
 
@@ -206,12 +206,12 @@
 
 | 顺序 | 目标 | 阶段 | 产出物 | 预计工作量 |
 |------|------|------|--------|------------|
-| **1** | **目标 A：CameraSessionManager 回调持锁重构** | 代码+单测 | `CameraSessionManager` 不再持锁执行 callback；新增并发订阅/退订单测 | 中 |
-| **2** | **目标 B：multi-camera-topology 强校验** | 脚本+文档 | topology smoke 增加 identity 冲突检测、lease 隔离验证、并发启停验证 | 小 |
-| **3** | **目标 C：DataPlaneV2 → MPP 低拷贝录制设计** | **仅文档** | 设计文档明确 copy/fd path 选择、MPP import 契约、release 时序、fallback 策略 | 中 |
-| **4** | **目标 D：FrameBroker 背压参数化** | 代码+单测 | `BackpressureConfig`、DropPolicy、慢消费者检测 | 中 |
-| **5** | **目标 E：统一 Metrics 接口** | 代码+文档 | `core::Metrics` 最小接口、按 stream_id 标签的指标定义 | 小 |
-| **阻塞等待** | **目标 F：真实 MIPI/RKISP live STREAMON** | 代码+板端验证 | 待真实 sensor 到位后立即进入，之前不投入代码 | 大 |
+| **1** | **目标 A：CameraSessionManager 回调持锁重构** | ✅ 已完成 | `CameraSessionManager` 不再持锁执行 callback；新增并发订阅/退订单测 | 中 |
+| **2** | **目标 B：multi-camera-topology 强校验** | ✅ 已完成 | topology smoke 增加 identity 冲突检测、lease 隔离验证、并发启停验证 | 小 |
+| **3** | **目标 C：DataPlaneV2 → MPP 低拷贝录制设计** | ✅ 已完成（仅文档） | 设计文档明确 copy/fd path 选择、MPP import 契约、release 时序、fallback 策略 | 中 |
+| **4** | **目标 D：FrameBroker 背压参数化** | ✅ 已完成 | `BackpressureConfig`、DropPolicy、慢消费者检测 | 中 |
+| **5** | **目标 E：统一 Metrics 接口** | ✅ 已完成 | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator` | 小 |
+| **阻塞等待** | **目标 F：真实 MIPI/RKISP live STREAMON** | 待 sensor 到位 | MPLANE 骨架已就绪，待真实 sensor 到位后立即进入 | 大 |
 
 > **为什么不先做目标 C 的代码实现？**
 >

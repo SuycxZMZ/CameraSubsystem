@@ -315,15 +315,15 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 
 - 🚧 CameraSource 高级能力（RK3576 DMA-BUF 板端验证 / 多平面 / cache sync）
 - 🚧 Web 录制长稳与 H.264 文件播放兼容性验证
-- 🚧 背压策略完善（延迟阈值 / DropPolicy 参数化）
 - 🚧 设备恢复机制（自动重连 / 降级策略）
+- ✅ 背压策略参数化（`BackpressureConfig` / `DropPolicy` / 慢消费者检测）
 
 ### 计划中模块
 
 - ⏳ 工具类实现
 - ⏳ 集成测试
 - ⏳ 性能测试
-- ⏳ 统一指标与观测接口（Metrics/Tracing）
+- ✅ 统一指标与观测接口（`core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`）
 
 ### 架构评审与详细设计入口
 

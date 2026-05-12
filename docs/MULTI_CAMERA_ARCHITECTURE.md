@@ -164,14 +164,14 @@ Web Preview 和板端脚本当前以单路调试为主，这个阶段是合理�
 
 | 阶段 | 优先级 | 任务 | 验收口径 |
 |------|--------|------|----------|
-| M0 | P0 | 文档与架构纠偏 | 本文、README、实现状态、架构评审、DMA-BUF/Codec 文档引用一致 |
-| M1 | P0 | 引入 `CameraStreamIdentity` 与 stream 命名规范 | 已完成基础贯通：`CameraEndpoint`、`CameraSessionManager`、`CameraSource`、`FrameDescriptor`、DataPlaneV2 descriptor 和关键日志已携带稳定 `stream_id` |
-| M2 | P0 | publisher 改为 `stream_id -> CameraStreamRuntime` | 已完成第一刀：publisher 示例已使用 runtime map，两个 stream 不再共享同一个全局 `CameraSource`；多路 release key 仍归 M3 |
-| M3 | P0 | DataPlaneV2/release key 多路化 | 已完成：publisher pending lease 使用 stream/frame/buffer key，ReleaseFrame tracker 以 stream/frame/buffer 隔离并跟踪 consumer release set |
-| M4 | P1 | codec server 多 `RecordingSession` | 已完成第一阶段：`RecordingSessionManager` 使用 `stream_id -> RecordingSession`，同一进程可同时管理多路录制状态，单路 stop 不影响其他路 |
-| M5 | P1 | Web/gateway 多 stream 状态 | 已完成 W1-W2：Gateway status 携带 `stream_index`，前端用 sideband 映射把 numeric frame index 归并到字符串 `stream_id`；W3/W4 暂缓 |
-| M6 | P1 | USB + MIPI 板端联合 smoke | 已新增 `scripts/rk3576-multi-camera-topology-smoke.sh` 入口；USB live + MIPI readiness 先共用 topology 口径，真实 sensor 接入后再升级为 USB live + MIPI live |
-| M7 | P2 | MIPI DataPlaneV2 -> MPP 低拷贝录制 | NV12 DMA-BUF descriptor import 编码，并完成 release 闭环 |
+| M0 | P0 | 文档与架构纠偏 | ✅ 已完成 |
+| M1 | P0 | 引入 `CameraStreamIdentity` 与 stream 命名规范 | ✅ 已完成：`CameraEndpoint`、`CameraSessionManager`、`CameraSource`、`FrameDescriptor`、DataPlaneV2 descriptor 和关键日志已携带稳定 `stream_id` |
+| M2 | P0 | publisher 改为 `stream_id -> CameraStreamRuntime` | ✅ 已完成：publisher 示例已使用 runtime map，两个 stream 不再共享同一个全局 `CameraSource` |
+| M3 | P0 | DataPlaneV2/release key 多路化 | ✅ 已完成：publisher pending lease 使用 stream/frame/buffer key，ReleaseFrame tracker 以 stream/frame/buffer 隔离并跟踪 consumer release set |
+| M4 | P1 | codec server 多 `RecordingSession` | ✅ 已完成：`RecordingSessionManager` 使用 `stream_id -> RecordingSession`，RK3576 `codec-multi-session-control` smoke 通过 |
+| M5 | P1 | Web/gateway 多 stream 状态 | ✅ 已完成 W1-W2：Gateway status 携带 `stream_index`，前端用 sideband 映射归并到 `stream_id`；W3/W4 暂缓 |
+| M6 | P1 | USB + MIPI 板端联合 smoke | ✅ 已完成：`multi-camera-topology` smoke 支持并发运行、identity 冲突检测和隔离验证；真实 sensor 接入后升级为 USB live + MIPI live |
+| M7 | P2 | MIPI DataPlaneV2 -> MPP 低拷贝录制 | 设计文档已完成（[DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md)）；编码实现待 MIPI sensor 到位 |
 
 阶段 M1-M3 是真正的架构纠偏主线。MIPI live、低拷贝录制、多路 Web UI 都不应绕过这三步直接实现，否则会把单路假设继续固化到更多模块里。Web 与 Codec 只作为调试预览、录制 smoke 和主链路验证辅助能力推进；除必要 bugfix、身份贯通和 smoke 支撑外，不继续扩大前端体验和编码容器功能面。
 

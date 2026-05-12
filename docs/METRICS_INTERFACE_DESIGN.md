@@ -59,31 +59,37 @@
 
 ## 3. 目标架构
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   CameraSource  │     │   FrameBroker   │     │  DataPlaneV2    │
-│  (采集层指标)    │     │  (分发层指标)    │     │  (数据面指标)    │
-└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
-         │                       │                       │
-         │  FillMetrics()        │  FillMetrics()        │  FillMetrics()
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-                    ┌─────────────▼─────────────┐
-                    │   IMetricsProvider 接口    │
-                    └─────────────┬─────────────┘
-                                  │
-                    ┌─────────────▼─────────────┐
-                    │  MetricsAggregator         │
-                    │  (按 stream_id 合并快照)   │
-                    └─────────────┬─────────────┘
-                                  │
-         ┌────────────────────────┼────────────────────────┐
-         │                        │                        │
-┌────────▼────────┐    ┌──────────▼────────┐    ┌─────────▼───────┐
-│  publisher 示例  │    │   Web Gateway     │    │  codec_server   │
-│  (日志输出)      │    │   (状态面板)      │    │  (录制统计)     │
-└─────────────────┘    └───────────────────┘    └─────────────────┘
+```mermaid
+flowchart TB
+    subgraph Providers["Metrics Providers"]
+        CS[CameraSource<br/>采集层指标]
+        FB[FrameBroker<br/>分发层指标]
+        DP[DataPlaneV2<br/>数据面指标]
+    end
+
+    subgraph Core["core 层"]
+        IMP[IMetricsProvider 接口]
+        MA[MetricsAggregator<br/>按 stream_id 合并快照]
+    end
+
+    subgraph Consumers["消费方"]
+        PUB[publisher 示例<br/>日志输出]
+        WEB[Web Gateway<br/>状态面板]
+        COD[codec_server<br/>录制统计]
+    end
+
+    CS -->|FillMetrics| IMP
+    FB -->|FillMetrics| IMP
+    DP -->|FillMetrics| IMP
+    IMP --> MA
+    MA --> PUB
+    MA --> WEB
+    MA --> COD
+
+    style CS fill:#e3f2fd
+    style FB fill:#e8f5e9
+    style DP fill:#fff3e0
+    style MA fill:#f3e5f5
 ```
 
 **核心原则：**
