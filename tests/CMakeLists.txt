@@ -219,3 +219,18 @@ target_link_libraries(test_metrics_aggregator
 )
 
 add_test(NAME test_metrics_aggregator COMMAND test_metrics_aggregator)
+
+add_executable(test_camera_source_recovery
+    unit/test_camera_source_recovery.cpp
+)
+
+target_link_libraries(test_camera_source_recovery
+    PRIVATE
+        camera_subsystem_camera
+        camera_subsystem_platform
+        camera_subsystem_core
+        ${GTEST_TARGET}
+        ${GTEST_MAIN_TARGET}
+)
+
+add_test(NAME test_camera_source_recovery COMMAND test_camera_source_recovery)

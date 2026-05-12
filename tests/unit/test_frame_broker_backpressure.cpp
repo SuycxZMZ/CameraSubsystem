@@ -12,6 +12,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -26,14 +28,10 @@ namespace
 
 class TestSubscriber : public IFrameSubscriber
 {
-public:
-    explicit TestSubscriber(const std::string& name,
-                            uint8_t priority = 128,
+  public:
+    explicit TestSubscriber(const std::string& name, uint8_t priority = 128,
                             const BackpressureConfig& config = BackpressureConfig{})
-        : name_(name)
-        , priority_(priority)
-        , config_(config)
-        , received_count_(0)
+        : name_(name), priority_(priority), config_(config), received_count_(0)
     {
     }
 
@@ -62,11 +60,57 @@ public:
         return received_count_.load();
     }
 
-private:
+  private:
     std::string name_;
     uint8_t priority_;
     BackpressureConfig config_;
     std::atomic<uint64_t> received_count_{0};
+};
+
+class BlockingTestSubscriber : public TestSubscriber
+{
+  public:
+    explicit BlockingTestSubscriber(const std::string& name, uint8_t priority = 128,
+                                    const BackpressureConfig& config = BackpressureConfig{})
+        : TestSubscriber(name, priority, config)
+    {
+    }
+
+    void OnFrame(const FrameHandle& frame) override
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            entered_ = true;
+        }
+        cv_.notify_all();
+
+        std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock, [this]() { return released_; });
+        lock.unlock();
+
+        TestSubscriber::OnFrame(frame);
+    }
+
+    bool WaitUntilEntered(std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return cv_.wait_for(lock, timeout, [this]() { return entered_; });
+    }
+
+    void Release()
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            released_ = true;
+        }
+        cv_.notify_all();
+    }
+
+  private:
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool entered_ = false;
+    bool released_ = false;
 };
 
 FrameHandle BuildTestFrame(uint32_t frame_id)
@@ -86,15 +130,20 @@ TEST(FrameBrokerBackpressureTest, DefaultConfigUsesGlobalMaxQueueSize)
     broker.SetMaxQueueSize(4);
     ASSERT_TRUE(broker.Start(1));
 
-    auto sub = std::make_shared<TestSubscriber>("default", 128, BackpressureConfig{});
+    auto sub = std::make_shared<BlockingTestSubscriber>("default", 128, BackpressureConfig{});
     ASSERT_TRUE(broker.Subscribe(sub));
 
-    // Publish 6 frames, only 4 should be queued, 2 dropped
-    for (uint32_t i = 0; i < 6; ++i)
+    broker.PublishFrame(BuildTestFrame(0));
+    ASSERT_TRUE(sub->WaitUntilEntered(std::chrono::milliseconds(500)));
+
+    // Publish 5 more frames while the first dispatch is blocked. The per-subscriber
+    // in-flight count reaches 4, so the last 2 frames are dropped deterministically.
+    for (uint32_t i = 1; i < 6; ++i)
     {
         broker.PublishFrame(BuildTestFrame(i));
     }
 
+    sub->Release();
     broker.Stop();
 
     EXPECT_EQ(sub->GetReceivedCount(), 4u);
@@ -159,16 +208,21 @@ TEST(FrameBrokerBackpressureTest, SlowConsumerDetection)
     BackpressureConfig config;
     config.max_queue_size = 1;
     config.slow_consumer_threshold = 3;
-    auto sub = std::make_shared<TestSubscriber>("slow_consumer", 128, config);
+    auto sub = std::make_shared<BlockingTestSubscriber>("slow_consumer", 128, config);
     ASSERT_TRUE(broker.Subscribe(sub));
 
-    // Publish 5 frames, only 1 queued, 4 dropped
+    broker.PublishFrame(BuildTestFrame(0));
+    ASSERT_TRUE(sub->WaitUntilEntered(std::chrono::milliseconds(500)));
+
+    // Publish 4 more frames while the first dispatch is blocked. With max_queue_size=1,
+    // all 4 are dropped deterministically.
     // slow_consumer_detected_count should be >= 1 after exceeding threshold 3
-    for (uint32_t i = 0; i < 5; ++i)
+    for (uint32_t i = 1; i < 5; ++i)
     {
         broker.PublishFrame(BuildTestFrame(i));
     }
 
+    sub->Release();
     broker.Stop();
 
     const auto stats = broker.GetStats();
@@ -185,17 +239,24 @@ TEST(FrameBrokerBackpressureTest, SlowConsumerRecovery)
     BackpressureConfig config;
     config.max_queue_size = 2;
     config.slow_consumer_threshold = 2;
-    auto sub = std::make_shared<TestSubscriber>("recovering", 128, config);
+    auto sub = std::make_shared<BlockingTestSubscriber>("recovering", 128, config);
     ASSERT_TRUE(broker.Subscribe(sub));
 
-    // Step 1: Publish 4 frames, 2 queued, 2 dropped -> slow consumer
-    for (uint32_t i = 0; i < 4; ++i)
+    broker.PublishFrame(BuildTestFrame(0));
+    ASSERT_TRUE(sub->WaitUntilEntered(std::chrono::milliseconds(500)));
+
+    // Step 1: Publish 3 more frames while one dispatch is blocked. The second frame is
+    // queued and the next 2 are dropped, marking the subscriber as slow.
+    for (uint32_t i = 1; i < 4; ++i)
     {
         broker.PublishFrame(BuildTestFrame(i));
     }
 
-    // Wait for worker to drain
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    sub->Release();
+    while (sub->GetReceivedCount() < 2)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 
     // Step 2: Publish 2 more frames, should be queued and processed
     // consecutive_drops should reset to 0 after successful dispatch

@@ -27,7 +27,15 @@ struct CameraConfig
     uint32_t fps_;          // 帧率
     uint32_t buffer_count_; // Buffer 数量
     uint32_t io_method_;    // IO 方法 (IoMethod)
-    uint8_t reserved_[64];  // 预留扩展空间
+
+    // ---- 新增：恢复策略配置 ----
+    bool enable_auto_recovery = false;        // 默认关闭，向后兼容
+    uint32_t disconnect_threshold = 3;        // 连续 ioctl 失败阈值
+    uint32_t max_recovery_attempts = 10;      // 最大重试次数
+    uint32_t recovery_backoff_base_ms = 1000; // 退避基数 (ms)
+    uint32_t recovery_backoff_max_ms = 30000; // 退避上限 (ms)
+
+    uint8_t reserved_[44]; // 预留扩展空间 (原 64，结构总大小保持 88 bytes)
 
     /**
      * @brief 默认构造函数

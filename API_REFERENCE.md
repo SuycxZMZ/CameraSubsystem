@@ -469,6 +469,18 @@ uint32_t GetCameraId() const;
 const CameraConfig& GetConfig() const;
 ```
 
+### 4.6 指标填充（IMetricsProvider）
+
+```cpp
+/**
+ * @brief 填充采集层指标
+ * @param metrics 输出参数，填充 capture_frame_count、capture_dropped_count、
+ *                dma_buf_frame_count、lease_exhausted_count、active_lease_count
+ * @note 实现 IMetricsProvider 接口，只填充 CameraSource 负责的字段
+ */
+void FillMetrics(core::StreamMetrics* metrics) const override;
+```
+
 ---
 
 ## 5. FrameBroker 类接口
@@ -564,31 +576,72 @@ size_t GetSubscriberCount(uint32_t camera_id) const;
 void Publish(const FrameHandle& frame);
 ```
 
-### 5.5 统计信息
+### 5.5 背压配置
 
 ```cpp
 /**
- * @brief 统计信息结构体
+ * @brief 背压策略枚举
  */
-struct Statistics
+enum class DropPolicy
 {
-    uint64_t total_frames_published_;   // 总发布帧数
-    uint64_t total_frames_dispatched_;  // 总分发帧数
-    uint64_t total_frames_dropped_;     // 总丢弃帧数
-    uint64_t current_queue_size_;       // 当前队列大小
-    uint64_t peak_queue_size_;          // 峰值队列大小
+    kDropOldest,  // 丢弃最旧任务
+    kDropNewest,  // 丢弃最新任务
+    kBlock,       // 阻塞等待（当前未实现，保留扩展）
+    kDropTail     // 丢弃尾部（同 DropNewest，语义区分）
+};
+
+/**
+ * @brief 背压配置结构
+ */
+struct BackpressureConfig
+{
+    uint32_t max_queue_size = 0;          // 最大队列深度，0 表示使用 FrameBroker 全局值
+    uint32_t slow_consumer_threshold = 10; // 连续丢帧阈值，超过则标记为慢消费者
+};
+```
+
+### 5.6 统计信息
+
+```cpp
+/**
+ * @brief 单订阅者统计信息
+ */
+struct SubscriberStats
+{
+    std::string name;
+    uint64_t dispatched = 0;
+    uint64_t dropped = 0;
+    uint64_t consecutive_drops = 0;
+    bool is_slow_consumer = false;
+    uint64_t slow_consumer_detected_count = 0;
+};
+
+/**
+ * @brief 分发统计信息
+ */
+struct Stats
+{
+    uint64_t published_frames = 0;
+    uint64_t dispatched_tasks = 0;
+    uint64_t dropped_tasks = 0;
+    size_t queue_size = 0;
+    size_t subscriber_count = 0;
+    std::vector<SubscriberStats> subscriber_stats;
 };
 
 /**
  * @brief 获取统计信息
- * @return 统计信息结构体
+ * @return 分发统计信息结构体
  */
-Statistics GetStatistics() const;
+Stats GetStats() const;
 
 /**
- * @brief 重置统计信息
+ * @brief 填充分发层指标
+ * @param metrics 输出参数，填充 broker_published_count、broker_dispatched_count、
+ *                broker_dropped_count、broker_queue_depth、broker_subscriber_count
+ * @note 实现 IMetricsProvider 接口，只填充 FrameBroker 负责的字段
  */
-void ResetStatistics();
+void FillMetrics(core::StreamMetrics* metrics) const override;
 ```
 
 ---
@@ -1502,6 +1555,141 @@ public:
 ./bin/camera_publisher_example [device_path] [control_socket] [data_socket]
 ./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket] [device_path]
 ```
+
+---
+
+**文档结束**
+
+---
+
+## 21. 统一 Metrics 接口（新增）
+
+### 21.1 概述
+
+`core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator` 构成 CameraSubsystem 的统一可观测性指标体系。设计目标是将分散在 `CameraSource`、`FrameBroker`、`DataPlaneV2` 中的计数器按 `stream_id` 标签聚合，使上层模块能通过统一入口获取每路流的完整指标快照。
+
+- 不引入外部依赖（无 Prometheus、statsd 等第三方库）
+- 先支持内存快照和日志输出，后续可扩展为文件/网络导出
+- 向后兼容：现有 `GetStats()` / `Get*Count()` 完全保留
+
+### 21.2 StreamMetrics 结构
+
+```cpp
+/**
+ * @brief 单路流指标快照
+ *
+ * 各模块通过 IMetricsProvider::FillMetrics() 填充自己负责的字段，
+ * 未负责字段保持默认值 0。
+ */
+struct StreamMetrics
+{
+    std::string stream_id;
+    uint64_t timestamp_ns = 0;
+
+    // ---- 采集层 (CameraSource 负责) ----
+    uint64_t capture_frame_count = 0;      // 总采集帧数
+    uint64_t capture_dropped_count = 0;    // 采集丢帧数
+    uint64_t dma_buf_frame_count = 0;      // DMA-BUF 路径帧数
+    uint64_t lease_exhausted_count = 0;    // lease 耗尽次数
+    size_t active_lease_count = 0;         // 当前活跃 lease 数
+
+    // ---- 分发层 (FrameBroker 负责) ----
+    uint64_t broker_published_count = 0;   // FrameBroker 收到发布的帧数
+    uint64_t broker_dispatched_count = 0;  // 成功分发给 subscriber 的帧数
+    uint64_t broker_dropped_count = 0;     // FrameBroker 背压丢弃的帧数
+    size_t broker_queue_depth = 0;         // 当前任务队列深度
+    size_t broker_subscriber_count = 0;    // 当前活跃 subscriber 数
+
+    // ---- 数据面 (DataPlaneV2 / publisher 负责) ----
+    uint64_t v2_sent_frame_count = 0;      // DataPlaneV2 发送帧数
+    uint64_t v2_send_failure_count = 0;    // DataPlaneV2 发送失败数
+    uint64_t release_pending_count = 0;    // 待 release 帧数
+    uint64_t release_timeout_count = 0;    // release 超时次数
+    uint64_t release_reclaimed_count = 0;  // 成功回收帧数
+};
+```
+
+### 21.3 IMetricsProvider 接口
+
+```cpp
+/**
+ * @brief Metrics 提供方接口
+ *
+ * 实现方只填充自己负责的 StreamMetrics 字段，不修改其他字段。
+ */
+class IMetricsProvider
+{
+public:
+    virtual ~IMetricsProvider() = default;
+
+    /**
+     * @brief 填充指标快照
+     * @param metrics 输出参数，provider 只填充自己负责的字段
+     * @note 实现方应保证线程安全（通常读取内部原子计数器）
+     * @note metrics->stream_id 在调用前已由聚合方设置，provider 不应修改
+     */
+    virtual void FillMetrics(StreamMetrics* metrics) const = 0;
+};
+```
+
+**已实现该接口的模块：**
+- `CameraSource`：填充采集层指标（`capture_frame_count`、`capture_dropped_count`、`dma_buf_frame_count`、`lease_exhausted_count`、`active_lease_count`）
+- `FrameBroker`：填充分发层指标（`broker_published_count`、`broker_dispatched_count`、`broker_dropped_count`、`broker_queue_depth`、`broker_subscriber_count`）
+
+### 21.4 MetricsAggregator 类
+
+```cpp
+/**
+ * @brief Metrics 聚合器
+ *
+ * 按 stream_id 注册多个 IMetricsProvider，合并生成单路流或全量流指标快照。
+ */
+class MetricsAggregator
+{
+public:
+    MetricsAggregator() = default;
+    ~MetricsAggregator() = default;
+
+    // 禁止拷贝
+    MetricsAggregator(const MetricsAggregator&) = delete;
+    MetricsAggregator& operator=(const MetricsAggregator&) = delete;
+
+    /**
+     * @brief 注册 provider 到指定 stream
+     */
+    void RegisterProvider(const std::string& stream_id, IMetricsProvider* provider);
+
+    /**
+     * @brief 注销 provider
+     */
+    void UnregisterProvider(const std::string& stream_id, IMetricsProvider* provider);
+
+    /**
+     * @brief 获取单路流指标快照
+     */
+    StreamMetrics GetStreamMetrics(const std::string& stream_id) const;
+
+    /**
+     * @brief 获取所有流指标快照
+     */
+    std::vector<StreamMetrics> GetAllStreamMetrics() const;
+
+    /**
+     * @brief 格式化单路流指标为日志字符串
+     *
+     * 输出格式：
+     *   stream=usb0 | capture=1848 | dropped=0 | dmabuf=1848 | leases=0 |
+     *   lease_exhausted=0 | queue=0 | subscribers=2 | v2_sent=3693 |
+     *   v2_fail=0 | release_pending=0 | release_timeout=0 | release_reclaimed=0
+     */
+    static std::string FormatForLog(const StreamMetrics& metrics);
+};
+```
+
+### 21.5 头文件
+
+- `include/camera_subsystem/core/metrics.h`
+- `src/core/metrics.cpp`
 
 ---
 

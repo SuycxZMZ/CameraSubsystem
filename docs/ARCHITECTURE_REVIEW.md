@@ -228,19 +228,19 @@
 | ARCH-001 | Buffer 所有权不明确 | 已完成 | 保持回归测试 |
 | ARCH-002 | Buffer 状态机缺失 | 已完成 | 增加异常状态测试 |
 | ARCH-003 | Buffer 泄漏检测 | 已完成 | 接入统一 metrics |
-| ARCH-004 | 丢帧策略硬编码 | 进行中 | 定义 `BackpressureConfig` |
-| ARCH-005 | 背压阈值配置 | 计划中 | 支持队列深度与延迟阈值 |
-| ARCH-006 | 订阅者优先级静态 | 计划中 | 支持动态优先级和慢消费者隔离 |
-| ARCH-007 | 设备自动重连 | 计划中 | 增加会话状态机 |
+| ARCH-004 | 丢帧策略硬编码 | 已完成 | `BackpressureConfig` / `DropPolicy`（kDropOldest/kDropNewest/kBlock/kDropTail）；4 个单元测试 + stress test 兼容 |
+| ARCH-005 | 背压阈值配置 | 已完成 | 按 subscriber 独立 `max_queue_size` 和 `slow_consumer_threshold`；全局默认值可覆盖 |
+| ARCH-006 | 订阅者优先级静态 | 已完成 | 慢消费者检测：`consecutive_drops >= threshold` 标记 `is_slow_consumer`；worker 成功处理后重置；日志告警与恢复通知 |
+| ARCH-007 | 设备自动重连 | 已完成 | `CameraSource` 已新增 `SourceState`、断连/恢复 Metrics、capture/monitor 双线程和可控恢复配置；自动恢复默认关闭；RK3576 quick、DataPlaneV2 lifecycle、multi-camera-topology smoke 与 USB 物理拔插/重插恢复实测已通过 |
 | ARCH-008 | 降级策略 | 计划中 | 支持降帧、降分辨率、暂停低优先级订阅 |
-| ARCH-009 | 统一 Metrics | 计划中 | 定义指标结构与导出接口 |
+| ARCH-009 | 统一 Metrics | 已完成 | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`；CameraSource/FrameBroker 已接入；publisher 示例已替换手动聚合；10 个单元测试通过 |
 | ARCH-010 | 数据面生产协议 | 进行中 | DMA-BUF Phase 2 最小跨进程链路已完成；已补慢消费者参数和 RK3576 slow-consumer smoke 脚本，`/dev/video45` 双订阅者 60 秒长稳与 counters 自动判定已通过；后续补更长时间长稳和生产级背压 |
 | ARCH-010A | DMA-BUF CPU sync helper | 已完成 | 已抽象 `core::DmaBufSyncHelper`，板端 CPU mmap/sync smoke 通过 |
-| ARCH-010B | DataPlaneV2 协议层 | 进行中 | 已新增 DataPlaneV2 descriptor、ReleaseFrame 消息结构、SCM_RIGHTS fd 传递 helper、release tracker、publisher release UDS server，并接入 publisher/subscriber 示例；RK3576 smoke 已通过，本机异常单测已覆盖 fd 清理、无效 release、部分 release 超时和重复/未知 release |
+| ARCH-010B | DataPlaneV2 协议层 | 已完成 | 跨进程 fd 传递、ReleaseFrame 通道、超时/断连回收、subscriber 崩溃 failover、fd 泄漏长稳、publisher 退出清理均已验证 |
 | ARCH-010C | MPLANE DMA-BUF 探测 | 进行中 | 已新增 `mplane_dmabuf_probe`，RKISP/RKVpss MPLANE 节点 `REQBUFS + QUERYBUF + EXPBUF` 成功；STREAMON 仍依赖真实 MIPI sensor/media pipeline |
-| ARCH-010D | H.264 录制编码服务 | 设计中 | 新增 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)，规划独立 `camera_codec_server` 订阅原始流，Web Preview 只转发录制控制；第一阶段以 USB JPEG/MJPEG -> H.264 文件落盘打通链路，MIPI/RKISP NV12 DMA-BUF 低拷贝路径后续扩展 |
+| ARCH-010D | H.264 录制编码服务 | 进行中 | USB JPEG/MJPEG -> H.264 文件落盘已打通；MP4 容器已完成；多 session 已完成；低拷贝录制设计文档 [DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md) 已完成，待 MIPI sensor 到位后编码实现 |
 | ARCH-011 | 多路能力探测 | 计划中 | 接入启动流程与平台标定 |
-| ARCH-011A | 多路摄像头身份与运行时纠偏 | 进行中 | 已新增 [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md)，M1 身份模型基础贯通、M2 publisher 示例 `stream_id -> CameraStreamRuntime`、M3 DataPlaneV2/release 多字段 key、M4 codec 多 session 第一阶段均已完成；下一步进入板端多 stream smoke 或 Web 多 stream 状态 |
+| ARCH-011A | 多路摄像头身份与运行时纠偏 | 已完成 | M1-M4 全部完成：`CameraStreamIdentity` 贯通、publisher 多 runtime、DataPlaneV2/release 多字段 key、codec 多 session、Web W1-W2、multi-camera-topology smoke（含 identity 冲突检测与隔离验证） |
 | ARCH-012 | 线程亲和性 | 计划中 | 采集/分发线程绑定策略 |
 | ARCH-018 | 发布端/订阅端解耦 | 基础落地 | 补生产级协议与异常恢复 |
 | ARCH-019 | 按订阅启停 Camera | 基础落地 | 补防抖 grace period 与失败回滚 |
@@ -253,13 +253,13 @@
 
 下一阶段建议以“板端可控原型”为目标，而不是继续扩大功能面。
 
-1. `CameraSessionManager` start/stop 回调不再持锁执行，并补充并发订阅/退订测试。
-2. 完成 `CameraStreamIdentity` 和 `stream_id -> CameraStreamRuntime` 基础改造，确保一路启动/停止不会影响其他 stream。
-3. DataPlaneV2 pending lease 与 ReleaseFrame tracker 不再使用裸 `frame_id` 作为全局键。
+1. ✅ `CameraSessionManager` start/stop 回调不再持锁执行，并补充并发订阅/退订测试。
+2. ✅ 完成 `CameraStreamIdentity` 和 `stream_id -> CameraStreamRuntime` 基础改造，确保一路启动/停止不会影响其他 stream。
+3. ✅ DataPlaneV2 pending lease 与 ReleaseFrame tracker 不再使用裸 `frame_id` 作为全局键。
 4. 文档和 API 明确当前数据面是示例复制链路，新增生产数据面设计草案。
-5. `FrameBroker` 支持可配置队列上限、DropPolicy、慢消费者统计。
-6. 统一输出最小 metrics：采集 FPS、发布 FPS、队列深度、丢帧数、发送失败数、端到端延迟，并带 `stream_id` 标签。
-7. RK3576 Debian 12 板端完成 `camera_publisher_example` / `camera_subscriber_example` copy 与 DataPlaneV2 最小运行验证，并通过 `dmabuf_smoke_test` 验证 DMA-BUF export、lease、CPU mmap 和 sync 行为。
+5. ✅ `FrameBroker` 支持可配置队列上限、DropPolicy、慢消费者统计。
+6. ✅ 统一输出最小 metrics：采集 FPS、发布 FPS、队列深度、丢帧数、发送失败数、lease 统计，并带 `stream_id` 标签。
+7. ✅ RK3576 Debian 12 板端完成 `camera_publisher_example` / `camera_subscriber_example` copy 与 DataPlaneV2 最小运行验证，并通过 `dmabuf_smoke_test` 验证 DMA-BUF export、lease、CPU mmap 和 sync 行为。
 8. 设备断连或 `/dev/videoX` 不可用时，发布端能输出明确错误状态并保持进程可控退出或等待恢复。
 
 ---
