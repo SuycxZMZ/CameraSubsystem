@@ -16,6 +16,7 @@
 #include "camera_subsystem/core/metrics.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -26,8 +27,20 @@
 
 #include <linux/videodev2.h>
 
-namespace camera_subsystem {
-namespace camera {
+namespace camera_subsystem
+{
+namespace camera
+{
+
+enum class SourceState : uint32_t
+{
+    kIdle = 0,
+    kReady,
+    kStreaming,
+    kDisconnected,
+    kRetrying,
+    kPermanentFailure
+};
 
 /**
  * @brief Camera 数据源（V4L2/MMAP 采集实现）
@@ -40,11 +53,10 @@ namespace camera {
  */
 class CameraSource : public core::IMetricsProvider
 {
-public:
+  public:
     using FrameCallback = std::function<void(const core::FrameHandle&)>;
     using FrameCallbackWithBuffer =
-        std::function<void(const core::FrameHandle&,
-                           const std::shared_ptr<core::BufferGuard>&)>;
+        std::function<void(const core::FrameHandle&, const std::shared_ptr<core::BufferGuard>&)>;
     using FramePacketCallback = std::function<void(const core::FramePacket&)>;
 
     CameraSource();
@@ -74,11 +86,20 @@ public:
     size_t GetDmaBufLeaseInFlightMax() const;
     size_t GetDmaBufMinQueuedCaptureBuffers() const;
 
+    // ---- 新增：状态查询 ----
+    SourceState GetState() const;
+    uint64_t GetDisconnectionCount() const;
+    uint64_t GetRecoveryAttemptCount() const;
+
     // ---- IMetricsProvider ----
     void FillMetrics(core::StreamMetrics* metrics) const override;
 
-private:
+  private:
     void CaptureLoop();
+    void MonitorLoop();
+    bool CheckDisconnection(int error_code) const;
+    void HandleDisconnection();
+    bool TryRecover();
     void HandleDequeuedBuffer(struct v4l2_buffer& buf, struct v4l2_plane* planes = nullptr);
     void HandleDequeuedBufferCopy(struct v4l2_buffer& buf, struct v4l2_plane* planes = nullptr);
     bool HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf, struct v4l2_plane* planes = nullptr);
@@ -169,9 +190,19 @@ private:
     std::atomic<uint64_t> lease_exhausted_count_{0};
 
     std::atomic<bool> is_running_;
+    std::atomic<bool> monitor_running_{false};
+    std::atomic<bool> disconnected_{false};
+    std::atomic<bool> capture_thread_exited_{false};
+    std::atomic<SourceState> state_{SourceState::kIdle};
     std::atomic<uint64_t> frame_count_;
     std::atomic<uint64_t> dropped_frames_;
+    std::atomic<uint64_t> disconnection_count_{0};
+    std::atomic<uint64_t> recovery_attempt_count_{0};
     std::thread capture_thread_;
+    std::thread monitor_thread_;
+    mutable std::mutex state_mutex_;
+    mutable std::mutex monitor_mutex_;
+    std::condition_variable monitor_cv_;
 
     mutable std::mutex callback_mutex_;
     FrameCallback callback_;

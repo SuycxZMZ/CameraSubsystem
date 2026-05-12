@@ -37,25 +37,30 @@ struct StreamMetrics
     uint64_t timestamp_ns = 0;
 
     // ---- 采集层 (CameraSource 负责) ----
-    uint64_t capture_frame_count = 0;      // 总采集帧数
-    uint64_t capture_dropped_count = 0;    // 采集丢帧数
-    uint64_t dma_buf_frame_count = 0;      // DMA-BUF 路径帧数
-    uint64_t lease_exhausted_count = 0;    // lease 耗尽次数
-    size_t active_lease_count = 0;         // 当前活跃 lease 数
+    uint64_t capture_frame_count = 0;   // 总采集帧数
+    uint64_t capture_dropped_count = 0; // 采集丢帧数
+    uint64_t dma_buf_frame_count = 0;   // DMA-BUF 路径帧数
+    uint64_t lease_exhausted_count = 0; // lease 耗尽次数
+    size_t active_lease_count = 0;      // 当前活跃 lease 数
 
     // ---- 分发层 (FrameBroker 负责) ----
-    uint64_t broker_published_count = 0;   // FrameBroker 收到发布的帧数
-    uint64_t broker_dispatched_count = 0;  // 成功分发给 subscriber 的帧数
-    uint64_t broker_dropped_count = 0;     // FrameBroker 背压丢弃的帧数
-    size_t broker_queue_depth = 0;         // 当前任务队列深度
-    size_t broker_subscriber_count = 0;    // 当前活跃 subscriber 数
+    uint64_t broker_published_count = 0;  // FrameBroker 收到发布的帧数
+    uint64_t broker_dispatched_count = 0; // 成功分发给 subscriber 的帧数
+    uint64_t broker_dropped_count = 0;    // FrameBroker 背压丢弃的帧数
+    size_t broker_queue_depth = 0;        // 当前任务队列深度
+    size_t broker_subscriber_count = 0;   // 当前活跃 subscriber 数
 
     // ---- 数据面 (DataPlaneV2 / publisher 负责) ----
-    uint64_t v2_sent_frame_count = 0;      // DataPlaneV2 发送帧数
-    uint64_t v2_send_failure_count = 0;    // DataPlaneV2 发送失败数
-    uint64_t release_pending_count = 0;    // 待 release 帧数
-    uint64_t release_timeout_count = 0;    // release 超时次数
-    uint64_t release_reclaimed_count = 0;  // 成功回收帧数
+    uint64_t v2_sent_frame_count = 0;     // DataPlaneV2 发送帧数
+    uint64_t v2_send_failure_count = 0;   // DataPlaneV2 发送失败数
+    uint64_t release_pending_count = 0;   // 待 release 帧数
+    uint64_t release_timeout_count = 0;   // release 超时次数
+    uint64_t release_reclaimed_count = 0; // 成功回收帧数
+
+    // ---- 断连与恢复指标 (CameraSource 负责) ----
+    uint64_t disconnection_count = 0;    // 断连发生次数
+    uint64_t recovery_attempt_count = 0; // 恢复尝试总次数
+    uint32_t current_state = 0;          // 当前 SourceState 值
 };
 
 /**
@@ -65,7 +70,7 @@ struct StreamMetrics
  */
 class IMetricsProvider
 {
-public:
+  public:
     virtual ~IMetricsProvider() = default;
 
     /**
@@ -85,7 +90,7 @@ public:
  */
 class MetricsAggregator
 {
-public:
+  public:
     MetricsAggregator() = default;
     ~MetricsAggregator() = default;
 
@@ -118,11 +123,12 @@ public:
      *
      * 输出格式示例：
      *   stream=usb0 | capture=1848 | dropped=0 | dmabuf=1848 | leases=0 | lease_exhausted=0
-     *   | queue=0 | subscribers=2 | v2_sent=3693 | v2_fail=0 | release_pending=0 | release_timeout=0
+     *   | queue=0 | subscribers=2 | v2_sent=3693 | v2_fail=0 | release_pending=0 |
+     * release_timeout=0
      */
     static std::string FormatForLog(const StreamMetrics& metrics);
 
-private:
+  private:
     mutable std::mutex mutex_;
     std::unordered_map<std::string, std::vector<IMetricsProvider*>> providers_by_stream_;
 };

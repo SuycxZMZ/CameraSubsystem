@@ -55,7 +55,7 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 
 - **RAII 资源管理**: 严格的资源管理，杜绝资源泄漏
 - **线程安全**: 完善的同步机制，避免死锁和竞态条件
-- **错误恢复**: 已有基础错误处理，设备断连恢复仍待完善
+- **错误恢复**: 已实现设备断连检测与自动恢复（默认关闭），USB 热插拔验证通过
 - **长期运行**: 已具备压力测试入口，7x24 稳定性仍待板端验证
 
 ### 可维护性
@@ -123,12 +123,14 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 1. 发布端：
 
 ```bash
-./bin/camera_publisher_example [device_path] [control_socket] [data_socket]
+./bin/camera_publisher_example [device_path] [control_socket] [data_socket] \
+  [--io-method mmap|dmabuf] [--enable-auto-recovery]
 ```
 
 - `device_path`：默认 `CAMERA_SUBSYSTEM_DEFAULT_CAMERA`（通常 `/dev/video0`）
 - `control_socket`：默认 `/tmp/camera_subsystem_control.sock`
 - `data_socket`：默认 `/tmp/camera_subsystem_data.sock`
+- `--enable-auto-recovery`：默认关闭；用于设备断连恢复验证时显式开启
 
 2. 订阅端：
 
@@ -460,7 +462,7 @@ ctest --output-on-failure
 可选参数：
 
 ```bash
-./bin/camera_publisher_example [device_path] [control_socket] [data_socket]
+./bin/camera_publisher_example [device_path] [control_socket] [data_socket] [--io-method mmap|dmabuf] [--enable-auto-recovery]
 ./bin/camera_subscriber_example [output_dir] [control_socket] [data_socket] [device_path]
 ./bin/camera_subscriber_example subscriber_frames /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock /dev/videoX
 ```

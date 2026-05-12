@@ -262,7 +262,7 @@ flowchart TB
 **待添加测试:**
 
 - ⏳ PlatformLayer 单元测试
-- ⏳ CameraSource 单元测试
+- ✅ CameraSource recovery 单元测试（配置 ABI、恢复字段 Reset、状态查询、Metrics 字段、Idle Stop 幂等）
 - ⏳ 集成测试
 - ⏳ 性能测试
 - ⏳ Metrics 集成测试（与真实板端 smoke 联动）
@@ -308,8 +308,13 @@ flowchart TB
 
 3. **板端可观测性增强**
    - 基于已落地的 `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`，将 per-stream 指标接入 smoke 自动判定
-   - 目标：板端 smoke 脚本可直接检查 `capture_frame_count`、`broker_dropped_count`、`release_pending_count` 等阈值，替代当前的日志 grep 判定
+   - 目标：板端 smoke 脚本可直接检查 `capture_frame_count`、`broker_dropped_count`、`release_pending_count`、`disconnection_count` 等阈值，替代当前的日志 grep 判定
    - 不引入外部依赖，先支持内存快照和日志输出
+
+4. **CameraSource 断连恢复实测**
+   - ARCH-007 已完成：自动恢复默认关闭，RK3576 quick、DataPlaneV2 lifecycle、multi-camera-topology smoke 已通过
+   - 已完成 USB 物理拔插/重插实测：`VIDIOC_DQBUF` 返回 `ENODEV` 后进入 `retrying`，重新插入 `/dev/video45` 后第 25 次重试恢复成功，publisher/subscriber 恢复 15fps
+   - 后续仅保留热插拔能力发现：若新硬件出现设备节点重枚举到非原路径，需要单独设计 device discovery 策略
 
 ### 已完成但需持续回归
 
@@ -542,7 +547,7 @@ flowchart TB
 - [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
 - [ ] 接入真实 MIPI sensor 后，把 `multi-camera-topology` 从 readiness 升级为 USB live + MIPI live 联合 smoke
 - [ ] DataPlaneV2 fd path 编码实现（设计文档已完成）
-- [ ] 设备断连恢复状态机（ARCH-007）
+- [x] 设备断连恢复状态机（ARCH-007）：自动恢复默认关闭，`SourceState` / Metrics / capture-monitor 双线程已落地，RK3576 smoke 与 USB 物理拔插/重插恢复实测通过 ✅ 2026-05-12
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 
 ## 贡献指南

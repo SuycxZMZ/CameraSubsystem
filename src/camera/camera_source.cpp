@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cinttypes>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -48,17 +50,11 @@ uint32_t EffectiveCapabilities(const v4l2_capability& cap)
 } // namespace
 
 CameraSource::CameraSource()
-    : config_()
-    , stream_identity_(core::MakeDefaultCameraStreamIdentity())
-    , device_path_("/dev/video0")
-    , device_fd_(-1)
-    , streaming_(false)
-    , device_capabilities_(0)
-    , capture_buffer_type_(V4L2_BUF_TYPE_VIDEO_CAPTURE)
-    , requeue_context_(std::make_shared<RequeueContext>())
-    , is_running_(false)
-    , frame_count_(0)
-    , dropped_frames_(0)
+    : config_(), stream_identity_(core::MakeDefaultCameraStreamIdentity()),
+      device_path_("/dev/video0"), device_fd_(-1), streaming_(false), device_capabilities_(0),
+      capture_buffer_type_(V4L2_BUF_TYPE_VIDEO_CAPTURE),
+      requeue_context_(std::make_shared<RequeueContext>()), is_running_(false), frame_count_(0),
+      dropped_frames_(0)
 {
 }
 
@@ -96,9 +92,9 @@ bool CameraSource::Initialize(const core::CameraConfig& config)
         const bool ok = InitMPlaneDmaBufExportSkeleton();
         CleanupMPlaneProbeBuffers();
         CloseDevice();
+        state_ = SourceState::kIdle;
         platform::PlatformLogger::Log(ok ? core::LogLevel::kInfo : core::LogLevel::kError,
-                                      "camera_source",
-                                      "MPLANE probe-only initialize result=%s",
+                                      "camera_source", "MPLANE probe-only initialize result=%s",
                                       ok ? "PASS" : "FAIL");
         return ok;
     }
@@ -153,17 +149,26 @@ bool CameraSource::Initialize(const core::CameraConfig& config)
         }
     }
 
+    state_ = SourceState::kReady;
     return true;
 }
 
 bool CameraSource::Start()
 {
-    if (is_running_)
+    if (is_running_.load())
     {
         return true;
     }
 
-    if (!config_.IsValid() || buffers_.empty())
+    if (capture_thread_.joinable() || monitor_thread_.joinable())
+    {
+        Stop();
+    }
+
+    const bool has_capture_buffers = (capture_buffer_type_ == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+                                         ? !mplane_probe_buffers_.empty()
+                                         : !buffers_.empty();
+    if (!config_.IsValid() || device_fd_ < 0 || !has_capture_buffers)
     {
         platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
                                       "CameraSource not initialized");
@@ -184,18 +189,40 @@ bool CameraSource::Start()
     is_running_ = true;
     frame_count_ = 0;
     dropped_frames_ = 0;
+    disconnected_ = false;
+    capture_thread_exited_ = false;
+    monitor_running_ = true;
+
     capture_thread_ = std::thread(&CameraSource::CaptureLoop, this);
+    monitor_thread_ = std::thread(&CameraSource::MonitorLoop, this);
+
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        state_ = SourceState::kStreaming;
+    }
     return true;
 }
 
 void CameraSource::Stop()
 {
-    if (!is_running_)
+    const bool has_worker_threads = capture_thread_.joinable() || monitor_thread_.joinable();
+    const SourceState current_state = state_.load();
+    if (!is_running_.load() && !has_worker_threads && current_state != SourceState::kRetrying &&
+        current_state != SourceState::kPermanentFailure &&
+        current_state != SourceState::kDisconnected)
     {
         return;
     }
 
     is_running_ = false;
+    monitor_running_ = false;
+    monitor_cv_.notify_one();
+
+    if (monitor_thread_.joinable())
+    {
+        monitor_thread_.join();
+    }
+
     if (capture_thread_.joinable())
     {
         capture_thread_.join();
@@ -207,6 +234,11 @@ void CameraSource::Stop()
     }
 
     StopStream();
+
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        state_ = SourceState::kIdle;
+    }
 }
 
 bool CameraSource::IsRunning() const
@@ -311,6 +343,21 @@ size_t CameraSource::GetDmaBufMinQueuedCaptureBuffers() const
     return min_queued_capture_buffers_;
 }
 
+SourceState CameraSource::GetState() const
+{
+    return state_.load();
+}
+
+uint64_t CameraSource::GetDisconnectionCount() const
+{
+    return disconnection_count_.load();
+}
+
+uint64_t CameraSource::GetRecoveryAttemptCount() const
+{
+    return recovery_attempt_count_.load();
+}
+
 void CameraSource::FillMetrics(core::StreamMetrics* metrics) const
 {
     if (!metrics)
@@ -323,11 +370,17 @@ void CameraSource::FillMetrics(core::StreamMetrics* metrics) const
     metrics->dma_buf_frame_count = dma_buf_frame_count_.load();
     metrics->lease_exhausted_count = lease_exhausted_count_.load();
     metrics->active_lease_count = GetDmaBufActiveLeaseCount();
+
+    metrics->disconnection_count = disconnection_count_.load();
+    metrics->recovery_attempt_count = recovery_attempt_count_.load();
+    metrics->current_state = static_cast<uint32_t>(state_.load());
 }
 
 void CameraSource::CaptureLoop()
 {
-    while (is_running_)
+    uint32_t consecutive_errors = 0;
+
+    while (is_running_.load())
     {
         fd_set fds;
         FD_ZERO(&fds);
@@ -344,14 +397,36 @@ void CameraSource::CaptureLoop()
             {
                 continue;
             }
+
+            ++consecutive_errors;
             platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
-                                          "select failed: %s", strerror(errno));
-            break;
+                                          "select failed: %s (consecutive_errors=%u)",
+                                          strerror(errno), consecutive_errors);
+
+            const bool should_recover =
+                CheckDisconnection(errno) || (config_.enable_auto_recovery &&
+                                              consecutive_errors >= config_.disconnect_threshold);
+            if (should_recover)
+            {
+                disconnected_.store(true);
+                is_running_.store(false);
+                break;
+            }
+
+            if (!config_.enable_auto_recovery)
+            {
+                is_running_.store(false);
+                break;
+            }
+            continue;
         }
+
         if (ret == 0)
         {
             continue;
         }
+
+        consecutive_errors = 0;
 
         struct v4l2_buffer buf;
         struct v4l2_plane planes[VIDEO_MAX_PLANES];
@@ -371,13 +446,246 @@ void CameraSource::CaptureLoop()
             {
                 continue;
             }
+
+            ++consecutive_errors;
             platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
-                                          "VIDIOC_DQBUF failed: %s", strerror(errno));
+                                          "VIDIOC_DQBUF failed: %s (consecutive_errors=%u)",
+                                          strerror(errno), consecutive_errors);
+
+            const bool should_recover =
+                CheckDisconnection(errno) || (config_.enable_auto_recovery &&
+                                              consecutive_errors >= config_.disconnect_threshold);
+            if (should_recover)
+            {
+                disconnected_.store(true);
+                is_running_.store(false);
+                break;
+            }
+
+            if (!config_.enable_auto_recovery)
+            {
+                is_running_.store(false);
+                break;
+            }
+            continue;
+        }
+
+        consecutive_errors = 0;
+        HandleDequeuedBuffer(buf, planes);
+    }
+
+    capture_thread_exited_.store(true);
+    monitor_cv_.notify_one();
+}
+
+bool CameraSource::CheckDisconnection(int error_code) const
+{
+    switch (error_code)
+    {
+        case ENODEV:
+        case ENXIO:
+        case EIO:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void CameraSource::MonitorLoop()
+{
+    while (monitor_running_.load())
+    {
+        {
+            std::unique_lock<std::mutex> lock(monitor_mutex_);
+            monitor_cv_.wait(lock, [this]()
+                             { return !monitor_running_.load() || capture_thread_exited_.load(); });
+        }
+
+        if (!monitor_running_.load())
+        {
             break;
         }
 
-        HandleDequeuedBuffer(buf, planes);
+        if (!capture_thread_exited_.exchange(false))
+        {
+            continue;
+        }
+
+        if (capture_thread_.joinable())
+        {
+            capture_thread_.join();
+        }
+
+        if (!disconnected_.exchange(false))
+        {
+            state_ = SourceState::kIdle;
+            is_running_ = false;
+            break;
+        }
+
+        HandleDisconnection();
+
+        if (!config_.enable_auto_recovery)
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            state_ = SourceState::kIdle;
+            is_running_ = false;
+            break;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            state_ = SourceState::kRetrying;
+        }
+
+        uint32_t attempt = 0;
+        uint32_t backoff_ms = config_.recovery_backoff_base_ms;
+
+        while (monitor_running_.load() && attempt < config_.max_recovery_attempts)
+        {
+            {
+                std::unique_lock<std::mutex> lock(monitor_mutex_);
+                if (monitor_cv_.wait_for(lock, std::chrono::milliseconds(backoff_ms),
+                                         [this]() { return !monitor_running_.load(); }))
+                {
+                    break;
+                }
+            }
+
+            platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                          "Recovery attempt %u/%u: stream=%s device=%s",
+                                          attempt + 1, config_.max_recovery_attempts,
+                                          stream_identity_.stream_id.data(), device_path_.c_str());
+
+            if (TryRecover())
+            {
+                platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                              "Recovery successful: stream=%s device=%s",
+                                              stream_identity_.stream_id.data(),
+                                              device_path_.c_str());
+
+                std::lock_guard<std::mutex> lock(state_mutex_);
+                state_ = SourceState::kStreaming;
+                recovery_attempt_count_.fetch_add(attempt + 1);
+                is_running_ = true;
+                capture_thread_ = std::thread(&CameraSource::CaptureLoop, this);
+                break;
+            }
+
+            ++attempt;
+            backoff_ms = std::min(backoff_ms * 2, config_.recovery_backoff_max_ms);
+        }
+
+        if (!monitor_running_.load())
+        {
+            break;
+        }
+
+        if (attempt >= config_.max_recovery_attempts)
+        {
+            platform::PlatformLogger::Log(
+                core::LogLevel::kError, "camera_source",
+                "Recovery failed after %u attempts, entering permanent failure", attempt);
+
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            state_ = SourceState::kPermanentFailure;
+            is_running_ = false;
+            break;
+        }
     }
+}
+
+void CameraSource::HandleDisconnection()
+{
+    std::lock_guard<std::mutex> lock(state_mutex_);
+
+    if (state_.load() != SourceState::kStreaming)
+    {
+        return;
+    }
+
+    state_ = SourceState::kDisconnected;
+    disconnection_count_.fetch_add(1);
+
+    StopStream();
+    CleanupBuffers();
+    CleanupDmaBufExports();
+    CleanupMPlaneProbeBuffers();
+    CloseDevice();
+
+    {
+        std::lock_guard<std::mutex> lock(requeue_context_->mutex);
+        requeue_context_->active = false;
+        requeue_context_->device_fd = -1;
+    }
+
+    platform::PlatformLogger::Log(
+        core::LogLevel::kWarning, "camera_source",
+        "Device disconnected: stream=%s device=%s disconnection_count=%" PRIu64,
+        stream_identity_.stream_id.data(), device_path_.c_str(), disconnection_count_.load());
+}
+
+bool CameraSource::TryRecover()
+{
+    if (!OpenDevice())
+    {
+        return false;
+    }
+
+    if (!SelectCaptureBufferType(device_capabilities_))
+    {
+        CloseDevice();
+        return false;
+    }
+
+    bool init_ok = false;
+    if (capture_buffer_type_ == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+    {
+        init_ok = InitMPlaneBuffers();
+    }
+    else
+    {
+        if (ConfigureDevice() && InitMMap())
+        {
+            pool_buffer_size_ = 0;
+            if (!buffers_.empty())
+            {
+                pool_buffer_size_ = buffers_[0].length;
+            }
+            if (pool_buffer_size_ == 0)
+            {
+                pool_buffer_size_ = CalculateBufferSize(config_);
+            }
+            init_ok = buffer_pool_.Initialize(config_.buffer_count_, pool_buffer_size_);
+        }
+    }
+
+    if (!init_ok)
+    {
+        CleanupDmaBufExports();
+        CleanupMPlaneProbeBuffers();
+        CleanupBuffers();
+        CloseDevice();
+        return false;
+    }
+
+    if (!StartStream())
+    {
+        StopStream();
+        CleanupDmaBufExports();
+        CleanupMPlaneProbeBuffers();
+        CleanupBuffers();
+        CloseDevice();
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(requeue_context_->mutex);
+        requeue_context_->device_fd = device_fd_;
+        requeue_context_->active = true;
+    }
+
+    return true;
 }
 
 void CameraSource::HandleDequeuedBuffer(struct v4l2_buffer& buf, struct v4l2_plane* planes)
@@ -800,14 +1108,11 @@ bool CameraSource::ConfigureDevice()
         config_.format_ = negotiated_format;
     }
 
-    platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
-                                  "negotiated format: width=%u height=%u fourcc=%c%c%c%c",
-                                  config_.width_,
-                                  config_.height_,
-                                  fmt.fmt.pix.pixelformat & 0xff,
-                                  (fmt.fmt.pix.pixelformat >> 8) & 0xff,
-                                  (fmt.fmt.pix.pixelformat >> 16) & 0xff,
-                                  (fmt.fmt.pix.pixelformat >> 24) & 0xff);
+    platform::PlatformLogger::Log(
+        core::LogLevel::kInfo, "camera_source",
+        "negotiated format: width=%u height=%u fourcc=%c%c%c%c", config_.width_, config_.height_,
+        fmt.fmt.pix.pixelformat & 0xff, (fmt.fmt.pix.pixelformat >> 8) & 0xff,
+        (fmt.fmt.pix.pixelformat >> 16) & 0xff, (fmt.fmt.pix.pixelformat >> 24) & 0xff);
 
     struct v4l2_streamparm parm;
     memset(&parm, 0, sizeof(parm));
@@ -930,8 +1235,8 @@ bool CameraSource::InitDmaBufExport()
             dma_buf_export_failures_.fetch_add(1);
             all_exported = false;
             platform::PlatformLogger::Log(core::LogLevel::kWarning, "camera_source",
-                                          "VIDIOC_EXPBUF failed for buffer %u: %s",
-                                          i, strerror(errno));
+                                          "VIDIOC_EXPBUF failed for buffer %u: %s", i,
+                                          strerror(errno));
             break;
         }
 
@@ -958,8 +1263,7 @@ bool CameraSource::InitDmaBufExport()
     platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
                                   "DMA-BUF export enabled: actual_buffer_count=%zu "
                                   "min_queued_capture_buffers=%zu lease_in_flight_max=%zu",
-                                  buffers_.size(),
-                                  min_queued_capture_buffers_,
+                                  buffers_.size(), min_queued_capture_buffers_,
                                   global_lease_in_flight_max_);
     if (requeue_context_)
     {
@@ -986,8 +1290,7 @@ bool CameraSource::ConfigureMPlaneFormatForProbe()
     }
 
     const uint32_t plane_count = fmt.fmt.pix_mp.num_planes;
-    if (plane_count == 0 || plane_count > VIDEO_MAX_PLANES ||
-        plane_count > core::kMaxFramePlanes)
+    if (plane_count == 0 || plane_count > VIDEO_MAX_PLANES || plane_count > core::kMaxFramePlanes)
     {
         platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
                                       "MPLANE invalid plane count: %u", plane_count);
@@ -1008,13 +1311,10 @@ bool CameraSource::ConfigureMPlaneFormatForProbe()
     platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
                                   "MPLANE probe format: width=%u height=%u "
                                   "fourcc=%c%c%c%c planes=%u",
-                                  mplane_probe_width_,
-                                  mplane_probe_height_,
-                                  mplane_probe_fourcc_ & 0xff,
-                                  (mplane_probe_fourcc_ >> 8) & 0xff,
+                                  mplane_probe_width_, mplane_probe_height_,
+                                  mplane_probe_fourcc_ & 0xff, (mplane_probe_fourcc_ >> 8) & 0xff,
                                   (mplane_probe_fourcc_ >> 16) & 0xff,
-                                  (mplane_probe_fourcc_ >> 24) & 0xff,
-                                  mplane_probe_plane_count_);
+                                  (mplane_probe_fourcc_ >> 24) & 0xff, mplane_probe_plane_count_);
 
     return true;
 }
@@ -1064,8 +1364,7 @@ bool CameraSource::InitMPlaneBuffersForProbe()
         if (Xioctl(device_fd_, VIDIOC_QUERYBUF, &buf) < 0)
         {
             platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
-                                          "MPLANE VIDIOC_QUERYBUF failed: %s",
-                                          strerror(errno));
+                                          "MPLANE VIDIOC_QUERYBUF failed: %s", strerror(errno));
             return false;
         }
 
@@ -1075,9 +1374,7 @@ bool CameraSource::InitMPlaneBuffersForProbe()
         for (uint32_t p = 0; p < mplane_probe_plane_count_; ++p)
         {
             MPlaneProbePlane& plane = buffer.planes[p];
-            plane.bytes_per_line = p < mplane_probe_strides_.size()
-                ? mplane_probe_strides_[p]
-                : 0;
+            plane.bytes_per_line = p < mplane_probe_strides_.size() ? mplane_probe_strides_[p] : 0;
             plane.length = planes[p].length;
             plane.bytes_used = planes[p].bytesused;
             plane.data_offset = planes[p].data_offset;
@@ -1111,9 +1408,7 @@ bool CameraSource::ExportMPlaneDmaBufsForProbe()
                 platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
                                               "MPLANE VIDIOC_EXPBUF failed: index=%u "
                                               "plane=%u error=%s",
-                                              buffer.index,
-                                              p,
-                                              strerror(errno));
+                                              buffer.index, p, strerror(errno));
                 CleanupMPlaneProbeBuffers();
                 return false;
             }
@@ -1126,8 +1421,7 @@ bool CameraSource::ExportMPlaneDmaBufsForProbe()
     platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
                                   "MPLANE DMA-BUF export skeleton initialized: "
                                   "buffers=%zu planes=%u",
-                                  mplane_probe_buffers_.size(),
-                                  mplane_probe_plane_count_);
+                                  mplane_probe_buffers_.size(), mplane_probe_plane_count_);
     return true;
 }
 
@@ -1154,10 +1448,8 @@ bool CameraSource::ShouldRunMPlaneProbeOnly() const
         return false;
     }
 
-    return std::strcmp(value, "1") == 0 ||
-           std::strcmp(value, "true") == 0 ||
-           std::strcmp(value, "TRUE") == 0 ||
-           std::strcmp(value, "on") == 0 ||
+    return std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0 ||
+           std::strcmp(value, "TRUE") == 0 || std::strcmp(value, "on") == 0 ||
            std::strcmp(value, "ON") == 0;
 }
 
@@ -1242,10 +1534,8 @@ bool CameraSource::InitMPlaneBuffers()
     platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
                                   "MPLANE live initialized: buffers=%zu planes=%u "
                                   "dma_buf_enabled=%u min_queued=%zu lease_max=%zu",
-                                  mplane_probe_buffers_.size(),
-                                  mplane_probe_plane_count_,
-                                  dma_buf_path_enabled_ ? 1U : 0U,
-                                  min_queued_capture_buffers_,
+                                  mplane_probe_buffers_.size(), mplane_probe_plane_count_,
+                                  dma_buf_path_enabled_ ? 1U : 0U, min_queued_capture_buffers_,
                                   global_lease_in_flight_max_);
     return true;
 }

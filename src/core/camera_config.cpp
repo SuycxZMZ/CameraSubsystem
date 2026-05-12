@@ -43,6 +43,11 @@ void CameraConfig::Reset()
     fps_ = 0;
     buffer_count_ = 0;
     io_method_ = static_cast<uint32_t>(IoMethod::kDmaBuf);
+    enable_auto_recovery = false;
+    disconnect_threshold = 3;
+    max_recovery_attempts = 10;
+    recovery_backoff_base_ms = 1000;
+    recovery_backoff_max_ms = 30000;
     memset(reserved_, 0, sizeof(reserved_));
 }
 
