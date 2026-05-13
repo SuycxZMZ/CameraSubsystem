@@ -91,6 +91,14 @@ class CameraSource : public core::IMetricsProvider
     uint64_t GetDisconnectionCount() const;
     uint64_t GetRecoveryAttemptCount() const;
 
+    // ---- 新增：降级状态查询 ----
+    bool IsDegraded() const;
+    uint64_t GetDegradationCount() const;
+    uint64_t GetDegradationRecoveryCount() const;
+    uint64_t GetDegradationFailureCount() const;
+    uint32_t GetRequestedFps() const;
+    uint32_t GetCurrentTargetFps() const;
+
     // ---- IMetricsProvider ----
     void FillMetrics(core::StreamMetrics* metrics) const override;
 
@@ -100,6 +108,13 @@ class CameraSource : public core::IMetricsProvider
     bool CheckDisconnection(int error_code) const;
     void HandleDisconnection();
     bool TryRecover();
+    uint32_t SetRequestedFps(uint32_t fps);
+    bool ApplyDegradation();
+    bool RestoreOriginalFps();
+    uint32_t ReconfigureFpsInLoop(uint32_t fps);
+    bool RequeueAllBuffers();
+    void UpdateDegradationState();
+    void UpdateDegradationStateAt(uint64_t now_ns);
     void HandleDequeuedBuffer(struct v4l2_buffer& buf, struct v4l2_plane* planes = nullptr);
     void HandleDequeuedBufferCopy(struct v4l2_buffer& buf, struct v4l2_plane* planes = nullptr);
     bool HandleDequeuedBufferDmaBuf(struct v4l2_buffer& buf, struct v4l2_plane* planes = nullptr);
@@ -198,6 +213,13 @@ class CameraSource : public core::IMetricsProvider
     std::atomic<uint64_t> dropped_frames_;
     std::atomic<uint64_t> disconnection_count_{0};
     std::atomic<uint64_t> recovery_attempt_count_{0};
+    std::atomic<bool> is_degraded_{false};
+    std::atomic<uint32_t> current_target_fps_{0};
+    std::atomic<uint64_t> degradation_count_{0};
+    std::atomic<uint64_t> degradation_recovery_count_{0};
+    std::atomic<uint64_t> degradation_failure_count_{0};
+    uint64_t window_start_ns_ = 0;
+    uint32_t window_frame_count_ = 0;
     std::thread capture_thread_;
     std::thread monitor_thread_;
     mutable std::mutex state_mutex_;

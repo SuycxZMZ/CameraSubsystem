@@ -47,6 +47,20 @@ uint32_t EffectiveCapabilities(const v4l2_capability& cap)
     return cap.capabilities;
 }
 
+void BuildStreamParm(struct v4l2_streamparm* parm, uint32_t buffer_type, uint32_t fps)
+{
+    memset(parm, 0, sizeof(*parm));
+    parm->type = static_cast<v4l2_buf_type>(buffer_type);
+    parm->parm.capture.timeperframe.numerator = 1;
+    parm->parm.capture.timeperframe.denominator = std::max<uint32_t>(1, fps);
+}
+
+uint32_t ExtractFpsFromParm(const struct v4l2_streamparm& parm)
+{
+    return parm.parm.capture.timeperframe.denominator /
+           std::max<uint32_t>(1, parm.parm.capture.timeperframe.numerator);
+}
+
 } // namespace
 
 CameraSource::CameraSource()
@@ -81,6 +95,13 @@ bool CameraSource::Initialize(const core::CameraConfig& config)
     }
 
     config_ = config;
+    is_degraded_.store(false);
+    current_target_fps_.store(config_.fps_);
+    degradation_count_.store(0);
+    degradation_recovery_count_.store(0);
+    degradation_failure_count_.store(0);
+    window_start_ns_ = 0;
+    window_frame_count_ = 0;
 
     if (!OpenDevice())
     {
@@ -235,6 +256,24 @@ void CameraSource::Stop()
 
     StopStream();
 
+    // 降级后恢复原始帧率，避免污染驱动状态和下一次启动
+    // 放在 STREAMOFF 之后：部分驱动在 streaming 状态下拒绝 S_PARM
+    if (is_degraded_.load() && device_fd_ >= 0)
+    {
+        const uint32_t actual_fps = SetRequestedFps(config_.fps_);
+        if (actual_fps == 0)
+        {
+            platform::PlatformLogger::Log(
+                core::LogLevel::kWarning, "camera_source",
+                "Stop() restore fps failed");
+        }
+    }
+
+    is_degraded_.store(false);
+    current_target_fps_.store(0);
+    window_start_ns_ = 0;
+    window_frame_count_ = 0;
+
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
         state_ = SourceState::kIdle;
@@ -358,6 +397,36 @@ uint64_t CameraSource::GetRecoveryAttemptCount() const
     return recovery_attempt_count_.load();
 }
 
+bool CameraSource::IsDegraded() const
+{
+    return is_degraded_.load();
+}
+
+uint64_t CameraSource::GetDegradationCount() const
+{
+    return degradation_count_.load();
+}
+
+uint64_t CameraSource::GetDegradationRecoveryCount() const
+{
+    return degradation_recovery_count_.load();
+}
+
+uint64_t CameraSource::GetDegradationFailureCount() const
+{
+    return degradation_failure_count_.load();
+}
+
+uint32_t CameraSource::GetRequestedFps() const
+{
+    return config_.fps_;
+}
+
+uint32_t CameraSource::GetCurrentTargetFps() const
+{
+    return current_target_fps_.load();
+}
+
 void CameraSource::FillMetrics(core::StreamMetrics* metrics) const
 {
     if (!metrics)
@@ -374,6 +443,13 @@ void CameraSource::FillMetrics(core::StreamMetrics* metrics) const
     metrics->disconnection_count = disconnection_count_.load();
     metrics->recovery_attempt_count = recovery_attempt_count_.load();
     metrics->current_state = static_cast<uint32_t>(state_.load());
+
+    metrics->source_degraded = is_degraded_.load();
+    metrics->source_requested_fps = config_.fps_;
+    metrics->source_current_target_fps = current_target_fps_.load();
+    metrics->source_degradation_count = degradation_count_.load();
+    metrics->source_degradation_recovery_count = degradation_recovery_count_.load();
+    metrics->source_degradation_failure_count = degradation_failure_count_.load();
 }
 
 void CameraSource::CaptureLoop()
@@ -688,6 +764,293 @@ bool CameraSource::TryRecover()
     return true;
 }
 
+uint32_t CameraSource::SetRequestedFps(uint32_t fps)
+{
+    if (device_fd_ < 0)
+    {
+        return 0;
+    }
+
+    struct v4l2_streamparm parm;
+    BuildStreamParm(&parm, CaptureBufferType(), fps);
+
+    if (Xioctl(device_fd_, VIDIOC_S_PARM, &parm) < 0)
+    {
+        platform::PlatformLogger::Log(core::LogLevel::kWarning, "camera_source",
+                                      "VIDIOC_S_PARM failed for fps=%u: %s", fps,
+                                      strerror(errno));
+        return 0;
+    }
+
+    // 读回实际值，驱动可能不支持精确匹配
+    uint32_t actual_fps = fps;
+    if (Xioctl(device_fd_, VIDIOC_G_PARM, &parm) >= 0)
+    {
+        actual_fps = ExtractFpsFromParm(parm);
+        platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                      "Set requested fps=%u, actual fps=%u", fps,
+                                      actual_fps);
+    }
+    else
+    {
+        platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                      "Set requested fps=%u", fps);
+    }
+
+    return actual_fps;
+}
+
+void CameraSource::UpdateDegradationState()
+{
+    UpdateDegradationStateAt(GetTimestampNs());
+}
+
+// UpdateDegradationStateAt 仅在 CaptureLoop 成功 DQBUF 并处理完成后调用。
+// select timeout / EAGAIN / 错误帧 不推进窗口，也不计入帧数。
+// 原因：2 秒以上无帧属于设备/驱动异常（ARCH-007 范畴），不是“维持不了目标帧率”。
+// 长时间无帧时窗口数据会过时，但下一帧到来后 elapsed_ns 会远超 window_ns，
+// 立即触发评估且 observed_fps 极低，从而正确触发降级（如果设备仍存活）。
+void CameraSource::UpdateDegradationStateAt(uint64_t now_ns)
+{
+    if (!config_.enable_degradation)
+    {
+        return;
+    }
+
+    if (window_start_ns_ == 0)
+    {
+        window_start_ns_ = now_ns;
+        window_frame_count_ = 1;
+        return;
+    }
+
+    ++window_frame_count_;
+
+    if (!is_degraded_.load())
+    {
+        const uint64_t window_ns =
+            static_cast<uint64_t>(config_.degradation_window_sec) * 1000000000ULL;
+        if (now_ns - window_start_ns_ < window_ns)
+        {
+            return;
+        }
+
+        const double elapsed_sec = static_cast<double>(now_ns - window_start_ns_) / 1000000000.0;
+        const double observed_fps = static_cast<double>(window_frame_count_) / elapsed_sec;
+        const double threshold = static_cast<double>(config_.fps_) * 0.6;
+
+        if (observed_fps < threshold)
+        {
+            ApplyDegradation();
+        }
+
+        window_start_ns_ = now_ns;
+        window_frame_count_ = 0;
+    }
+    else
+    {
+        if (window_frame_count_ < config_.degradation_recovery_frames)
+        {
+            return;
+        }
+
+        const double elapsed_sec = static_cast<double>(now_ns - window_start_ns_) / 1000000000.0;
+        const double observed_fps = static_cast<double>(window_frame_count_) / elapsed_sec;
+        // 用 current_target_fps_ 判断稳定，而不是原始 fps。
+        // 降级到 15fps 后，observed >= 12 即认为稳定，执行 trial restore 到原始 fps。
+        // 恢复后重新开窗口观察，若又跌破阈值则再次降级。
+        const double threshold = static_cast<double>(current_target_fps_.load()) * 0.8;
+
+        if (observed_fps >= threshold)
+        {
+            RestoreOriginalFps();
+        }
+
+        window_start_ns_ = now_ns;
+        window_frame_count_ = 0;
+    }
+}
+
+bool CameraSource::ApplyDegradation()
+{
+    if (is_degraded_.load())
+    {
+        return true;
+    }
+
+    if (config_.fps_ <= config_.degradation_target_fps)
+    {
+        return false;
+    }
+
+    const uint32_t reported_fps = ReconfigureFpsInLoop(config_.degradation_target_fps);
+    if (reported_fps == 0)
+    {
+        degradation_failure_count_.fetch_add(1);
+        return false;
+    }
+
+    is_degraded_.store(true);
+    // 用策略目标 fps 驱动状态机，不依赖驱动回读（部分驱动 G_PARM 不可信）
+    current_target_fps_.store(config_.degradation_target_fps);
+    degradation_count_.fetch_add(1);
+
+    platform::PlatformLogger::Log(core::LogLevel::kWarning, "camera_source",
+                                  "Degraded to target=%u driver_reported=%u fps: "
+                                  "stream=%s device=%s",
+                                  config_.degradation_target_fps, reported_fps,
+                                  stream_identity_.stream_id.data(),
+                                  device_path_.c_str());
+    return true;
+}
+
+bool CameraSource::RestoreOriginalFps()
+{
+    if (!is_degraded_.load())
+    {
+        return true;
+    }
+
+    const uint32_t reported_fps = ReconfigureFpsInLoop(config_.fps_);
+    if (reported_fps == 0)
+    {
+        degradation_failure_count_.fetch_add(1);
+        return false;
+    }
+
+    is_degraded_.store(false);
+    // 用策略目标 fps 驱动状态机，不依赖驱动回读
+    current_target_fps_.store(config_.fps_);
+    degradation_recovery_count_.fetch_add(1);
+
+    platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                  "Restored to target=%u driver_reported=%u fps: "
+                                  "stream=%s device=%s",
+                                  config_.fps_, reported_fps,
+                                  stream_identity_.stream_id.data(),
+                                  device_path_.c_str());
+    return true;
+}
+
+uint32_t CameraSource::ReconfigureFpsInLoop(uint32_t fps)
+{
+    if (device_fd_ < 0)
+    {
+        return 0;
+    }
+
+    // DMA-BUF 路径：存在未 release 的 lease 时跳过重配置，
+    // 避免 RequeueAllBuffers 和 subscriber 持有的 fd 冲突。
+    if (dma_buf_path_enabled_ && requeue_context_ &&
+        requeue_context_->active_leases.load() > 0)
+    {
+        platform::PlatformLogger::Log(
+            core::LogLevel::kWarning, "camera_source",
+            "Skip fps reconfigure: %zu active DMA-BUF leases",
+            requeue_context_->active_leases.load());
+        return 0;
+    }
+
+    const bool was_streaming = streaming_;
+    if (was_streaming)
+    {
+        StopStream();
+    }
+
+    struct v4l2_streamparm parm;
+    BuildStreamParm(&parm, CaptureBufferType(), fps);
+
+    if (Xioctl(device_fd_, VIDIOC_S_PARM, &parm) < 0)
+    {
+        platform::PlatformLogger::Log(core::LogLevel::kWarning, "camera_source",
+                                      "VIDIOC_S_PARM failed for fps=%u: %s", fps,
+                                      strerror(errno));
+        // 尽力恢复：恢复原 fps 并重新启动采集
+        BuildStreamParm(&parm, CaptureBufferType(), config_.fps_);
+        Xioctl(device_fd_, VIDIOC_S_PARM, &parm);
+        if (was_streaming)
+        {
+            RequeueAllBuffers();
+            StartStream();
+        }
+        return 0;
+    }
+
+    uint32_t actual_fps = fps;
+    if (Xioctl(device_fd_, VIDIOC_G_PARM, &parm) >= 0)
+    {
+        actual_fps = ExtractFpsFromParm(parm);
+    }
+
+    if (was_streaming)
+    {
+        if (!RequeueAllBuffers() || !StartStream())
+        {
+            platform::PlatformLogger::Log(
+                core::LogLevel::kError, "camera_source",
+                "Failed to restart stream after fps reconfigure, attempting rollback");
+            BuildStreamParm(&parm, CaptureBufferType(), config_.fps_);
+            Xioctl(device_fd_, VIDIOC_S_PARM, &parm);
+            RequeueAllBuffers();
+            StartStream();
+            return 0;
+        }
+    }
+
+    platform::PlatformLogger::Log(core::LogLevel::kInfo, "camera_source",
+                                  "Reconfigured fps to target=%u actual=%u", fps, actual_fps);
+    return actual_fps;
+}
+
+bool CameraSource::RequeueAllBuffers()
+{
+    if (capture_buffer_type_ == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+    {
+        for (auto& buffer : mplane_probe_buffers_)
+        {
+            struct v4l2_buffer qbuf;
+            struct v4l2_plane qplanes[VIDEO_MAX_PLANES];
+            std::memset(&qbuf, 0, sizeof(qbuf));
+            std::memset(qplanes, 0, sizeof(qplanes));
+            qbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+            qbuf.memory = V4L2_MEMORY_MMAP;
+            qbuf.index = buffer.index;
+            qbuf.length = mplane_probe_plane_count_;
+            qbuf.m.planes = qplanes;
+            for (uint32_t p = 0; p < mplane_probe_plane_count_ && p < VIDEO_MAX_PLANES; ++p)
+            {
+                qplanes[p].length = buffer.planes[p].length;
+            }
+            if (Xioctl(device_fd_, VIDIOC_QBUF, &qbuf) < 0)
+            {
+                platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                              "RequeueAllBuffers QBUF failed: %s",
+                                              strerror(errno));
+                return false;
+            }
+        }
+    }
+    else
+    {
+        for (uint32_t i = 0; i < buffers_.size(); ++i)
+        {
+            struct v4l2_buffer qbuf;
+            std::memset(&qbuf, 0, sizeof(qbuf));
+            qbuf.type = static_cast<v4l2_buf_type>(CaptureBufferType());
+            qbuf.memory = V4L2_MEMORY_MMAP;
+            qbuf.index = i;
+            if (Xioctl(device_fd_, VIDIOC_QBUF, &qbuf) < 0)
+            {
+                platform::PlatformLogger::Log(core::LogLevel::kError, "camera_source",
+                                              "RequeueAllBuffers QBUF failed: %s",
+                                              strerror(errno));
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 void CameraSource::HandleDequeuedBuffer(struct v4l2_buffer& buf, struct v4l2_plane* planes)
 {
     const size_t buffer_count = (capture_buffer_type_ == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
@@ -703,10 +1066,12 @@ void CameraSource::HandleDequeuedBuffer(struct v4l2_buffer& buf, struct v4l2_pla
 
     if (ShouldUseDmaBufPath() && HandleDequeuedBufferDmaBuf(buf, planes))
     {
+        UpdateDegradationState();
         return;
     }
 
     HandleDequeuedBufferCopy(buf, planes);
+    UpdateDegradationState();
 }
 
 void CameraSource::HandleDequeuedBufferCopy(struct v4l2_buffer& buf, struct v4l2_plane* planes)

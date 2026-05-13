@@ -551,6 +551,10 @@ int main(int argc, char* argv[])
     IoMethod io_method = IoMethod::kMmap;
     DataPlaneMode data_plane_mode = DataPlaneMode::kV1Copy;
     bool enable_auto_recovery = false;
+    bool enable_degradation = false;
+    uint32_t degradation_target_fps = 15;
+    uint32_t degradation_window_sec = 5;
+    uint32_t degradation_recovery_frames = 30;
     uint32_t disconnect_threshold = 3;
     uint32_t max_recovery_attempts = 10;
     uint32_t recovery_backoff_base_ms = 1000;
@@ -626,12 +630,33 @@ int main(int argc, char* argv[])
             ++i;
             recovery_backoff_max_ms = static_cast<uint32_t>(std::strtoul(argv[i], nullptr, 10));
         }
+        else if (arg == "--enable-degradation")
+        {
+            enable_degradation = true;
+        }
+        else if (arg == "--degradation-target-fps" && i + 1 < argc)
+        {
+            ++i;
+            degradation_target_fps = static_cast<uint32_t>(std::strtoul(argv[i], nullptr, 10));
+        }
+        else if (arg == "--degradation-window-sec" && i + 1 < argc)
+        {
+            ++i;
+            degradation_window_sec = static_cast<uint32_t>(std::strtoul(argv[i], nullptr, 10));
+        }
+        else if (arg == "--degradation-recovery-frames" && i + 1 < argc)
+        {
+            ++i;
+            degradation_recovery_frames = static_cast<uint32_t>(std::strtoul(argv[i], nullptr, 10));
+        }
         else if (arg == "--help" || arg == "-h")
         {
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
                                 "usage: %s [device_path] [control_socket] [data_socket] "
                                 "[--io-method mmap|dmabuf] [--data-plane v1|v2] "
                                 "[--release-socket path] [--enable-auto-recovery] "
+                                "[--enable-degradation] [--degradation-target-fps n] "
+                                "[--degradation-window-sec n] [--degradation-recovery-frames n] "
                                 "[--disconnect-threshold n] [--max-recovery-attempts n] "
                                 "[--recovery-backoff-ms ms] [--recovery-backoff-max-ms ms]",
                                 argv[0]);
@@ -658,12 +683,14 @@ int main(int argc, char* argv[])
 
     PlatformLogger::Log(LogLevel::kInfo, "publisher",
                         "publisher start, device=%s, control_socket=%s, data_socket=%s, "
-                        "release_socket=%s, io_method=%s, data_plane=%s, auto_recovery=%s",
+                        "release_socket=%s, io_method=%s, data_plane=%s, auto_recovery=%s, "
+                        "degradation=%s",
                         device_path.c_str(), control_socket_path.c_str(), data_socket_path.c_str(),
                         release_socket_path.c_str(),
                         io_method == IoMethod::kDmaBuf ? "dmabuf" : "mmap",
                         data_plane_mode == DataPlaneMode::kV2DmaBuf ? "v2" : "v1",
-                        enable_auto_recovery ? "enabled" : "disabled");
+                        enable_auto_recovery ? "enabled" : "disabled",
+                        enable_degradation ? "enabled" : "disabled");
 
     DataSocketServer data_server;
     DataPlaneV2SocketServer data_v2_server;
@@ -688,6 +715,10 @@ int main(int argc, char* argv[])
     config.buffer_count_ = 4;
     config.io_method_ = static_cast<uint32_t>(io_method);
     config.enable_auto_recovery = enable_auto_recovery;
+    config.enable_degradation = enable_degradation ? 1u : 0u;
+    config.degradation_target_fps = degradation_target_fps;
+    config.degradation_window_sec = degradation_window_sec;
+    config.degradation_recovery_frames = degradation_recovery_frames;
     config.disconnect_threshold = std::max<uint32_t>(1, disconnect_threshold);
     config.max_recovery_attempts = std::max<uint32_t>(1, max_recovery_attempts);
     config.recovery_backoff_base_ms = std::max<uint32_t>(1, recovery_backoff_base_ms);
