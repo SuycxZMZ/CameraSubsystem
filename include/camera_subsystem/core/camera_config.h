@@ -35,7 +35,12 @@ struct CameraConfig
     uint32_t recovery_backoff_base_ms = 1000; // 退避基数 (ms)
     uint32_t recovery_backoff_max_ms = 30000; // 退避上限 (ms)
 
-    uint8_t reserved_[44]; // 预留扩展空间 (原 64，结构总大小保持 88 bytes)
+    uint32_t enable_degradation = 0;          // 降级策略开关，默认关闭
+    uint32_t degradation_target_fps = 15;     // 降级目标帧率
+    uint32_t degradation_window_sec = 5;      // 滑动窗口时长（秒）
+    uint32_t degradation_recovery_frames = 30; // 恢复所需连续成功帧数
+
+    uint8_t reserved_[28]; // 预留扩展空间 (结构总大小保持 88 bytes)
 
     /**
      * @brief 默认构造函数

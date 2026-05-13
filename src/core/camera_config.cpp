@@ -30,9 +30,23 @@ CameraConfig::CameraConfig(uint32_t width, uint32_t height, PixelFormat format, 
 
 bool CameraConfig::IsValid() const
 {
-    return (width_ > 0 && height_ > 0 && format_ != PixelFormat::kUnknown && fps_ > 0 &&
-            buffer_count_ >= 2 && buffer_count_ <= 8 &&
-            io_method_ <= static_cast<uint32_t>(IoMethod::kUserPtr));
+    if (!(width_ > 0 && height_ > 0 && format_ != PixelFormat::kUnknown && fps_ > 0 &&
+          buffer_count_ >= 2 && buffer_count_ <= 8 &&
+          io_method_ <= static_cast<uint32_t>(IoMethod::kUserPtr)))
+    {
+        return false;
+    }
+
+    if (enable_degradation != 0)
+    {
+        if (degradation_target_fps == 0 || degradation_window_sec == 0 ||
+            degradation_recovery_frames == 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 void CameraConfig::Reset()
@@ -48,6 +62,10 @@ void CameraConfig::Reset()
     max_recovery_attempts = 10;
     recovery_backoff_base_ms = 1000;
     recovery_backoff_max_ms = 30000;
+    enable_degradation = 0;
+    degradation_target_fps = 15;
+    degradation_window_sec = 5;
+    degradation_recovery_frames = 30;
     memset(reserved_, 0, sizeof(reserved_));
 }
 
