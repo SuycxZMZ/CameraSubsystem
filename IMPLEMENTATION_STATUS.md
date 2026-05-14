@@ -1,6 +1,6 @@
 # CameraSubsystem 实现状态
 
-**更新日期:** 2026-05-10
+**更新日期:** 2026-05-14
 
 > **文档硬规范**
 >
@@ -28,10 +28,10 @@
   - [测试状态](#测试状态)
   - [文档状态](#文档状态)
   - [下一步工作计划](#下一步工作计划)
-    - [短期优先级（1-2周）](#短期优先级1-2周)
+    - [P0：硬件到位后立即推进](#p0硬件到位后立即推进)
+    - [P1：不依赖新增摄像头的主线增强](#p1不依赖新增摄像头的主线增强)
+    - [P2：暂缓或只做轻量维护](#p2暂缓或只做轻量维护)
     - [已完成但需持续回归](#已完成但需持续回归)
-    - [中期目标（3-4周）](#中期目标3-4周)
-    - [长期目标（1-2月）](#长期目标1-2月)
   - [架构完善项（面向边缘设备）](#架构完善项面向边缘设备)
   - [DMA-BUF Phase 1 后续修改入口](#dma-buf-phase-1-后续修改入口)
   - [发布端/订阅端解耦模型状态](#发布端订阅端解耦模型状态)
@@ -198,6 +198,8 @@ flowchart TB
 - ✅ 基础背压：池耗尽时丢帧
 - ✅ `camera_session_manager.h/cpp` - 会话管理（按订阅启停）
 - ✅ Web Preview + Codec Server 录制联调：Record start/stop 后预览数据面保持可用，publisher 对断开的 codec data fd 走 send_fail 清理而非进程退出
+- ✅ CameraSource 断连恢复：`SourceState`、monitor thread、断连/恢复 Metrics、可控自动恢复已落地；RK3576 USB 物理拔插/重插恢复实测通过
+- ✅ CameraSource 降帧降级：`enable_degradation` 默认关闭；滑动窗口 fps 评估、受控 STREAMOFF/S_PARM/QBUF/STREAMON 重配置、publisher CLI 开关已落地；RK3576 `/dev/video45` USB UVC `mmap/v1` enable=1 降级/恢复/Stop 清理验证通过
 
 **待实现:**
 
@@ -206,7 +208,7 @@ flowchart TB
 
 ### 5. 工具类 (Utils) 🚧
 
-**状态:** 部分完成
+**状态:** 主链路测试已覆盖，生产化仍需持续扩展
 
 **已实现:**
 
@@ -258,14 +260,16 @@ flowchart TB
 - ✅ RK3576 Web 录制 start/stop smoke：停止录制后 WebSocket 仍持续出帧，8080 服务保持监听
 - ✅ RK3576 60 秒录制稳定性：1490 帧输入/解码/编码，0 failures，24MB H.264 文件
 - ✅ H.264 文件播放兼容性：ffprobe 确认 H.264 High profile 1920x1080
+- ✅ CameraSource recovery 单元测试与 RK3576 USB 物理热插拔验证
+- ✅ CameraSource degradation 单元测试与 RK3576 USB UVC `mmap/v1` enable=1 降级/恢复验证
 
 **待添加测试:**
 
 - ⏳ PlatformLayer 单元测试
-- ✅ CameraSource recovery 单元测试（配置 ABI、恢复字段 Reset、状态查询、Metrics 字段、Idle Stop 幂等）
 - ⏳ 集成测试
 - ⏳ 性能测试
-- ⏳ Metrics 集成测试（与真实板端 smoke 联动）
+- ⏳ Metrics 集成测试（与真实板端 smoke 自动阈值判定联动）
+- ⏳ DMA-BUF active lease 场景下的降级重配置验证
 
 ## 文档状态
 
@@ -294,123 +298,69 @@ flowchart TB
 
 ## 下一步工作计划
 
-### 短期优先级（1-2周）
+当前主线不再是 Web/Codec 功能扩展，而是把已经跑通的 USB/RK3576 链路收敛为可观测、可回归、可承接 MIPI/RKISP 的生产前基线。
+
+### P0：硬件到位后立即推进
 
 1. **真实 MIPI/RKISP live STREAMON**
-   - MPLANE live 初始化骨架（`InitMPlaneBuffers`、`CaptureLoop`、`HandleDequeuedBuffer`、`RequeueBuffer`、per-plane fd 去重）已全部就绪
-   - 当前唯一阻塞：无真实 MIPI sensor 硬件，无法验证 STREAMON 后持续 DQBUF/QBUF、per-plane `bytesused > 0`、timestamp/sequence 正确性和 release 后可持续采集
-   - sensor 到位后立即验证：板端运行 `mplane_dmabuf_probe` live 模式 + DataPlaneV2 subscriber 端到端路径 + MPP import 验证
+   - MPLANE live 初始化骨架已就绪，当前只缺真实 MIPI sensor 和媒体管道。
+   - sensor 到位后优先验证 STREAMON、持续 DQBUF/QBUF、per-plane `bytesused`、timestamp/sequence、release 后持续采集。
+   - 验证产物应进入 `multi-camera-topology` smoke，而不是只保留一次性手工日志。
 
-2. **DataPlaneV2 fd path 编码实现**
-   - 设计文档 `docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md` 已完成：copy path / fd path 选择条件、MPP import 输入契约、ReleaseFrame 时序、fallback 策略
-   - 7 项编码就绪条件全部满足前不编码 fd path 生产实现
-   - 真实 MIPI sensor 到位后，按文档顺序编码：fd path 初始化 → MPP `MPP_BUFFER_TYPE_EXT_DMA` import → 编码完成 ReleaseFrame → fallback 到 copy path
+2. **DataPlaneV2 -> MPP 低拷贝录制实现**
+   - 以 [docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md) 为唯一设计入口。
+   - 只有在真实 `NV12 + kDmaBuf + plane_count==1` live frame 可验证后，才实现 codec server fd path。
+   - USB MJPEG 继续走 copy path，不为 USB 压缩帧强行套 fd import。
 
-3. **板端可观测性增强**
-   - 基于已落地的 `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`，将 per-stream 指标接入 smoke 自动判定
-   - 目标：板端 smoke 脚本可直接检查 `capture_frame_count`、`broker_dropped_count`、`release_pending_count`、`disconnection_count` 等阈值，替代当前的日志 grep 判定
-   - 不引入外部依赖，先支持内存快照和日志输出
+### P1：不依赖新增摄像头的主线增强
 
-4. **CameraSource 断连恢复实测**
-   - ARCH-007 已完成：自动恢复默认关闭，RK3576 quick、DataPlaneV2 lifecycle、multi-camera-topology smoke 已通过
-   - 已完成 USB 物理拔插/重插实测：`VIDIOC_DQBUF` 返回 `ENODEV` 后进入 `retrying`，重新插入 `/dev/video45` 后第 25 次重试恢复成功，publisher/subscriber 恢复 15fps
-   - 后续仅保留热插拔能力发现：若新硬件出现设备节点重枚举到非原路径，需要单独设计 device discovery 策略
+1. **板端 Metrics smoke 自动判定**
+   - 将 `core::StreamMetrics` 快照接入 smoke 脚本判定。
+   - 首批阈值覆盖 `capture_frame_count`、`broker_dropped_count`、`release_pending_count`、`active_leases`、`source_degradation_count`、`source_recovery_count`。
+   - 目标是让 quick/full/extended smoke 输出明确 PASS/FAIL，而不是依赖人工 grep。
 
-### 已完成但需持续回归
+2. **DMA-BUF 降级重配置验证**
+   - 当前 `mmap/v1` 降级/恢复已完成，DMA-BUF active lease 场景仍需单独验证。
+   - 验证重点是 active lease 未 release 时跳过重配置、后续重试、Stop 清理和 fd drift。
+   - 如果驱动在 streaming 状态下拒绝 `VIDIOC_S_PARM`，继续保持 CaptureLoop 单线程 STREAMOFF/S_PARM/QBUF/STREAMON 策略。
 
-1. **多路摄像头架构纠偏（USB + MIPI）**
-   - `CameraStreamIdentity` 已贯通控制面/数据面/release/日志
-   - publisher 已改为 `stream_id -> CameraStreamRuntime` map
-   - pending lease / release tracker 已使用多字段 key（stream/frame/buffer/consumer）
-   - codec server 多 session（`stream_id -> RecordingSession`）已完成并通过 RK3576 验证
-   - Web W1-W2（`stream_index -> stream_id` 映射）已完成
-   - `multi-camera-topology` smoke 已支持 USB live + MIPI readiness 并发运行、identity 冲突检测和隔离验证
+3. **热插拔能力发现与设备重枚举策略**
+   - USB 物理拔插恢复已经通过，但仍假设设备回到原路径 `/dev/video45`。
+   - 后续需要设计 device discovery：设备节点变化、能力变化、MIPI pipeline 缺失时的状态暴露和订阅端错误收敛。
 
-2. **CameraSessionManager 回调持锁重构**
-   - Subscribe/Unsubscribe 中 start/stop callback 已移出 `mutex_` 临界区
-   - 乐观预设 + 锁外执行 + 失败回滚策略
-   - 新增 3 个并发单测全部通过
+### P2：暂缓或只做轻量维护
 
-3. **FrameBroker 背压参数化**
-   - `BackpressureConfig` / `DropPolicy`（`kDropOldest` / `kDropNewest` / `kBlock` / `kDropTail`）
-   - 按 subscriber 独立 `max_queue_size` 和 `slow_consumer_threshold`
-   - 慢消费者检测与恢复（`consecutive_drops` 阈值、worker 成功后重置）
-   - 4 个单元测试 + stress test 兼容
+1. **Web Preview**
+   - W1-W2 stream card 归并已完成。
+   - 后续只修 smoke/稳定性/错误收敛问题，不扩展复杂 UI。
 
-4. **统一 Metrics 接口**
-   - `core::StreamMetrics` 16 字段覆盖采集/分发/数据面三层
-   - `IMetricsProvider` 虚接口，模块只填充自己负责的字段
-   - `MetricsAggregator` 按 `stream_id` 注册多 provider 并合并快照
-   - `FormatForLog()` 统一日志输出格式
-   - 10 个单元测试全部通过
+2. **Codec Server**
+   - raw H.264、MP4 最小写入、Web 录制闭环已满足当前阶段。
+   - 暂缓 RTSP、H.265、MKV、分段录制、断电恢复。
 
-5. **DataPlaneV2 异常验证**
-   - 已完成 RK3576 真实进程 subscriber 崩溃 failover smoke：强杀慢 release subscriber 后，正常 subscriber 持续收帧，publisher 最终 `release_pending=0`、`active_leases=0`
-   - 已完成 release socket 主动断开隔离：publisher 收到断连 reclaim 后移除对应 DataPlaneV2 数据客户端，正常 subscriber 保持 24-25fps，`release_timeout=0`、`lease_exhausted=0`
-   - 已完成 fd 泄漏长稳与 publisher 退出清理验证：60 秒双 subscriber 运行期间 publisher fd drift=0、subscriber fd drift=0，publisher 主动退出后进程与 socket 均清理为 0
-
-6. **Web 录制与 MP4 主链路**
-   - 已完成连续录制 5 分钟+、重复 start/stop 循环、`.h264` 多工具解码验证、Web MP4 参数入口和 RK3576 live `.mp4` 验证
-   - 已完成 Web smoke 多轮 start/stop、停止后 WebSocket 重连、codec server 重启恢复，覆盖 raw_h264 和 mp4
-
-7. **编码参数化与容器封装**
-   - 已完成请求级 `fps` / `bitrate` / `gop` 覆盖、启动参数默认值、status profile 返回、MP4 最小写入器和 `container=mp4` 主链路
-   - MKV、分段录制和断电恢复作为后续扩展，不进入当前短期优先级
-
-8. **DataPlaneV2 -> MPP 低拷贝录制设计（仅文档）**
-   - `docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md` 已完成
-   - copy path（USB MJPEG）保留不变；fd path 仅在 `NV12 + kDmaBuf + plane_count==1` 时启用
-   - ReleaseFrame 采用帧级序列号跟踪 + `encode_get_packet` 关联释放
-   - 7 项编码就绪检查清单已定义
+3. **大范围平台抽象**
+   - Android HAL、RGA/RKNN 深度集成、配置中心等都不是当前下一步。
+   - 等 MIPI live 和低拷贝录制闭环完成后再重新评估。
 
 ### 已完成但需持续回归
 
-1. **DataPlaneV2 异常验证**
-   - 已完成 RK3576 真实进程 subscriber 崩溃 failover smoke：强杀慢 release subscriber 后，正常 subscriber 持续收帧，publisher 最终 `release_pending=0`、`active_leases=0`
-   - 已完成 release socket 主动断开隔离：publisher 收到断连 reclaim 后移除对应 DataPlaneV2 数据客户端，正常 subscriber 保持 24-25fps，`release_timeout=0`、`lease_exhausted=0`
-   - 已完成 fd 泄漏长稳与 publisher 退出清理验证：60 秒双 subscriber 运行期间 publisher fd drift=0、subscriber fd drift=0，publisher 主动退出后进程与 socket 均清理为 0
+1. **多路摄像头架构纠偏**
+   - `CameraStreamIdentity` 已贯通控制面/数据面/release/日志。
+   - publisher 已改为 `stream_id -> CameraStreamRuntime` map。
+   - pending lease / release tracker 已使用多字段 key。
+   - codec server 多 session 与 Web W1-W2 已完成。
 
-2. **Web 录制与 MP4 主链路**
-   - 已完成连续录制 5 分钟+、重复 start/stop 循环、`.h264` 多工具解码验证、Web MP4 参数入口和 RK3576 live `.mp4` 验证
-   - 已完成 Web smoke 多轮 start/stop、停止后 WebSocket 重连、codec server 重启恢复，覆盖 raw_h264 和 mp4
+2. **DataPlaneV2 生命周期与异常治理**
+   - subscriber 崩溃 failover、release socket 主动断开、fd 泄漏长稳、publisher 退出清理均已通过 RK3576 验证。
+   - 后续保持 quick/full/extended smoke 回归。
 
-3. **编码参数化与容器封装**
-   - 已完成请求级 `fps` / `bitrate` / `gop` 覆盖、启动参数默认值、status profile 返回、MP4 最小写入器和 `container=mp4` 主链路
-   - MKV、分段录制和断电恢复作为后续扩展，不进入当前短期优先级
+3. **CameraSource 恢复与降级**
+   - USB 断连恢复、物理热插拔、`mmap/v1` enable=1 降级/恢复/Stop 清理已完成。
+   - ARCH-007 与 ARCH-008 可视为 USB mmap 主链路完成；DMA-BUF 与 MIPI 后端按独立边界继续验证。
 
-### 中期目标（3-4周）
-
-1. **完善测试覆盖**
-   - 增加集成测试
-   - 添加性能测试
-   - 扩展压力测试场景
-
-2. **示例工程强化**
-   - 增加子发布端（编解码链路）示例
-   - 增加多订阅端并发示例
-   - 增加故障注入示例（设备断连/重连）
-
-3. **文档完善**
-   - 架构评审文档与实现状态联动
-   - 补充 RK3576 部署手册
-   - 补充运维排障手册
-
-### 长期目标（1-2月）
-
-1. **性能优化**
-   - 零拷贝传输优化
-   - 内存占用优化
-   - CPU 占用优化
-
-2. **功能扩展**
-   - 支持 Android HAL
-   - 完善发布端/订阅端解耦通信（生产级协议与安全控制）
-   - 支持更多像素格式
-
-3. **监控与诊断**
-   - ✅ 实现性能指标采集（`core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`）
-   - 实现实时监控接口（后续扩展：文件/网络导出）
-   - 实现诊断日志
+4. **Web 录制与 MP4 主链路**
+   - 连续录制、重复 start/stop、WebSocket 重连、codec server 重启恢复、raw_h264/mp4 均已完成阶段验证。
+   - 后续只作为 smoke 入口保留，不继续扩展产品功能。
 
 ## 架构完善项（面向边缘设备）
 
@@ -544,11 +494,11 @@ flowchart TB
 - [x] 增强 multi-camera-topology smoke：并发运行、identity 冲突检测、lease 跨 stream 隔离验证 ✅ 2026-05-10
 - [x] DataPlaneV2 → MPP 低拷贝录制设计文档 ✅ 2026-05-10
 - [ ] 接入真实 MIPI/RKISP sensor pipeline 后复测 STREAMON、bytesused 和多 fd plane
-- [ ] 接入 V4L2 MPLANE 采集路径并验证 MIPI/RKISP 多平面
+- [x] 接入 V4L2 MPLANE 采集路径主循环骨架，真实 MIPI/RKISP 多平面 live 验证待 sensor 到位 ✅ 2026-05-10
 - [ ] 接入真实 MIPI sensor 后，把 `multi-camera-topology` 从 readiness 升级为 USB live + MIPI live 联合 smoke
 - [ ] DataPlaneV2 fd path 编码实现（设计文档已完成）
-- [x] 设备断连恢复状态机（ARCH-007）：自动恢复默认关闭，`SourceState` / Metrics / capture-monitor 双线程已落地，RK3576 smoke 与 USB 物理拔插/重插恢复实测通过 ✅ 2026-05-12
-- [x] 降级策略（ARCH-008）：已完成；RK3576 `/dev/video45` USB UVC、`mmap/v1` 路径 enable=1 降级/恢复/Stop 清理验证通过；DMA-BUF 重配置策略待后续单独验证 ✅ 2026-05-12
+- [x] 设备断连恢复状态机（ARCH-007）：自动恢复默认关闭，`SourceState` / Metrics / capture-monitor 双线程已落地，RK3576 smoke 与 USB 物理拔插/重插恢复实测通过 ✅ 2026-05-13
+- [x] 降级策略（ARCH-008）：已完成；RK3576 `/dev/video45` USB UVC、`mmap/v1` 路径 enable=1 降级/恢复/Stop 清理验证通过；DMA-BUF 重配置策略待后续单独验证 ✅ 2026-05-13
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 
 ## 贡献指南
@@ -572,5 +522,5 @@ flowchart TB
 
 ---
 
-**最后更新:** 2026-05-10
-**文档版本:** v0.3
+**最后更新:** 2026-05-14
+**文档版本:** v0.4

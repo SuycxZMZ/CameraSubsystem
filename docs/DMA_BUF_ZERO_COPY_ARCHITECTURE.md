@@ -1,8 +1,8 @@
 # DMA-BUF 数据面阶段性设计与验证记录
 
-**最后更新:** 2026-05-08<br>
-**阶段状态:** DMA-BUF Phase 2 阶段性任务已完成；DataPlaneV2 + `SCM_RIGHTS` + 独立 ReleaseFrame 通道已落地，并通过 RK3576 `/dev/video45` 冒烟验证<br>
-**后续承接:** H.264 编码录制架构见 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)
+**最后更新:** 2026-05-14<br>
+**阶段状态:** DMA-BUF Phase 2 阶段性任务已完成；DataPlaneV2 + `SCM_RIGHTS` + 独立 ReleaseFrame 通道已落地，并通过 RK3576 `/dev/video45` 冒烟、异常回收和 fd 泄漏长稳验证<br>
+**后续承接:** H.264 编码录制架构见 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)；DataPlaneV2 -> MPP 低拷贝录制设计见 [DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md)
 
 > **文档硬规范**
 >

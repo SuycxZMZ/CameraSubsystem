@@ -1,7 +1,7 @@
 # CameraSubsystem 架构评审与建议
 
-**文档版本:** v0.6<br>
-**评审范围:** 当前主干代码与项目文档（截至 2026-05-08）<br>
+**文档版本:** v0.7<br>
+**评审范围:** 当前主干代码与项目文档（截至 2026-05-14）<br>
 **评审角色:** 高级系统架构师<br>
 **关联文档:** [README.md](../README.md)、[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)、[MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md)、[DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)、[CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)、[API_REFERENCE.md](../API_REFERENCE.md)
 
@@ -45,13 +45,11 @@
 
 当前 CameraSubsystem 已经从“单进程概念原型”进入“可运行的核心发布端 + 订阅端双进程原型”阶段，方向正确，工程边界也比早期清晰：核心发布端独占底层 Camera 设备或采集后端、控制面 IPC 管理订阅关系、数据面 IPC 做示例帧传输、BufferPool/BufferGuard 解决了基础生命周期问题，RK3576 官方工具链也已作为首个板端验证链路接入。
 
-但从生产级边缘系统角度看，目前仍是 **可运行原型**，不是稳定生产架构。下一阶段必须优先解决四件事：
+但从生产级边缘系统角度看，目前仍是 **USB/RK3576 主链路基本收敛，MIPI/RKISP 与低拷贝录制等待实帧验证** 的状态。下一阶段必须优先解决三件事：
 
-1. 将数据面从“socket 复制示例”升级为可部署的数据通路，明确拷贝模式与零拷贝模式边界。
-2. 将背压、队列、优先级和延迟阈值从硬编码能力升级为可配置策略。
-3. 补齐设备断连、订阅端异常、核心发布端重启后的恢复闭环。
-4. 建立统一 Metrics/Tracing 接口，否则不同板端和不同采集后端的问题很难定位。
-5. 在继续扩展 MIPI/RKISP live、低拷贝录制或多路 Web UI 前，先完成 [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md) 定义的多路身份模型和 publisher 运行时纠偏。
+1. 有真实 MIPI sensor 后，立即验证 MPLANE live STREAMON、per-plane layout、DataPlaneV2 实帧传递和 release 后持续采集。
+2. 将已落地的 Metrics 接口接入板端 smoke 自动判定，减少依赖人工 grep 和一次性日志结论。
+3. 在 DataPlaneV2 active lease 场景下验证降帧降级重配置边界，确保 STREAMOFF/STREAMON 不破坏未 release fd 生命周期。
 
 ---
 
@@ -251,16 +249,13 @@
 
 ## 9. 下一阶段验收标准
 
-下一阶段建议以“板端可控原型”为目标，而不是继续扩大功能面。
+下一阶段建议以“可观测、可回归、可承接 MIPI 实帧”为目标，而不是继续扩大外围功能面。
 
-1. ✅ `CameraSessionManager` start/stop 回调不再持锁执行，并补充并发订阅/退订测试。
-2. ✅ 完成 `CameraStreamIdentity` 和 `stream_id -> CameraStreamRuntime` 基础改造，确保一路启动/停止不会影响其他 stream。
-3. ✅ DataPlaneV2 pending lease 与 ReleaseFrame tracker 不再使用裸 `frame_id` 作为全局键。
-4. 文档和 API 明确当前数据面是示例复制链路，新增生产数据面设计草案。
-5. ✅ `FrameBroker` 支持可配置队列上限、DropPolicy、慢消费者统计。
-6. ✅ 统一输出最小 metrics：采集 FPS、发布 FPS、队列深度、丢帧数、发送失败数、lease 统计，并带 `stream_id` 标签。
-7. ✅ RK3576 Debian 12 板端完成 `camera_publisher_example` / `camera_subscriber_example` copy 与 DataPlaneV2 最小运行验证，并通过 `dmabuf_smoke_test` 验证 DMA-BUF export、lease、CPU mmap 和 sync 行为。
-8. 设备断连或 `/dev/videoX` 不可用时，发布端能输出明确错误状态并保持进程可控退出或等待恢复。
+1. RK3576 quick/full/extended smoke 能通过 `StreamMetrics` 快照自动判断 PASS/FAIL。
+2. CameraSource 降级策略在 `mmap/v1` 与 DataPlaneV2 active lease 场景都有明确验证结论。
+3. 真实 MIPI sensor 到位后，MPLANE live STREAMON 能纳入 `multi-camera-topology` smoke，而不是停留在一次性手工验证。
+4. DataPlaneV2 -> MPP fd path 只在真实 `NV12 + kDmaBuf` 实帧验证后合入，并保持 copy path fallback。
+5. 设备节点重枚举、能力变化、MIPI media pipeline 缺失等场景有明确状态暴露和恢复策略。
 
 ---
 
@@ -268,4 +263,4 @@
 
 当前系统架构方向是正确的：设备入口集中、进程隔离、控制面与数据面分离、Buffer 生命周期开始可控。代码架构也已经具备继续演进的骨架。
 
-真正的风险不在“能不能跑”，而在“能不能在不同边缘设备和不同采集后端上长期、可观测、可恢复地跑”。下一阶段应把工作重心从补功能转向补生产控制面：数据面零拷贝、背压参数化、设备恢复、metrics、板端验证。只有这些闭环完成后，CameraSubsystem 才适合承载 AI 推理、编码、录制等上层模块的稳定接入。
+真正的风险已经从“能不能跑”转向“在不同采集后端、不同设备状态和多路输入下能不能稳定、可观测、可恢复地跑”。下一阶段应把工作重心放在 MIPI/RKISP 实帧、DataPlaneV2 低拷贝录制、Metrics smoke 自动判定和设备发现策略上；Web 与 Codec 只做服务主线的轻量维护。

@@ -1,6 +1,6 @@
 # CameraSubsystem 文档索引
 
-**最后更新:** 2026-05-10
+**最后更新:** 2026-05-14
 
 > **文档硬规范**
 >
@@ -10,7 +10,7 @@
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
 > - 评审建议、风险、ARCH-* 跟踪项只维护在 [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)，其他文档只链接引用，避免重复漂移。
-> - Git 提交信息必须遵循项目既有风格：标题使用 `[类别] 简短动词短语`，正文使用 2-3 条 `- ` 列表说明主要修改范围；不要写“验证：XXX”这类独立验证段落，也不要附带外部 AI 生成标记。
+> - Git 提交信息必须遵循 [../AGENTS.md](../AGENTS.md) 中的硬性规范；禁止附带外部 AI 生成标记，禁止擅自删除或还原用户已有改动。
 
 ---
 
@@ -41,8 +41,8 @@
 6. [METRICS_INTERFACE_DESIGN.md](METRICS_INTERFACE_DESIGN.md)
 7. [DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md)
 8. [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md)
-9. [../structure.md](../structure.md)
-10. [../API_REFERENCE.md](../API_REFERENCE.md)
+9. [../API_REFERENCE.md](../API_REFERENCE.md)
+10. [../structure.md](../structure.md)（历史背景材料）
 
 ### 做代码开发
 
@@ -81,12 +81,12 @@
 | [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md) | H.264 编码录制服务架构，包含 `camera_codec_server`、Web 录制控制、USB 首阶段链路和 MIPI/RKISP 扩展路径 | DMA-BUF 底层协议细节、具体 C++ 实现 |
 | [METRICS_INTERFACE_DESIGN.md](METRICS_INTERFACE_DESIGN.md) | 统一 Metrics 接口设计：`core::StreamMetrics`、`IMetricsProvider`、`MetricsAggregator`；按 `stream_id` 标签聚合；与现有零散统计的整合路径 | 具体性能优化方案、生产级监控后端选型 |
 | [DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md) | DataPlaneV2 → MPP 低拷贝录制设计：copy path / fd path 选择条件、MPP import 契约、ReleaseFrame 时序、fallback 策略 | 具体编码实现（待 MIPI sensor 到位） |
-| [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) | 开发路线图：当前阶段划分、主线优先级、暂缓项和写代码前置流程 | 各模块详细架构设计 |
+| [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) | 开发路线图：当前阶段划分、主线优先级、暂缓项和编码准入门槛 | 各模块详细架构设计 |
 | [BOARD_WEB_DEBUG_GUIDE.md](BOARD_WEB_DEBUG_GUIDE.md) | RK3576 板端 Web Preview、录制联调、统一部署目录和 smoke / stability 调试流程 | 架构取舍、API 全量说明、长期路线图 |
 | [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md) | 模块完成度、测试状态、下一步计划、技术债务执行状态 | 重复架构评审正文 |
 | [../API_REFERENCE.md](../API_REFERENCE.md) | 公开接口、数据结构、IPC 协议、示例调用 | 设计争议与风险讨论 |
 | [../NAMING_CONVENTION.md](../NAMING_CONVENTION.md) | 命名、目录、代码格式、跨平台约定 | 项目状态与路线图 |
-| [../structure.md](../structure.md) | 完整架构设计长文、历史设计语境 | 当前唯一事实源 |
+| [../structure.md](../structure.md) | 完整架构设计长文、历史设计语境 | 当前唯一事实源；如与 README/IMPLEMENTATION_STATUS/ARCHITECTURE_REVIEW 冲突，以后三者为准 |
 
 ---
 
@@ -99,6 +99,7 @@
 5. 构建、脚本、交叉编译入口变化必须同步 [../README.md](../README.md) 和 [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)。
 6. 文档中的系统架构图、模块框图、部署拓扑图、数据路径框图和工程结构框图必须使用 `architecture-diagram` skill；每个 HTML 图必须同步导出同名 `.svg`，Markdown 中默认直接显示 SVG，并附完整 HTML 图表链接。目录结构说明、时序图、状态机图继续使用 Mermaid，不使用 ASCII 树。
 7. `third_party/` 下游文档不按本项目规范改写，避免污染上游来源。
+8. 已完成的阶段性设计文档如仍承载接口契约、验证边界或后续编码门槛，应保留并标注状态；只有内容已经完整收敛到权威文档且不再提供独立价值时才删除。
 
 ---
 

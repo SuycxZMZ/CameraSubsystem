@@ -1,9 +1,17 @@
 # 统一 Metrics 接口设计
 
-**文档版本:** v0.1  
-**最后更新:** 2026-05-10  
-**适用范围:** CameraSubsystem 核心链路统一可观测性指标  
+**文档版本:** v0.2<br>
+**最后更新:** 2026-05-14<br>
+**适用范围:** CameraSubsystem 核心链路统一可观测性指标<br>
+**当前状态:** `StreamMetrics`、`IMetricsProvider`、`MetricsAggregator` 已落地；下一步是把 metrics 快照接入板端 smoke 自动判定<br>
 **关联文档:** [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)（P1 风险 — 指标体系不足，ARCH-009）、[AGENTS.md](../AGENTS.md)（2.2 写代码前置规则）
+
+> **文档硬规范**
+>
+> - 本项目的系统架构图、模块框图、部署拓扑图、数据路径框图和工程结构框图必须使用 `architecture-diagram` skill 生成独立 HTML / inline SVG 图表产物；每个 HTML 图必须同步导出同名 `.svg`，Markdown 中默认直接显示 SVG，并附完整 HTML 图表链接。
+> - 时序图、状态机图、纯目录结构图等仍使用 Mermaid fenced code block（语言标识为 `mermaid`）。
+> - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
+> - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 
 ---
 

@@ -1,8 +1,8 @@
 # CameraSubsystem Agent 工作指南
 
-**最后更新:** 2026-05-10  
-**开发路线:** [docs/DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md)  
-**适用范围:** 本文件面向在 `CameraSubsystem/` 目录内执行开发、评审、验证和文档维护任务的 AI Coding Agent。  
+**最后更新:** 2026-05-14<br>
+**开发路线:** [docs/DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md)<br>
+**适用范围:** 本文件面向在 `CameraSubsystem/` 目录内执行开发、评审、验证和文档维护任务的 AI Coding Agent。<br>
 **上级指南:** 仓库根目录 `../AGENTS.md` 提供全景导航、跨子项目关系和通用构建命令；本文档只补充 CameraSubsystem 特有的**当前上下文、决策树和检查清单**。
 
 ---
@@ -23,7 +23,7 @@
 
 ## 1. 当前开发上下文
 
-截至 2026-05-10，项目处于 **"多路摄像头主链路纠偏 + MIPI/RKISP 低拷贝准备"** 阶段。
+截至 2026-05-14，项目处于 **"USB/RK3576 主链路收敛 + MIPI/RKISP 实帧阻塞等待 + 低拷贝录制准备"** 阶段。
 
 | 领域 | 当前事实 | Agent 决策影响 |
 |------|----------|----------------|
@@ -37,12 +37,15 @@
 | **板端 smoke** | `quick/full/extended` 三档 + `multi-camera-topology` 已接入 | 平台相关变更应通过 smoke；真实 MIPI 接入后升级为联合 smoke |
 | **背压参数化** | `BackpressureConfig` / `DropPolicy` / 慢消费者检测已完成 | stress test 兼容；新增 4 个单元测试 |
 | **统一 Metrics** | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator` 已完成 | CameraSource / FrameBroker 已接入；publisher 示例已替换手动聚合；10 个单元测试 |
+| **CameraSource 恢复/降级** | USB 断连恢复、物理热插拔、`mmap/v1` enable=1 降帧降级已完成 | 降级默认关闭；DMA-BUF 重配置边界待后续独立验证，不要扩大为“全路径已完成” |
 
-**最近关键板端结果（2026-05-10）：**
+**最近关键板端结果（截至 2026-05-14）：**
 - USB `/dev/video45` DataPlaneV2 live：`v2_sent=254`、`release_pending=0`、subscriber `frames=254`
 - RKISP/RKVpss MPLANE readiness：`pass=10`、`fail=0`
 - 统一 Metrics 接口：本地构建 13/13 测试通过，RK3576 交叉编译通过
 - FrameBroker 背压：本地 4 个单元测试 + stress test 通过
+- USB 物理热插拔恢复：拔出后进入 retrying，重插 `/dev/video45` 后恢复采集
+- CameraSource 降帧降级：RK3576 `/dev/video45` USB UVC `mmap/v1` enable=1 已验证降级、恢复和 Stop 清理
 
 ---
 
@@ -142,7 +145,7 @@
 | Web 前端 | `cd extensions/web_preview/web && npm run build` 通过 |
 | Codec Server | `./scripts/build-rk3576.sh` 通过（交叉编译自动启用 codec_server） |
 | 文档变更 | 确认对应架构文档、README、API_REFERENCE 已同步更新 |
-| 板端相关变更 | 提醒用户运行 `./scripts/rk3576-board-smoke-suite.sh`（Agent 无法直接执行板端验证） |
+| 板端相关变更 | 优先运行 `./scripts/rk3576-board-smoke-suite.sh` 或对应专项脚本；如果当前 Agent 环境无 SSH/密码能力，再提醒用户执行 |
 
 ---
 
@@ -175,7 +178,7 @@
 │       复杂 UI、自动续录、RTSP、H.265、MKV → 暂缓
 │
 └─→ 改的是板端脚本/smoke？
-    └─→ 提醒用户板端验证，Agent 无法直接连接 RK3576
+    └─→ 优先使用已有 RK3576 smoke 脚本验证；无法连接时记录阻塞条件并给出用户可执行命令
 ```
 
 ---
@@ -184,17 +187,16 @@
 
 开发重心按以下顺序推进，**不要偏离主线去扩展外围功能**。详细分析见 [docs/DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md)。
 
-### 第一阶段（不依赖 MIPI sensor，可立即开始）
+### P0：硬件到位后立即执行
 
-1. **CameraSessionManager 回调持锁重构** — ARCHITECTURE_REVIEW P0 风险。将 Subscribe/Unsubscribe 中的"状态决策"与"callback 执行"拆开：锁内只更新 session 状态，锁外执行 start/stop，再锁内回滚。补充并发订阅/退订单测。
-2. **multi-camera-topology 强校验** — 在现有 USB live + MIPI readiness smoke 基础上，增加 identity 冲突检测、lease 跨 stream 隔离验证、并发启停独立性验证。
-3. **DataPlaneV2 -> MPP 低拷贝录制设计（仅文档）** — 明确 copy path / fd path 选择条件、MPP import 输入契约、release 时序、fallback 策略。真实 MIPI 帧到位前只做设计文档，不编码 fd path。
-4. **FrameBroker 背压参数化** — ARCH-004。定义 `BackpressureConfig`、DropPolicy、慢消费者检测与隔离。
-5. **统一 Metrics 接口** — ARCH-009。`core` 层最小 Metrics 结构，按 `stream_id` 标签聚合采集 FPS、队列深度、丢帧数、lease 统计。
+1. **真实 MIPI/RKISP live STREAMON** — MPLANE 骨架已就绪，需验证 STREAMON 后 DQBUF/QBUF 帧率稳定性、per-plane `bytesused` 真实性、timestamp 正确性、per-plane fd 端到端路径。
+2. **DataPlaneV2 -> MPP 低拷贝录制实现** — 只在真实 NV12 DMA-BUF live frame 可验证后编码 fd path；USB MJPEG 继续保留 copy path。
 
-### 第二阶段（硬件阻塞，待 sensor 到位）
+### P1：不依赖新增摄像头的主线增强
 
-6. **真实 MIPI/RKISP live STREAMON** — MPLANE 骨架已就绪，需验证 STREAMON 后 DQBUF/QBUF 帧率稳定性、per-plane `bytesused` 真实性、timestamp 正确性、per-plane fd 端到端路径。
+3. **板端 Metrics smoke 自动判定** — 将 `StreamMetrics` 快照接入 smoke 阈值判断，减少日志 grep 和人工判断。
+4. **DMA-BUF 降级重配置验证** — 针对 active lease 场景验证降级重配置的跳过、重试和清理边界。
+5. **热插拔能力发现** — 针对不同 USB/MIPI 设备补 device discovery、节点重枚举和订阅端提示策略。
 
 **明确暂缓项：** 复杂 UI 体验、自动续录、RTSP 推流、H.265、MKV 容器、分段录制、断电恢复
 
@@ -222,7 +224,7 @@
 
 ## 6. 板端上下文
 
-Agent 无法直接连接 RK3576 开发板执行板端验证，但可以基于以下上下文提供代码和脚本：
+如果当前 Agent 环境具备 SSH 工具和用户授权，应优先使用已有脚本执行 RK3576 板端验证；如果无法连接，则基于以下上下文给出用户可直接执行的命令：
 
 | 项目 | 当前值 |
 |------|--------|
