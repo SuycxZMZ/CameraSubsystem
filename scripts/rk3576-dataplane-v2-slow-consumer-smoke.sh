@@ -18,6 +18,12 @@ SKIP_BUILD="${SKIP_BUILD:-0}"
 MIN_SUBSCRIBER_FRAMES="${MIN_SUBSCRIBER_FRAMES:-5}"
 MAX_RELEASE_TIMEOUT="${MAX_RELEASE_TIMEOUT:-0}"
 MAX_V2_SEND_FAIL="${MAX_V2_SEND_FAIL:-2}"
+ENABLE_DEGRADATION="${ENABLE_DEGRADATION:-0}"
+DEGRADATION_TARGET_FPS="${DEGRADATION_TARGET_FPS:-15}"
+DEGRADATION_WINDOW_SEC="${DEGRADATION_WINDOW_SEC:-5}"
+DEGRADATION_RECOVERY_FRAMES="${DEGRADATION_RECOVERY_FRAMES:-30}"
+EXPECT_RECONFIG_SKIP="${EXPECT_RECONFIG_SKIP:-0}"
+EXPECT_NO_RECONFIG="${EXPECT_NO_RECONFIG:-0}"
 
 CONTROL_SOCKET="/tmp/camera_subsystem_control.sock"
 DATA_SOCKET="/tmp/camera_subsystem_data_v2.sock"
@@ -90,6 +96,13 @@ extract_counter()
     sed -n "s/.*${key}=\\([0-9][0-9]*\\).*/\\1/p" <<<"${line}"
 }
 
+max_counter_in_file()
+{
+    local file="$1"
+    local key="$2"
+    sed -n "s/.*${key}=\\([0-9][0-9]*\\).*/\\1/p" "${file}" | sort -n | tail -n 1
+}
+
 check_eq()
 {
     local label="$1"
@@ -146,10 +159,16 @@ run_ssh "set -e; \
     rm -f publisher.log subscriber-normal.log subscriber-slow.log *.pid; \
     mkdir -p normal_frames slow_frames"
 
+publisher_degradation_args=""
+if [[ "${ENABLE_DEGRADATION}" == "1" ]]; then
+    publisher_degradation_args="--enable-degradation --degradation-target-fps ${DEGRADATION_TARGET_FPS} --degradation-window-sec ${DEGRADATION_WINDOW_SEC} --degradation-recovery-frames ${DEGRADATION_RECOVERY_FRAMES}"
+fi
+
 run_ssh "set -e; \
     cd '${BOARD_DIR}'; \
     nohup ./camera_publisher_example '${DEVICE}' '${CONTROL_SOCKET}' '${DATA_SOCKET}' \
         --io-method dmabuf --data-plane v2 --release-socket '${RELEASE_SOCKET}' \
+        ${publisher_degradation_args} \
         > publisher.log 2>&1 & echo \$! > publisher.pid"
 
 sleep 2
@@ -190,6 +209,10 @@ echo "Publisher counters:"
 grep -E "release_pending|lease_exhausted|v2_sent|release_timeout" \
     "${LOCAL_LOG_DIR}/publisher.log" | tail -n 10 || true
 echo
+echo "Publisher degradation events:"
+grep -E "degradation=|Skip fps reconfigure|Degraded to|Restored to|Reconfigured fps" \
+    "${LOCAL_LOG_DIR}/publisher.log" | tail -n 20 || true
+echo
 echo "Normal subscriber summary:"
 grep -E "summary|release_fail|fps=" "${LOCAL_LOG_DIR}/subscriber-normal.log" | tail -n 10 || true
 echo
@@ -215,6 +238,7 @@ else
     v2_send_fail="$(extract_counter "${publisher_line}" "v2_send_fail")"
     release_pending="$(extract_counter "${publisher_line}" "release_pending")"
     release_timeout="$(extract_counter "${publisher_line}" "release_timeout")"
+    max_active_leases="$(max_counter_in_file "${LOCAL_LOG_DIR}/publisher.log" "active_leases")"
 
     check_eq "publisher.dmabuf_enabled" "${dmabuf_enabled:-missing}" "1" || failures=$((failures + 1))
     check_eq "publisher.export_fail" "${export_fail:-missing}" "0" || failures=$((failures + 1))
@@ -222,6 +246,28 @@ else
     check_le "publisher.v2_send_fail" "${v2_send_fail:-999999}" "${MAX_V2_SEND_FAIL}" || failures=$((failures + 1))
     check_eq "publisher.release_pending" "${release_pending:-missing}" "0" || failures=$((failures + 1))
     check_le "publisher.release_timeout" "${release_timeout:-999999}" "${MAX_RELEASE_TIMEOUT}" || failures=$((failures + 1))
+    if [[ "${EXPECT_RECONFIG_SKIP}" == "1" ]]; then
+        check_ge "publisher.max_active_leases" "${max_active_leases:-0}" 1 || failures=$((failures + 1))
+    fi
+fi
+
+if [[ "${ENABLE_DEGRADATION}" == "1" ]]; then
+    if grep -q "degradation=enabled" "${LOCAL_LOG_DIR}/publisher.log"; then
+        echo "PASS: publisher.degradation_enabled=1"
+    else
+        echo "FAIL: publisher.degradation_enabled not found"
+        failures=$((failures + 1))
+    fi
+fi
+
+if [[ "${EXPECT_RECONFIG_SKIP}" == "1" ]]; then
+    skip_count="$(grep -c "Skip fps reconfigure" "${LOCAL_LOG_DIR}/publisher.log" || true)"
+    check_ge "publisher.reconfigure_skip_count" "${skip_count:-0}" 1 || failures=$((failures + 1))
+fi
+
+if [[ "${EXPECT_NO_RECONFIG}" == "1" ]]; then
+    reconfig_count="$(grep -E -c "Degraded to|Restored to|Reconfigured fps" "${LOCAL_LOG_DIR}/publisher.log" || true)"
+    check_eq "publisher.reconfigure_event_count" "${reconfig_count:-0}" "0" || failures=$((failures + 1))
 fi
 
 for role in normal slow; do

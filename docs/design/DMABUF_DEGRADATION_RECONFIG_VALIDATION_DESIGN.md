@@ -1,9 +1,9 @@
 # DMA-BUF 降级重配置验证设计
 
-**文档版本:** v0.1<br>
+**文档版本:** v0.2<br>
 **最后更新:** 2026-05-16<br>
 **设计范围:** CameraSource 降帧降级在 DMA-BUF/DataPlaneV2 active lease 场景下的验证方案与编码准入边界<br>
-**当前状态:** 设计阶段，未进入代码开发<br>
+**当前状态:** slow-consumer backpressure 不误降级验证已通过；active lease skip 需要后续 fault injection 或单测覆盖<br>
 **关联文档:** [../DMA_BUF_ZERO_COPY_ARCHITECTURE.md](../DMA_BUF_ZERO_COPY_ARCHITECTURE.md)、[../MULTI_CAMERA_ARCHITECTURE.md](../MULTI_CAMERA_ARCHITECTURE.md)、[BOARD_METRICS_SMOKE_DESIGN.md](BOARD_METRICS_SMOKE_DESIGN.md)、[../../IMPLEMENTATION_STATUS.md](../../IMPLEMENTATION_STATUS.md)
 
 > **文档硬规范**
@@ -38,6 +38,7 @@ CameraSource 降帧降级已在 RK3576 `/dev/video45` USB UVC `mmap/v1` 路径�
 2. 降级重配置需要 `STREAMOFF -> S_PARM -> QBUF -> STREAMON`。
 3. 如果 active lease 未 release 时强行 `STREAMOFF/QBUF`，可能导致 subscriber 持有的 fd 与 publisher 侧 buffer 生命周期冲突。
 4. 当前策略应当是在 active lease 存在时跳过重配置，等待后续窗口再次尝试。
+5. RK3576 slow-consumer smoke 已证明：慢消费者只会造成 backpressure / lease exhausted，CameraSource 仍能持续 DQBUF，因此不会触发降级窗口。这是正确行为，不能用 slow-consumer 直接证明 active lease skip 分支。
 
 这不是新的降级算法设计，而是对现有降级策略在 DMA-BUF active lease 下的边界验证。
 
@@ -45,8 +46,9 @@ CameraSource 降帧降级已在 RK3576 `/dev/video45` USB UVC `mmap/v1` 路径�
 
 | 目标 | 说明 |
 |------|------|
-| active lease 保护 | publisher 检测到 active lease 时不得执行重配置 |
-| 后续重试 | active lease 清零后，降级/恢复应允许在后续窗口再次尝试 |
+| backpressure 不误降级 | slow consumer 只造成 lease exhausted / release timeout，不应触发降级重配置 |
+| active lease 保护 | publisher 检测到 active lease 时不得执行重配置；该分支需要后续 fault injection 或单测覆盖 |
+| 后续重试 | active lease 清零后，降级/恢复应允许在后续窗口再次尝试；该分支需要后续 fault injection 或单测覆盖 |
 | fd 生命周期稳定 | 慢消费者或延迟 release 不应造成 fd drift |
 | release 清理正确 | Stop 或 subscriber 退出后 pending release 能收敛到 0 |
 | Metrics 可观测 | 验证结果必须能从 `StreamMetrics` / logs 中判断，不靠人工猜测 |
@@ -57,7 +59,7 @@ CameraSource 降帧降级已在 RK3576 `/dev/video45` USB UVC `mmap/v1` 路径�
 |------|----------|----------|
 | 降级默认关闭 | 已完成 | smoke 必须显式传 `--enable-degradation` |
 | DMA-BUF active lease 可统计 | 已有 `active_lease_count` / release pending 指标 | 需要在 smoke 中采样并纳入报告 |
-| 慢消费者可制造 active lease | 已有 slow-consumer smoke | 可复用或扩展该脚本 |
+| 慢消费者可制造 active lease | 已有 slow-consumer smoke | 只能验证 backpressure 与 active lease 指标，不足以触发降级 |
 | 重配置跳过不算断连 | 降级失败/跳过不应进入断连恢复 | 检查 `disconnection_count == 0` |
 | USB `/dev/video45` 可跑 DataPlaneV2 | 已验证 | 当前硬件足够覆盖 USB DMA-BUF 边界，不等待 MIPI |
 
@@ -92,10 +94,11 @@ stateDiagram-v2
 |------|----------|------|
 | D1 默认关闭 | DataPlaneV2 + subscriber 正常 release | 不触发降级，metrics 与现有 lifecycle 一致 |
 | D2 enable=1 正常 release | 启用降级但无慢消费者 | 不应非预期降级，`source_degraded=false` |
-| D3 active lease 跳过 | slow consumer 延迟 release，触发低 fps 窗口 | 日志出现跳过重配置，`active_lease_count > 0` 时不 STREAMOFF |
-| D4 release 后重试 | slow consumer 恢复正常 release | 后续窗口允许降级或恢复重配置 |
-| D5 Stop 清理 | 降级态或跳过态 Stop | `release_pending_count=0`、fd drift 不超阈值 |
-| D6 subscriber 退出 | subscriber 崩溃或主动断开 | release timeout/reclaim 后 pending 收敛，publisher 不崩溃 |
+| D3 backpressure 不误降级 | slow consumer 延迟 release，造成 active lease 与 lease exhausted | 不出现 `Degraded to` / `Reconfigured fps`，`disconnection_count == 0` |
+| D4 active lease 跳过 | 通过后续 fault injection 或单测制造低 source fps + active lease | 日志出现跳过重配置，`active_lease_count > 0` 时不 STREAMOFF |
+| D5 release 后重试 | D4 条件解除 active lease | 后续窗口允许降级或恢复重配置 |
+| D6 Stop 清理 | 降级态、跳过态或 backpressure 态 Stop | `release_pending_count=0`、fd drift 不超阈值 |
+| D7 subscriber 退出 | subscriber 崩溃或主动断开 | release timeout/reclaim 后 pending 收敛，publisher 不崩溃 |
 
 ## 6. 脚本与指标设计
 
@@ -115,7 +118,8 @@ stateDiagram-v2
 | `DEGRADATION_TARGET_FPS` | `15` | 降级目标 fps |
 | `DEGRADATION_WINDOW_SEC` | `5` | 低 fps 判定窗口 |
 | `DEGRADATION_RECOVERY_FRAMES` | `30` | 恢复尝试帧数 |
-| `EXPECT_RECONFIG_SKIP` | `0` | 慢消费者场景下是否要求出现 active lease 跳过 |
+| `EXPECT_NO_RECONFIG` | `0` | slow-consumer backpressure 场景要求不出现降级/恢复/重配置事件 |
+| `EXPECT_RECONFIG_SKIP` | `0` | 仅用于后续 fault injection 或单测；slow-consumer 场景不应打开 |
 
 关键观测点：
 
@@ -132,7 +136,8 @@ stateDiagram-v2
 | check_id | PASS 条件 | FAIL 条件 |
 |----------|-----------|-----------|
 | `dmabuf_degradation_no_crash` | publisher/subscriber 正常退出 | 任一进程异常残留 |
-| `dmabuf_active_lease_skip` | `EXPECT_RECONFIG_SKIP=1` 时出现 active lease skip 日志 | 未观察到跳过，或 active lease 下执行重配置 |
+| `dmabuf_backpressure_no_degrade` | slow-consumer 场景不出现 `Degraded to` / `Reconfigured fps` | backpressure 被误判为 source 降级 |
+| `dmabuf_active_lease_skip` | `EXPECT_RECONFIG_SKIP=1` 时出现 active lease skip 日志 | 未观察到跳过，或 active lease 下执行重配置；该项不适用于普通 slow-consumer |
 | `dmabuf_release_converged` | 结束时 `release_pending_count == 0` | pending 残留 |
 | `dmabuf_fd_drift` | publisher/subscriber fd drift 不超过现有阈值 | fd drift 超阈值 |
 | `dmabuf_no_unexpected_disconnect` | `disconnection_count == 0` | 降级过程引发断连恢复 |
@@ -140,20 +145,21 @@ stateDiagram-v2
 
 ## 8. 编码准入清单
 
-- [x] 明确本阶段只验证 DMA-BUF active lease 下的降级重配置边界，不改降级算法。
-- [x] 明确优先复用 slow-consumer smoke，不新增主链路 C++ 功能。
-- [x] 明确 active lease 存在时必须跳过重配置。
+- [x] 明确本阶段先验证 DMA-BUF backpressure 下不误触发降级，不改降级算法。
+- [x] 明确 slow-consumer smoke 只能制造 backpressure，不能直接证明 active lease skip 分支。
+- [x] 明确 active lease skip 需要后续 fault injection 或单测，不在普通 slow-consumer smoke 中强制要求。
 - [x] 明确 release pending、fd drift、disconnection、Stop 清理为硬判定项。
-- [ ] 检查现有 publisher 示例是否已把降级 CLI 透传到 slow-consumer smoke 所用路径。
-- [ ] 评审通过后再修改脚本。
-- [ ] 脚本修改后必须跑 RK3576 `/dev/video45` slow-consumer smoke。
+- [x] 检查现有 publisher 示例是否已把降级 CLI 透传到 slow-consumer smoke 所用路径。
+- [x] slow-consumer smoke 已接入降级参数透传与可选 skip 检查。
+- [x] 使用修正后的 backpressure 口径重跑 RK3576 `/dev/video45` slow-consumer smoke。
 
 ## 9. 分阶段计划
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| G0 | 本文档评审与收敛 | 进行中 |
-| G1 | 检查 slow-consumer smoke 与 publisher 参数透传现状 | 待开始 |
-| G2 | 仅脚本层接入降级参数和 active lease skip 判定 | 待评审后编码 |
-| G3 | RK3576 `/dev/video45` 板端验证 | 待 G2 |
-| G4 | 如脚本暴露真实缺陷，再回到架构文档评审是否需要 C++ 修改 | 暂缓 |
+| G0 | 本文档评审与收敛 | 已完成 |
+| G1 | 检查 slow-consumer smoke 与 publisher 参数透传现状 | 已完成 |
+| G2 | 脚本层接入降级参数和可选 active lease skip 判定 | 已完成 |
+| G3 | RK3576 `/dev/video45` backpressure 不误降级验证 | 已完成：`ENABLE_DEGRADATION=1 EXPECT_NO_RECONFIG=1 MAX_RELEASE_TIMEOUT=100` slow-consumer smoke 通过 |
+| G4 | active lease skip fault injection / 单测设计 | 待单独设计 |
+| G5 | 如 fault injection 暴露真实缺陷，再回到架构文档评审是否需要 C++ 修改 | 暂缓 |
