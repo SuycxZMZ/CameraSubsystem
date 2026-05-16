@@ -1,9 +1,9 @@
 # 设备发现与重枚举恢复设计
 
-**文档版本:** v0.4<br>
+**文档版本:** v0.5<br>
 **最后更新:** 2026-05-16<br>
 **设计范围:** USB 热插拔后设备节点变化、能力变化、MIPI pipeline 缺失时的发现、恢复和状态暴露策略<br>
-**当前状态:** 脚本层扫描报告已接入并通过 RK3576 验证；进入 runtime 最小身份解析接入<br>
+**当前状态:** 脚本层扫描报告与 runtime M0 身份日志已接入并通过 RK3576 验证；M1 状态快照进入设计冻结<br>
 **关联文档:** [../MULTI_CAMERA_ARCHITECTURE.md](../MULTI_CAMERA_ARCHITECTURE.md)、[../ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md)、[../../IMPLEMENTATION_STATUS.md](../../IMPLEMENTATION_STATUS.md)
 
 > **文档硬规范**
@@ -28,6 +28,7 @@
 - [8. 验证计划](#8-验证计划)
 - [9. 编码准入清单](#9-编码准入清单)
 - [10. Runtime 接入分阶段方案](#10-runtime-接入分阶段方案)
+- [11. M1 状态快照编码方案](#11-m1-状态快照编码方案)
 
 ---
 
@@ -219,7 +220,11 @@ M0 是当前可立即编码的最小主线接入点：
 | 输出形式 | publisher 日志，包含 `stream_id`、`device_path`、`physical_id`、driver/name/bus_info |
 | 不做事项 | 不改 `CameraEndpoint`、不改 `StreamMetrics`、不自动扫描候选列表、不自动重绑定 |
 
-M0 的价值是把脚本层已经验证过的身份模型接入 runtime，让后续热插拔恢复日志可以明确“当前绑定的是哪个物理设备”。如果 M0 在 RK3576 上稳定，再进入 M1。
+M0 的价值是把脚本层已经验证过的身份模型接入 runtime，让后续热插拔恢复日志可以明确“当前绑定的是哪个物理设备”。M0 已通过 RK3576 `/dev/video45` 12 秒 lifecycle smoke，publisher 日志可看到：
+
+```text
+device discovery snapshot: stream=default0 device=/dev/video45 exists=1 physical_id=usb:32e6:9221:202509021958 driver=uvcvideo name=WebCamera: WebCamera bus_info=usb-xhci-hcd.0.auto-1.2 subsystem=usb vendor_id=32e6 product_id=9221 serial=202509021958
+```
 
 ### 10.2 M1：状态快照与候选扫描
 
@@ -240,3 +245,85 @@ M2 需要单独评审后再写代码：
 2. 切换必须发生在 stream 停止或恢复窗口内，不能在 DQBUF/QBUF 主循环中直接替换 fd。
 3. 同型号多实例无 serial 时必须进入 `Ambiguous`，禁止自动绑定。
 4. 能力变化默认进入 `CapabilityChanged`，禁止自动改分辨率或 pixel format。
+
+## 11. M1 状态快照编码方案
+
+M1 的目标是把 M0 的“一次性启动日志”收敛为可机器读取的 runtime 状态快照，但仍不做自动重绑定。
+
+### 11.1 数据结构
+
+建议在 publisher 示例内部维护轻量状态结构，先不下沉到 `CameraSource`：
+
+| 字段 | 来源 | 说明 |
+|------|------|------|
+| `stream_id` | `CameraStreamIdentity` | 稳定业务流 ID |
+| `camera_id` | `CameraStreamIdentity` | 兼容 DataPlaneV2 numeric stream key |
+| `configured_device_path` | CLI/control endpoint | 配置期望路径 |
+| `current_device_path` | runtime endpoint | 当前实际绑定路径，M1 与 configured 相同 |
+| `discovery_state` | runtime 判定 | `Bound/Missing/Unknown`，M1 不产生 `Ambiguous` |
+| `device_exists` | `InspectVideoDevice()` | sysfs 是否存在 |
+| `physical_id` | `VideoDeviceDiscoveryInfo` | 稳定物理身份摘要 |
+| `driver/name/bus_info/subsystem` | `VideoDeviceDiscoveryInfo` | 观测字段 |
+| `vendor_id/product_id/serial` | `VideoDeviceDiscoveryInfo` | USB 匹配字段 |
+| `last_refresh_ns` | publisher clock | 快照刷新时间 |
+
+M1 不把这些字符串字段写入 `StreamMetrics`。如果后续要自动判定，只通过 status JSON 或 control-plane status 扩展读取。
+
+### 11.2 快照输出
+
+M1 编码优先级：
+
+1. publisher 新增可选参数 `--device-discovery-status-path PATH`。
+2. stream start callback 中刷新该 stream 的 discovery status。
+3. stats 线程或退出路径按需覆盖写入一个小 JSON 文件。
+4. 未传入该参数时只保留 M0 日志，不增加额外 I/O。
+
+JSON 形态固定为：
+
+```json
+{
+  "streams": [
+    {
+      "stream_id": "default0",
+      "camera_id": 0,
+      "configured_device_path": "/dev/video45",
+      "current_device_path": "/dev/video45",
+      "discovery_state": "Bound",
+      "device_exists": true,
+      "physical_id": "usb:32e6:9221:202509021958",
+      "driver": "uvcvideo",
+      "name": "WebCamera: WebCamera",
+      "bus_info": "usb-xhci-hcd.0.auto-1.2",
+      "subsystem": "usb",
+      "vendor_id": "32e6",
+      "product_id": "9221",
+      "serial": "202509021958",
+      "last_refresh_ns": 1778934264131000000
+    }
+  ]
+}
+```
+
+### 11.3 刷新时机
+
+| 时机 | 是否 M1 实现 | 说明 |
+|------|--------------|------|
+| stream start callback | 是 | 与 M0 一致，启动时建立初始状态 |
+| stats 线程周期刷新 | 可选 | 只在 `--device-discovery-status-path` 指定时执行，默认间隔复用 metrics history interval |
+| Stop/退出前 | 是 | 覆盖写最后状态，方便板端 smoke 拉取 |
+| recovery failed 后刷新 | 暂缓 | 需要接入 `CameraSource` 恢复回调，进入 M2 前单独评审 |
+| control 手动 refresh | 暂缓 | 需要控制协议扩展，不在 M1 |
+
+### 11.4 禁止事项
+
+1. M1 禁止自动改写 `CameraSource::device_path_`。
+2. M1 禁止新增 board suite 或复杂 smoke 判定，只允许用现有 lifecycle smoke 人工 grep status 文件。
+3. M1 禁止把 discovery 字符串塞进 `StreamMetrics`。
+4. M1 禁止新增 udev daemon、inotify 常驻线程或后台扫描线程。
+
+### 11.5 验收标准
+
+1. 本地构建与单元测试通过。
+2. RK3576 交叉编译通过。
+3. RK3576 `/dev/video45` lifecycle smoke 仍通过。
+4. 指定 `--device-discovery-status-path` 后，板端能生成包含 `physical_id=usb:32e6:9221:202509021958` 对应 JSON 字段的状态文件。

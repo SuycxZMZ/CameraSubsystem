@@ -330,7 +330,7 @@ flowchart TB
 3. **热插拔能力发现与设备重枚举策略**
    - USB 物理拔插恢复已经通过，但仍假设设备回到原路径 `/dev/video45`。
    - device discovery 设计见 [docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md](docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md)：脚本层扫描报告已接入并通过 RK3576 验证，当前 USB 摄像头可由 `vendor_id=32e6 product_id=9221 serial=202509021958` 稳定识别；已明确字符串类 discovery 字段进入 status/log，`StreamMetrics` 暂不扩展字符串字段。
-   - Runtime M0 已进入小步接入：新增 video device identity 解析工具，publisher 在 stream start 路径输出当前 `device_path`、driver/name、bus_info、USB vendor/product/serial、`physical_id`。本阶段不做自动重绑定、不接入 board suite、不改变控制协议。
+   - Runtime M0 已完成小步接入：新增 video device identity 解析工具，publisher 在 stream start 路径输出当前 `device_path`、driver/name、bus_info、USB vendor/product/serial、`physical_id`；RK3576 `/dev/video45` 12 秒 lifecycle smoke 已确认日志输出。下一步按设计进入 M1 状态快照，只新增可选 status JSON，不做自动重绑定、不接入 board suite、不改变控制协议。
 
 ### P2：暂缓或只做轻量维护
 
