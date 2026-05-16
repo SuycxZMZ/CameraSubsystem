@@ -318,6 +318,7 @@ flowchart TB
    - `dataplane-lifecycle` 已改为基于 `StreamMetrics` JSON Lines 自动判定，并通过 RK3576 `/dev/video45` 双订阅者 60 秒 smoke。
    - `rk3576-board-smoke-suite.sh` 已新增显式 `stream-metrics` suite，作为团队快速入口。
    - `dataplane-failover` 和 `dataplane-release-disconnect` 已迁移到同一 evaluator，并通过 RK3576 板端验证。
+   - `multi-camera-topology` 接入 metrics 前必须先按 [docs/design/MULTI_CAMERA_TOPOLOGY_METRICS_DESIGN.md](docs/design/MULTI_CAMERA_TOPOLOGY_METRICS_DESIGN.md) 完成设计评审；当前只允许推进 topology report 聚合、USB metrics 子报告引用、MIPI readiness `PASS/SKIP/FAIL/ERROR` 语义固化，不改 C++ 主链路。
    - 下一步只在真实多 stream 需要时推进 per-stream DataPlaneV2 指标；MIPI 未到位前不扩大 Web/Codec 功能面。
 
 2. **DMA-BUF 降级重配置验证**
