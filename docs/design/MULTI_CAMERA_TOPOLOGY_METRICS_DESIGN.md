@@ -1,9 +1,9 @@
 # Multi-Camera Topology Metrics Smoke 设计
 
-**文档版本:** v0.1<br>
+**文档版本:** v0.2<br>
 **最后更新:** 2026-05-16<br>
 **设计范围:** `rk3576-multi-camera-topology-smoke.sh` 接入 `StreamMetrics` 自动判定的 Phase 2 架构设计<br>
-**当前状态:** 设计阶段，未进入主干代码开发<br>
+**当前状态:** T1/T2 脚本接入与 RK3576 USB-only topology smoke 已完成；仅改板端 smoke 编排，不改 C++ 主链路<br>
 **关联文档:** [../MULTI_CAMERA_ARCHITECTURE.md](../MULTI_CAMERA_ARCHITECTURE.md)、[BOARD_METRICS_SMOKE_DESIGN.md](BOARD_METRICS_SMOKE_DESIGN.md)、[../METRICS_INTERFACE_DESIGN.md](../METRICS_INTERFACE_DESIGN.md)、[../../IMPLEMENTATION_STATUS.md](../../IMPLEMENTATION_STATUS.md)
 
 > **文档硬规范**
@@ -275,16 +275,16 @@ sequenceDiagram
 - [x] 明确 PASS/SKIP/FAIL/ERROR 与退出码映射。
 - [x] 明确 report 产物路径和最小 JSON 字段。
 - [x] 明确不改 `metrics_smoke_evaluator.py`、DataPlaneV2 协议、Web、Codec。
-- [ ] 完成本文档评审。
-- [ ] 评审通过后再开始 `rk3576-multi-camera-topology-smoke.sh` 小步编码。
+- [x] 完成本文档评审。
+- [x] `rk3576-multi-camera-topology-smoke.sh` 已小步接入 topology report、USB metrics 子报告引用和 exit 2 透传。
 
 ## 11. 分阶段计划
 
 | 阶段 | 内容 | 是否可立即做 |
 |------|------|--------------|
-| T0 | 本文档评审与收敛 | 是 |
-| T1 | topology script 汇总 USB metrics report、透传子脚本 exit 2、生成 `topology_report.json` | 评审通过后可做 |
-| T2 | RK3576 USB-only topology smoke 验证：`REQUIRE_MIPI=0`，MIPI readiness 允许 SKIP | T1 后可做 |
-| T3 | `REQUIRE_MIPI=1` 错误路径验证：无 MIPI 时必须 FAIL | T1 后可做 |
+| T0 | 本文档评审与收敛 | 已完成 |
+| T1 | topology script 汇总 USB metrics report、透传子脚本 exit 2、生成 `topology_report.json` | 已完成 |
+| T2 | RK3576 USB-only topology smoke 验证：`REQUIRE_MIPI=0`，MIPI readiness 允许 SKIP | 已完成：`USB_DURATION_SEC=12` topology smoke 通过，USB metrics 子报告与 topology report 均可解析 |
+| T3 | `REQUIRE_MIPI=1` 错误路径验证：无 MIPI 时必须 FAIL | 本地 dry-run 已覆盖，板端按需执行 |
 | T4 | 真实 MIPI sensor 到位后设计 MIPI live metrics | 暂缓 |
 | T5 | per-stream DataPlaneV2 指标拆分 | 暂缓，需真实多 live 输入 |

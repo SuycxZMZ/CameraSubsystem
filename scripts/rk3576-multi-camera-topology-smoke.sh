@@ -22,10 +22,96 @@ LOCAL_LOG_DIR="${LOCAL_LOG_DIR:-${PROJECT_ROOT}/logs/rk3576-multi-camera-topolog
 mkdir -p "${LOCAL_LOG_DIR}"
 
 topology_log="${LOCAL_LOG_DIR}/topology-$(date +%Y%m%d-%H%M%S).log"
+topology_report="${LOCAL_LOG_DIR}/topology_report.json"
+usb_live_dir="${LOCAL_LOG_DIR}/usb-live"
+mipi_readiness_dir="${LOCAL_LOG_DIR}/mipi-readiness"
+usb_metrics_report="${usb_live_dir}/metrics_smoke_report.json"
 
 log()
 {
     echo "$@" | tee -a "${topology_log}"
+}
+
+json_string()
+{
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\n'/\\n}"
+    value="${value//$'\r'/\\r}"
+    value="${value//$'\t'/\\t}"
+    printf '"%s"' "${value}"
+}
+
+status_from_exit()
+{
+    local exit_code="$1"
+    case "${exit_code}" in
+        0) echo "PASS" ;;
+        1) echo "FAIL" ;;
+        2) echo "ERROR" ;;
+        *) echo "ERROR" ;;
+    esac
+}
+
+collect_mipi_devices()
+{
+    local files=()
+    local line=""
+    shopt -s nullglob
+    files=("${mipi_readiness_dir}"/mplane-readiness-*.log)
+    shopt -u nullglob
+    if (( ${#files[@]} > 0 )); then
+        line=$(grep -h "^mplane_readiness_devices=" "${files[@]}" | head -n 1 || true)
+        if [[ -n "${line}" ]]; then
+            line="${line//$'\r'/}"
+            echo "${line#*=}"
+            return
+        fi
+    fi
+    echo "${MIPI_DEVICES}"
+}
+
+write_topology_report()
+{
+    local result="$1"
+    local usb_status="$2"
+    local mipi_status="$3"
+    local identity_status="$4"
+    local isolation_status="$5"
+    local exit_code="$6"
+    local metrics_report_value=""
+    local mipi_devices_value=""
+    if [[ -f "${usb_metrics_report}" ]]; then
+        metrics_report_value="usb-live/metrics_smoke_report.json"
+    fi
+    mipi_devices_value="$(collect_mipi_devices)"
+
+    {
+        printf '{\n'
+        printf '  "result": %s,\n' "$(json_string "${result}")"
+        printf '  "exit_code": %s,\n' "${exit_code}"
+        printf '  "board": %s,\n' "$(json_string "${BOARD_USER}@${BOARD_HOST}")"
+        printf '  "topology_log": %s,\n' "$(json_string "$(basename "${topology_log}")")"
+        printf '  "usb_live": {\n'
+        printf '    "status": %s,\n' "$(json_string "${usb_status}")"
+        printf '    "device": %s,\n' "$(json_string "${USB_DEVICE}")"
+        printf '    "stream_id": "usb0",\n'
+        printf '    "metrics_report": %s\n' "$(json_string "${metrics_report_value}")"
+        printf '  },\n'
+        printf '  "mipi_readiness": {\n'
+        printf '    "status": %s,\n' "$(json_string "${mipi_status}")"
+        printf '    "require_mipi": %s,\n' "$(if [[ "${REQUIRE_MIPI}" == "1" ]]; then echo true; else echo false; fi)"
+        printf '    "devices": %s\n' "$(json_string "${mipi_devices_value}")"
+        printf '  },\n'
+        printf '  "identity_conflict": {\n'
+        printf '    "status": %s\n' "$(json_string "${identity_status}")"
+        printf '  },\n'
+        printf '  "isolation": {\n'
+        printf '    "status": %s\n' "$(json_string "${isolation_status}")"
+        printf '  }\n'
+        printf '}\n'
+    } >"${topology_report}"
 }
 
 run_and_log()
@@ -47,13 +133,19 @@ log "concurrent=${RUN_CONCURRENT}"
 log "scope=usb_live_plus_mipi_readiness"
 
 failures=0
+errors=0
+usb_live_result="SKIP"
+mipi_readiness_result="SKIP"
+identity_result="SKIP"
+isolation_result="SKIP"
 
 # ------------------------------------------------------------------
 # 串行模式（兼容旧行为）
 # ------------------------------------------------------------------
 if [[ "${RUN_CONCURRENT}" != "1" ]]; then
     if [[ "${RUN_USB_LIVE}" == "1" ]]; then
-        if ! run_and_log "usb-live-dataplane-v2" \
+        set +e
+        run_and_log "usb-live-dataplane-v2" \
             env BOARD_HOST="${BOARD_HOST}" \
                 BOARD_USER="${BOARD_USER}" \
                 BOARD_PASSWORD="${BOARD_PASSWORD}" \
@@ -63,47 +155,89 @@ if [[ "${RUN_CONCURRENT}" != "1" ]]; then
                 SUBSCRIBER_COUNT="${USB_SUBSCRIBER_COUNT}" \
                 SKIP_BUILD="${SKIP_BUILD}" \
                 CHECK_CLEANUP=0 \
-                LOCAL_LOG_DIR="${LOCAL_LOG_DIR}/usb-live" \
-                "${PROJECT_ROOT}/scripts/rk3576-dataplane-v2-lifecycle-smoke.sh"; then
-            log "multi_camera_topology_usb_live=FAIL"
+                LOCAL_LOG_DIR="${usb_live_dir}" \
+                "${PROJECT_ROOT}/scripts/rk3576-dataplane-v2-lifecycle-smoke.sh"
+        usb_exit=$?
+        set -e
+        usb_live_result="$(status_from_exit "${usb_exit}")"
+        if [[ "${usb_live_result}" == "PASS" && ! -f "${usb_metrics_report}" ]]; then
+            usb_live_result="ERROR"
+            log "ERROR: usb_live metrics report missing path=${usb_metrics_report}"
+        fi
+        log "multi_camera_topology_usb_live=${usb_live_result}"
+        if [[ "${usb_live_result}" == "FAIL" ]]; then
             failures=$((failures + 1))
-        else
-            log "multi_camera_topology_usb_live=PASS"
+        elif [[ "${usb_live_result}" == "ERROR" ]]; then
+            errors=$((errors + 1))
         fi
     else
         log "multi_camera_topology_usb_live=SKIP"
     fi
 
     if [[ "${RUN_MIPI_READINESS}" == "1" ]]; then
-        if ! run_and_log "mipi-mplane-readiness" \
+        set +e
+        run_and_log "mipi-mplane-readiness" \
             env BOARD_HOST="${BOARD_HOST}" \
                 BOARD_USER="${BOARD_USER}" \
                 BOARD_PASSWORD="${BOARD_PASSWORD}" \
                 DEVICES="${MIPI_DEVICES}" \
                 REQUIRE_MPLANE="${REQUIRE_MIPI}" \
                 SKIP_BUILD="${SKIP_BUILD}" \
-                LOCAL_LOG_DIR="${LOCAL_LOG_DIR}/mipi-readiness" \
-                "${PROJECT_ROOT}/scripts/rk3576-mplane-readiness-probe.sh"; then
-            log "multi_camera_topology_mipi_readiness=FAIL"
-            failures=$((failures + 1))
-        elif grep -q "mplane_readiness_result=SKIP" "${topology_log}"; then
-            log "multi_camera_topology_mipi_readiness=SKIP"
+                LOCAL_LOG_DIR="${mipi_readiness_dir}" \
+                "${PROJECT_ROOT}/scripts/rk3576-mplane-readiness-probe.sh"
+        mipi_exit=$?
+        set -e
+        if [[ "${mipi_exit}" -eq 0 ]]; then
+            if grep -q "mplane_readiness_result=SKIP" "${topology_log}"; then
+                mipi_readiness_result="SKIP"
+            else
+                mipi_readiness_result="PASS"
+            fi
         else
-            log "multi_camera_topology_mipi_readiness=PASS"
+            mipi_readiness_result="$(status_from_exit "${mipi_exit}")"
+        fi
+        if [[ "${mipi_readiness_result}" == "SKIP" && "${REQUIRE_MIPI}" == "1" ]]; then
+            mipi_readiness_result="FAIL"
+            log "FAIL: mipi_readiness skipped while REQUIRE_MIPI=1"
+        fi
+        log "multi_camera_topology_mipi_readiness=${mipi_readiness_result}"
+        if [[ "${mipi_readiness_result}" == "FAIL" ]]; then
+            failures=$((failures + 1))
+        elif [[ "${mipi_readiness_result}" == "ERROR" ]]; then
+            errors=$((errors + 1))
         fi
     else
         log "multi_camera_topology_mipi_readiness=SKIP"
     fi
+    if [[ "${mipi_readiness_result}" == "SKIP" && "${REQUIRE_MIPI}" == "1" ]]; then
+        mipi_readiness_result="FAIL"
+        log "FAIL: mipi_readiness skipped while REQUIRE_MIPI=1"
+        failures=$((failures + 1))
+    fi
 
+    identity_result="SKIP"
+    isolation_result="SKIP"
+    if (( errors > 0 )); then
+        log
+        write_topology_report "ERROR" "${usb_live_result}" "${mipi_readiness_result}" "${identity_result}" "${isolation_result}" 2
+        log "multi_camera_topology_smoke_result=ERROR errors=${errors} failures=${failures}"
+        log "topology_report=${topology_report}"
+        log "local_log=${topology_log}"
+        exit 2
+    fi
     if (( failures > 0 )); then
         log
+        write_topology_report "FAIL" "${usb_live_result}" "${mipi_readiness_result}" "${identity_result}" "${isolation_result}" 1
         log "multi_camera_topology_smoke_result=FAIL failures=${failures}"
+        log "topology_report=${topology_report}"
         log "local_log=${topology_log}"
         exit 1
     fi
 
     log
+    write_topology_report "PASS" "${usb_live_result}" "${mipi_readiness_result}" "${identity_result}" "${isolation_result}" 0
     log "multi_camera_topology_smoke_result=PASS"
+    log "topology_report=${topology_report}"
     log "local_log=${topology_log}"
     exit 0
 fi
@@ -112,12 +246,10 @@ fi
 # 并发模式
 # ------------------------------------------------------------------
 
-usb_live_result=""
-mipi_readiness_result=""
-
 if [[ "${RUN_USB_LIVE}" == "1" ]]; then
     log "concurrent_step=usb_live_background_start"
     (
+        set +e
         env BOARD_HOST="${BOARD_HOST}" \
             BOARD_USER="${BOARD_USER}" \
             BOARD_PASSWORD="${BOARD_PASSWORD}" \
@@ -127,10 +259,13 @@ if [[ "${RUN_USB_LIVE}" == "1" ]]; then
             SUBSCRIBER_COUNT="${USB_SUBSCRIBER_COUNT}" \
             SKIP_BUILD="${SKIP_BUILD}" \
             CHECK_CLEANUP=0 \
-            LOCAL_LOG_DIR="${LOCAL_LOG_DIR}/usb-live" \
+            LOCAL_LOG_DIR="${usb_live_dir}" \
             "${PROJECT_ROOT}/scripts/rk3576-dataplane-v2-lifecycle-smoke.sh" \
             >"${LOCAL_LOG_DIR}/usb-live-concurrent.log" 2>&1
-        echo "usb_live_exit=$?" >>"${LOCAL_LOG_DIR}/usb-live-concurrent.log"
+        usb_exit=$?
+        set -e
+        echo "usb_live_exit=${usb_exit}" >>"${LOCAL_LOG_DIR}/usb-live-concurrent.log"
+        exit "${usb_exit}"
     ) &
     usb_pid=$!
     log "usb_live_pid=${usb_pid}"
@@ -150,7 +285,7 @@ if [[ "${RUN_MIPI_READINESS}" == "1" ]]; then
             DEVICES="${MIPI_DEVICES}" \
             REQUIRE_MPLANE="${REQUIRE_MIPI}" \
             SKIP_BUILD="${SKIP_BUILD}" \
-            LOCAL_LOG_DIR="${LOCAL_LOG_DIR}/mipi-readiness" \
+            LOCAL_LOG_DIR="${mipi_readiness_dir}" \
             "${PROJECT_ROOT}/scripts/rk3576-mplane-readiness-probe.sh"; then
         if grep -q "mplane_readiness_result=SKIP" "${topology_log}"; then
             mipi_readiness_result="SKIP"
@@ -160,23 +295,45 @@ if [[ "${RUN_MIPI_READINESS}" == "1" ]]; then
             log "multi_camera_topology_mipi_readiness=PASS"
         fi
     else
+        mipi_exit=$?
+        mipi_readiness_result="$(status_from_exit "${mipi_exit}")"
+        log "multi_camera_topology_mipi_readiness=${mipi_readiness_result}"
+        if [[ "${mipi_readiness_result}" == "ERROR" ]]; then
+            errors=$((errors + 1))
+        else
+            failures=$((failures + 1))
+        fi
+    fi
+    if [[ "${mipi_readiness_result}" == "SKIP" && "${REQUIRE_MIPI}" == "1" ]]; then
         mipi_readiness_result="FAIL"
-        log "multi_camera_topology_mipi_readiness=FAIL"
+        log "FAIL: mipi_readiness skipped while REQUIRE_MIPI=1"
         failures=$((failures + 1))
     fi
 else
     log "multi_camera_topology_mipi_readiness=SKIP"
 fi
+if [[ "${mipi_readiness_result}" == "SKIP" && "${REQUIRE_MIPI}" == "1" ]]; then
+    mipi_readiness_result="FAIL"
+    log "FAIL: mipi_readiness skipped while REQUIRE_MIPI=1"
+    failures=$((failures + 1))
+fi
 
 if [[ "${RUN_USB_LIVE}" == "1" ]]; then
     log "concurrent_step=usb_live_wait"
-    if wait "${usb_pid}"; then
-        usb_live_result="PASS"
-        log "multi_camera_topology_usb_live=PASS"
-    else
-        usb_live_result="FAIL"
-        log "multi_camera_topology_usb_live=FAIL"
+    set +e
+    wait "${usb_pid}"
+    usb_exit=$?
+    set -e
+    usb_live_result="$(status_from_exit "${usb_exit}")"
+    if [[ "${usb_live_result}" == "PASS" && ! -f "${usb_metrics_report}" ]]; then
+        usb_live_result="ERROR"
+        log "ERROR: usb_live metrics report missing path=${usb_metrics_report}"
+    fi
+    log "multi_camera_topology_usb_live=${usb_live_result}"
+    if [[ "${usb_live_result}" == "FAIL" ]]; then
         failures=$((failures + 1))
+    elif [[ "${usb_live_result}" == "ERROR" ]]; then
+        errors=$((errors + 1))
     fi
 
     # 将 USB live 并发日志追加到 topology 主日志
@@ -231,8 +388,10 @@ if [[ "${usb_live_result}" == "PASS" && "${mipi_readiness_result}" == "PASS" ]];
 fi
 
 if [[ "${identity_failures}" -eq 0 ]]; then
+    identity_result="PASS"
     log "multi_camera_topology_identity_conflict=PASS"
 else
+    identity_result="FAIL"
     log "multi_camera_topology_identity_conflict=FAIL failures=${identity_failures}"
     failures=$((failures + 1))
 fi
@@ -282,8 +441,10 @@ else
 fi
 
 if [[ "${isolation_failures}" -eq 0 ]]; then
+    isolation_result="PASS"
     log "multi_camera_topology_isolation=PASS"
 else
+    isolation_result="FAIL"
     log "multi_camera_topology_isolation=FAIL failures=${isolation_failures}"
     failures=$((failures + 1))
 fi
@@ -291,13 +452,26 @@ fi
 # ------------------------------------------------------------------
 # 结果汇总
 # ------------------------------------------------------------------
+if (( errors > 0 )); then
+    log
+    write_topology_report "ERROR" "${usb_live_result}" "${mipi_readiness_result}" "${identity_result}" "${isolation_result}" 2
+    log "multi_camera_topology_smoke_result=ERROR errors=${errors} failures=${failures}"
+    log "topology_report=${topology_report}"
+    log "local_log=${topology_log}"
+    exit 2
+fi
+
 if (( failures > 0 )); then
     log
+    write_topology_report "FAIL" "${usb_live_result}" "${mipi_readiness_result}" "${identity_result}" "${isolation_result}" 1
     log "multi_camera_topology_smoke_result=FAIL failures=${failures}"
+    log "topology_report=${topology_report}"
     log "local_log=${topology_log}"
     exit 1
 fi
 
 log
+write_topology_report "PASS" "${usb_live_result}" "${mipi_readiness_result}" "${identity_result}" "${isolation_result}" 0
 log "multi_camera_topology_smoke_result=PASS"
+log "topology_report=${topology_report}"
 log "local_log=${topology_log}"
