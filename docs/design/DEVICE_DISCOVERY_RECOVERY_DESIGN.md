@@ -466,4 +466,8 @@ M3 在 M2b 基础上新增重绑定触发路径：CameraSource 恢复失败时�
 - **MonitorLoop 在进入 kPermanentFailure 前调用 hook**：给 publisher runtime 一次重绑定机会。hook 成功后 state 变为 kStreaming，不进入 kPermanentFailure。
 - **publisher 注册 hook 并调用 TryRebind**：复用 M2b 的 `TryRebindRuntimeDeviceOnStartFailure`，`last_rebind_reason` 为 `"recovery_failed"`。
 - **默认关闭**：`--enable-device-rebind-on-recovery-failure`，与 M2b 一致。
-- **板端验证**：RK3576 60 秒 lifecycle smoke PASS（recovery_failure_rebind=enabled），正常路径不破坏。recovery failed hook 的完整端到端验证需物理拔插 USB 摄像头触发断连恢复失败。
+- **板端验证**：RK3576 60 秒 lifecycle smoke PASS（recovery_failure_rebind=enabled），正常路径不破坏。
+- **热插拔验证（2026-05-17）**：通过 USB driver unbind/bind 模拟热插拔，验证 hook 触发机制：
+  - unbind 后 CameraSource 进入 retrying，恢复尝试耗尽后 hook **成功触发**（`last_rebind_reason=recovery_failed`）。
+  - **时序限制**：hook 是一次性的，触发瞬间调用 ScanVideoDevices。若此时 USB 设备尚未就绪（bind 后驱动注册 video 节点需要时间），重绑定因 `candidate_missing` 失败，publisher 进入 kPermanentFailure。
+  - 这不是 bug，是 M3 的设计边界：hook 只给一次重绑定机会，不负责持续轮询。持续轮询属于方向 B（status/control refresh）的范畴。
