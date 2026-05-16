@@ -1,6 +1,6 @@
 # CameraSubsystem 实现状态
 
-**更新日期:** 2026-05-16
+**更新日期:** 2026-05-17
 
 > **文档硬规范**
 >
@@ -504,6 +504,7 @@ flowchart TB
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 - [x] M2b 启动失败路径设备重绑定板端实证通过 ✅ 2026-05-16
 - [x] M3 CameraSource 恢复失败重绑定 hook 已实现 ✅ 2026-05-16
+- [x] M3 热插拔验证：USB driver unbind/bind 模拟，hook 触发成功，一次性时序限制已记录 ✅ 2026-05-17
 
 ## 贡献指南
 
@@ -526,5 +527,5 @@ flowchart TB
 
 ---
 
-**最后更新:** 2026-05-16
-**文档版本:** v0.5
+**最后更新:** 2026-05-17
+**文档版本:** v0.5.1
