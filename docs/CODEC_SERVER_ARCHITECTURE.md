@@ -1,8 +1,8 @@
 # Camera Codec Server 架构设计
 
-**最后更新:** 2026-05-09<br>
-**阶段定位:** 第一版代码已开工，当前完成最小进程骨架、文件写入、JSON line 控制面、录制状态机、v1 copy 数据面订阅、MPP JPEG decode 和 MPP H.264 encode 主链路接入<br>
-**第一阶段目标:** USB 摄像头也支持录制 H.264，先打通端到端链路；MIPI/RKISP 按可扩展路径预留
+**最后更新:** 2026-05-14<br>
+**阶段定位:** USB copy path 已完成端到端录制闭环，包含多 RecordingSession、JSON line 控制面、v1 copy 数据面订阅、MPP JPEG decode、MPP H.264 encode、raw H.264 与最小 MP4 文件写入<br>
+**当前目标:** Codec Server 保持快速收敛，只维护现有 smoke/bugfix 和后续 DataPlaneV2 -> MPP fd path 入口；MIPI/RKISP 低拷贝录制等待真实 NV12 DMA-BUF live frame 后再编码
 
 > **文档硬规范**
 >
@@ -73,11 +73,11 @@ CameraSubsystem 当前已经具备核心发布端、订阅端、Web Preview 和 
 | USB 摄像头 | 当前主要验证对象是 `/dev/video45`，输出 JPEG/MJPEG | USB H.264 录制需要 JPEG decode 到 NV12/YUV 后再编码 |
 | RK3576 编码能力 | Luckfox 官方规格显示 VPU 支持 H.264/H.265 硬编码 4K@60fps | 第一选择应是 Rockchip MPP，而不是软件编码 |
 
-当前不支持的部分：
+当前不支持或暂缓的部分：
 
-1. Web 长时间异常恢复验证还不完整，浏览器刷新、WebSocket 断线重连和 codec server 重启恢复仍需补充。
-2. DataPlaneV2 / DMA-BUF / MIPI/RKISP NV12 还没有接入编码主链路。
-3. 容器封装还没有接入，第一阶段仍输出裸 `.h264` 文件。
+1. DataPlaneV2 / DMA-BUF / MIPI/RKISP NV12 还没有接入编码主链路，等待真实 MIPI sensor 出帧后按低拷贝设计文档推进。
+2. RTSP、H.265、MKV、分段录制、断电恢复暂缓，不进入当前主线优先级。
+3. Web 和 Codec 只做 smoke、错误收敛和低拷贝输入适配，不继续扩大外围功能面。
 
 ## 3. 总体架构
 

@@ -3,7 +3,7 @@
 **目标平台:** Linux / 嵌入式边缘设备（当前已接入 RK3576 / Debian 验证链路，预留 Android 迁移）<br>
 **开发语言:** C++17 / C POD 数据结构<br>
 **核心方向:** Camera 采集后端 -> Publish/Subscribe -> AI / 编码 / 录制<br>
-**最后更新:** 2026-05-10
+**最后更新:** 2026-05-14
 
 > **文档硬规范**
 >
@@ -69,6 +69,7 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 | 统一 Metrics 接口 | 已完成 | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`；CameraSource/FrameBroker 已接入；publisher 示例已替换手动聚合 |
 | FrameBroker 背压参数化 | 已完成 | `BackpressureConfig` / `DropPolicy` / 慢消费者检测；4 个单元测试通过；stress test 兼容 |
 | CameraSource 断连恢复 | 已完成 | `SourceState`、断连/恢复 Metrics、capture/monitor 双线程已落地；自动恢复默认关闭；RK3576 quick、DataPlaneV2 lifecycle、multi-camera-topology smoke 和 USB 物理拔插/重插恢复实测已通过 |
+| CameraSource 降帧降级 | 已完成（USB mmap/v1） | `enable_degradation` 默认关闭；RK3576 `/dev/video45` USB UVC `mmap/v1` enable=1 已验证降级、恢复与 Stop 清理；DMA-BUF 重配置边界保留为后续独立验证 |
 
 ---
 
@@ -292,6 +293,7 @@ cd /home/luckfox/CameraSubsystem
 
 ```bash
 ./scripts/rk3576-board-smoke-suite.sh
+./scripts/rk3576-board-smoke-suite.sh stream-metrics
 ./scripts/rk3576-board-smoke-suite.sh dataplane-lifecycle codec-multi-session-control codec-mp4 web-record-mp4
 ./scripts/rk3576-board-smoke-suite.sh multi-camera-topology
 ```
@@ -341,12 +343,13 @@ Smoke suite 档位：
 
 1. 默认数据面 IPC 仍是示例复制链路，不适合作为 4K 高帧率生产通路；跨进程 DMA-BUF 需要显式启用 `--io-method dmabuf --data-plane v2`。
 2. DMA-BUF 数据面已完成 RK3576 `/dev/video45` Phase 2 冒烟、慢消费者/双订阅者长稳、subscriber 崩溃 failover、release socket 主动断开、fd 泄漏长稳和 publisher 退出清理验证，但仍需补充真实 MIPI/RKISP 出帧验证，阶段性记录见 [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md)。
-3. CameraSource 设备断连检测与可控恢复已落地，并完成 RK3576 USB 物理拔插/重插恢复验证；后续只保留不同硬件设备节点重枚举场景的能力发现。
-4. 多平台后端能力发现、设备热插拔与恢复策略仍需完善。
+3. CameraSource 设备断连恢复和 USB mmap/v1 降帧降级已落地；后续只保留不同硬件设备节点重枚举、DMA-BUF 重配置和 MIPI 后端差异的能力发现。
+4. Web Preview 与 Codec Server 已满足当前调试闭环，后续只做主线 smoke、错误收敛和低拷贝输入适配，不扩展复杂 UI 或新容器能力。
 
 下一步建议按以下顺序推进，并与 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 的 P0/P1 风险项对齐：
 
 1. **真实 MIPI/RKISP live STREAMON**：MPLANE 骨架已就绪，需 sensor 到位后验证 STREAMON、DQBUF/QBUF 帧率稳定性、per-plane `bytesused` 真实性和 DataPlaneV2 端到端路径。
 2. **DataPlaneV2 -> MPP 低拷贝录制编码**：设计文档已完成（copy path / fd path 选择、MPP import 契约、release 时序、fallback），待真实 MIPI sensor 到位后进入编码阶段。
-3. **板端可观测性增强**：基于已落地的 Metrics 接口，将 per-stream 指标快照接入板端 smoke 自动判定（如 `capture_frame_count`、`broker_dropped_count`、`release_pending_count`、`disconnection_count` 阈值检查）。
-4. **热插拔能力发现**：针对后续不同 USB/MIPI 硬件，补设备节点重枚举、设备能力变化和订阅端提示策略。
+3. **板端可观测性增强**：基于已落地的 Metrics 接口，将 per-stream 指标快照接入板端 smoke 自动判定（如 `capture_frame_count`、`broker_dropped_count`、`release_pending_count`、`source_degradation_count` 阈值检查）。
+4. **DMA-BUF 降级重配置验证**：在 DataPlaneV2 active lease 场景下验证降级重配置的跳过、重试和回收策略，避免 STREAMOFF/STREAMON 与未 release fd 冲突。
+5. **热插拔能力发现**：针对后续不同 USB/MIPI 硬件，补设备节点重枚举、设备能力变化和订阅端提示策略。

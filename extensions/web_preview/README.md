@@ -1,5 +1,29 @@
 # Web Preview Extension
 
+**最后更新:** 2026-05-14
+
+> **文档硬规范**
+>
+> - 本项目的系统架构图、模块框图、部署拓扑图、数据路径框图和工程结构框图必须使用 `architecture-diagram` skill 生成独立 HTML / inline SVG 图表产物；每个 HTML 图必须同步导出同名 `.svg`，Markdown 中默认直接显示 SVG，并附完整 HTML 图表链接。
+> - 时序图、状态机图、纯目录结构图等仍使用 Mermaid fenced code block（语言标识为 `mermaid`）。
+> - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
+> - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
+> - Web Preview 当前只做调试预览、录制控制入口和 smoke 支撑；复杂 UI、自动续录、RTSP、H.265 等不进入当前主线。
+
+## 目录
+
+- [目标](#目标)
+- [当前进度](#当前进度)
+- [目录结构](#目录结构)
+- [快速开始](#快速开始)
+- [Gateway 命令行参数](#gateway-命令行参数)
+- [前端功能说明](#前端功能说明)
+- [构建](#构建)
+- [协议说明](#协议说明)
+- [故障排查](#故障排查)
+- [文档](#文档)
+- [下一步计划](#下一步计划)
+
 `web_preview` 是 CameraSubsystem 的 Web 调试预览扩展模块，面向 Linux 边缘设备，用于在开发板上提供局域网可访问的 Camera 实时预览页面。
 
 ## 目标
@@ -13,7 +37,7 @@
 
 ## 当前进度
 
-截至 2026-05-09，Web Preview 已完成 RK3576 正式目录联调：
+截至 2026-05-14，Web Preview 已完成 RK3576 正式目录联调，并进入轻量维护状态：
 
 | 能力 | 状态 | 验证 |
 |------|------|------|
@@ -24,6 +48,7 @@
 | 录制状态面板 | 已完成当前切片 | 展示录制时长、文件统计、输入/编码/解码计数、有效 profile 和错误提示。 |
 | 停止录制后预览保持 | 已验证 | RK3576 正式目录验证 `LIVE_WS_COUNTS before=15 during=25 after=25`，8080 保持监听。 |
 | 板端 smoke | 已补充 | `scripts/web-record-freeze-smoke-rk3576.sh` 默认使用 `/home/luckfox/CameraSubsystem`，支持多轮录制、停止后重连和 MP4 输出校验；`scripts/web-codec-restart-smoke-rk3576.sh` 已验证 raw_h264 / mp4 codec 重启恢复。 |
+| 后续策略 | 暂缓扩展 | 只处理影响 smoke、状态归并、错误收敛和低拷贝输入适配的问题。 |
 
 ## 目录结构
 

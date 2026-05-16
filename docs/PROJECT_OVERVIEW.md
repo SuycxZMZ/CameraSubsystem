@@ -1,6 +1,6 @@
 # CameraSubsystem 项目概览
 
-**最后更新:** 2026-04-27
+**最后更新:** 2026-05-14
 
 > **文档硬规范**
 >
@@ -29,7 +29,7 @@
 
 ## 项目简介
 
-CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基座。它作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源，当前已形成采集后端适配、BufferPool 生命周期治理、发布端/订阅端双进程示例、交叉编译链路和 Web 调试预览扩展；DMA-BUF DataPlaneV2 已完成 RK3576 阶段性冒烟验证，独立 `camera_codec_server` 已打通 USB MJPEG -> MPP H.264 录制首版链路，并完成 Web Record start/stop 板端 smoke。
+CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基座。它作为 AI 推理、视频编码、预览显示等上层应用的统一数据来源，当前已形成采集后端适配、BufferPool 生命周期治理、发布端/订阅端双进程示例、交叉编译链路和 Web 调试预览扩展；DMA-BUF DataPlaneV2 已完成 RK3576 阶段性冒烟验证，独立 `camera_codec_server` 已打通 USB MJPEG -> MPP H.264/MP4 录制链路，CameraSource 已完成 USB 断连恢复和 `mmap/v1` 降帧降级验证。
 
 项目不把架构绑定到单一 SoC 或单一采集 API。当前实现以 Linux V4L2/MMAP 后端和 RK3576 / Debian 板端验证为基线，后续可继续扩展 Android Camera HAL、厂商媒体栈、USB/UVC、MIPI/CSI 多平面链路或其他平台私有后端。
 
@@ -41,7 +41,7 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 
 - **当前链路**: 已落地 Linux V4L2/MMAP 后端，默认采集后拷贝到 BufferPool，适合本机与板端初期联调。
 - **DMA-BUF 数据面**: 已新增 `FrameDescriptor` / `FrameLease` / V4L2 `VIDIOC_EXPBUF` / DataPlaneV2 + `SCM_RIGHTS` 路径；驱动不支持时自动保留 copy fallback。
-- **录制编码链路**: 已由独立 `camera_codec_server` 订阅原始流，先以 USB 摄像头打通 JPEG/MJPEG 到 H.264 文件录制；Web Preview Record 按钮可触发后台录制，停止录制后预览链路保持可用。
+- **录制编码链路**: 已由独立 `camera_codec_server` 订阅原始流，先以 USB 摄像头打通 JPEG/MJPEG 到 H.264/MP4 文件录制；Web Preview Record 按钮可触发后台录制，停止录制后预览链路保持可用。
 - **调度基础**: 已具备线程池分发、Buffer 复用和基础丢帧保护。
 - **指标口径**: 4K 高帧率、端到端延迟、内存占用等指标需要按具体平台和采集后端实测。
 
@@ -55,7 +55,7 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 
 - **RAII 资源管理**: 严格的资源管理，杜绝资源泄漏
 - **线程安全**: 完善的同步机制，避免死锁和竞态条件
-- **错误恢复**: 已实现设备断连检测与自动恢复（默认关闭），USB 热插拔验证通过
+- **错误恢复**: 已实现设备断连检测与自动恢复（默认关闭），USB 热插拔验证通过；`mmap/v1` 降帧降级默认关闭，RK3576 USB enable=1 验证通过
 - **长期运行**: 已具备压力测试入口，7x24 稳定性仍待板端验证
 
 ### 可维护性
@@ -176,7 +176,7 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 #### 1. CameraSource
 
 - **职责**: 负责 Camera 设备的初始化、参数配置、流控及原始帧数据的捕获
-- **特性**: 已落地 V4L2/MMAP 采集后端、Buffer 预分配与复用、RK3576 交叉编译适配；DMA-BUF 单 fd export 基础路径已接入，板端能力验证、多平面、其他采集后端、设备热插拔恢复待完善
+- **特性**: 已落地 V4L2/MMAP 采集后端、Buffer 预分配与复用、RK3576 交叉编译适配；DMA-BUF 单 fd export、设备断连恢复和 USB 降帧降级已接入，多平面 live、其他采集后端和设备重枚举策略待完善
 
 #### 2. FrameBroker
 
@@ -289,9 +289,9 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 
 ### 当前版本
 
-- **版本号**: v0.2
+- **版本号**: v0.4
 - **状态**: 开发中
-- **完成度**: 约 80%
+- **完成度**: USB/RK3576 主链路阶段收敛，MIPI/RKISP live 与低拷贝录制待硬件验证
 
 ### 已完成模块
 
@@ -305,7 +305,13 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 - ✅ CameraSessionManager（按订阅引用计数启停）
 - ✅ 控制面 IPC（CameraControlServer/Client）
 - ✅ 数据面 IPC（示例协议与双进程收发链路）
-- ✅ DMA-BUF Phase 1 基础模型（FrameDescriptor / FrameLease / DmaBufFrameLease）
+- ✅ DataPlaneV2（`SCM_RIGHTS` fd 传递、独立 ReleaseFrame、异常回收、fd 泄漏长稳）
+- ✅ DMA-BUF 基础模型（FrameDescriptor / FrameLease / DmaBufFrameLease）
+- ✅ 多路身份模型（`CameraStreamIdentity`、`stream_id -> CameraStreamRuntime`、多字段 release key）
+- ✅ CameraSource 断连恢复与 USB 物理热插拔恢复
+- ✅ CameraSource 降帧降级（RK3576 USB UVC `mmap/v1` enable=1 已验证）
+- ✅ 统一指标与观测接口（`core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`）
+- ✅ FrameBroker 背压策略参数化（`BackpressureConfig` / `DropPolicy` / 慢消费者检测）
 - ✅ 构建系统配置
 - ✅ RK3576 官方工具链交叉编译入口（`cmake/toolchains/rk3576.cmake` / `scripts/build-rk3576.sh`）
 - ✅ Web Preview + Codec Server 录制闭环（RK3576 正式目录 smoke：停止录制后 8080 保持监听）
@@ -315,17 +321,17 @@ rm -f /tmp/camera_subsystem_control.sock /tmp/camera_subsystem_data.sock
 
 ### 进行中模块
 
-- 🚧 CameraSource 高级能力（RK3576 DMA-BUF 板端验证 / 多平面 / cache sync）
-- 🚧 Web 录制长稳与 H.264 文件播放兼容性验证
-- 🚧 设备恢复机制（自动重连 / 降级策略）
-- ✅ 背压策略参数化（`BackpressureConfig` / `DropPolicy` / 慢消费者检测）
+- 🚧 MIPI/RKISP MPLANE live STREAMON 与真实出帧验证（当前硬件阻塞）
+- 🚧 DataPlaneV2 -> MPP 低拷贝录制 fd path（等待真实 NV12 DMA-BUF live frame）
+- 🚧 板端 Metrics smoke 自动判定
+- 🚧 DMA-BUF active lease 场景下降级重配置专项验证
 
 ### 计划中模块
 
 - ⏳ 工具类实现
 - ⏳ 集成测试
 - ⏳ 性能测试
-- ✅ 统一指标与观测接口（`core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`）
+- ⏳ 设备节点重枚举与 device discovery 策略
 
 ### 架构评审与详细设计入口
 
@@ -506,5 +512,5 @@ ctest --output-on-failure
 
 ---
 
-**最后更新**: 2026-02-03
-**文档版本**: v0.1
+**最后更新**: 2026-05-14
+**文档版本**: v0.4

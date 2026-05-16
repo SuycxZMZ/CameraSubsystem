@@ -1,11 +1,17 @@
 # DataPlaneV2 → MPP 低拷贝录制设计
 
-**文档版本:** v0.1  
-**最后更新:** 2026-05-10  
-**适用范围:** `camera_codec_server` 接入 CameraSubsystem DataPlaneV2，实现 MIPI/RKISP NV12 DMA-BUF 低拷贝录制路径  
+**文档版本:** v0.2<br>
+**最后更新:** 2026-05-14<br>
+**适用范围:** `camera_codec_server` 接入 CameraSubsystem DataPlaneV2，实现 MIPI/RKISP NV12 DMA-BUF 低拷贝录制路径<br>
+**当前状态:** 设计契约保留为后续编码门槛；真实 MIPI sensor 和 NV12 DMA-BUF live frame 到位前不写生产 fd path<br>
 **关联文档:** [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)、[CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)、[MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md)
 
-> **硬性约束**
+> **文档硬规范**
+>
+> - 本项目的系统架构图、模块框图、部署拓扑图、数据路径框图和工程结构框图必须使用 `architecture-diagram` skill 生成独立 HTML / inline SVG 图表产物；每个 HTML 图必须同步导出同名 `.svg`，Markdown 中默认直接显示 SVG，并附完整 HTML 图表链接。
+> - 时序图、状态机图、纯目录结构图等仍使用 Mermaid fenced code block（语言标识为 `mermaid`）。
+> - 禁止新增 ASCII art/text 框图；普通日志、命令输出、代码片段按其原始语言使用 fenced code block。
+> - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 >
 > - 本文只做设计，不承载实现代码。所有标注 **「待 MIPI sensor 验证」** 的假设在真实 sensor 到位前不可编码为生产路径。
 > - 任何偏离本文契约的编码必须先更新本文并重新评审。

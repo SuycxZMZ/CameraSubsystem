@@ -43,6 +43,7 @@ Tiers (select via TIER environment variable):
   extended  (~5-8m) all suites, including multi-camera topology smoke
 
 Available suites:
+  stream-metrics
   dataplane-lifecycle
   dataplane-failover
   dataplane-release-disconnect
@@ -105,6 +106,12 @@ run_suite()
     echo "RK3576 smoke suite: ${name}"
     echo "============================================================"
     case "${name}" in
+        stream-metrics)
+            BOARD_HOST="${BOARD_HOST}" BOARD_USER="${BOARD_USER}" BOARD_PASSWORD="${BOARD_PASSWORD}" \
+            DEVICE="${DEVICE}" SKIP_BUILD="${SKIP_BUILD}" DURATION_SEC="${DURATION_SEC:-60}" \
+            SAMPLE_INTERVAL_SEC="${SAMPLE_INTERVAL_SEC:-5}" SUBSCRIBER_COUNT="${SUBSCRIBER_COUNT:-2}" \
+                "${PROJECT_ROOT}/scripts/rk3576-dataplane-v2-lifecycle-smoke.sh"
+            ;;
         dataplane-lifecycle)
             BOARD_HOST="${BOARD_HOST}" BOARD_USER="${BOARD_USER}" BOARD_PASSWORD="${BOARD_PASSWORD}" \
             DEVICE="${DEVICE}" SKIP_BUILD="${SKIP_BUILD}" DURATION_SEC="${DURATION_SEC:-60}" \

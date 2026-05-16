@@ -179,6 +179,12 @@ TEST(MetricsAggregatorTest, FormatForLogContainsExpectedFields)
     metrics.release_pending_count = 0;
     metrics.release_timeout_count = 0;
     metrics.release_reclaimed_count = 0;
+    metrics.source_degraded = true;
+    metrics.source_requested_fps = 30;
+    metrics.source_current_target_fps = 15;
+    metrics.source_degradation_count = 2;
+    metrics.source_degradation_recovery_count = 1;
+    metrics.source_degradation_failure_count = 1;
 
     const std::string log = MetricsAggregator::FormatForLog(metrics);
 
@@ -186,6 +192,12 @@ TEST(MetricsAggregatorTest, FormatForLogContainsExpectedFields)
     EXPECT_NE(log.find("capture=1848"), std::string::npos);
     EXPECT_NE(log.find("subscribers=2"), std::string::npos);
     EXPECT_NE(log.find("v2_sent=3693"), std::string::npos);
+    EXPECT_NE(log.find("degraded=1"), std::string::npos);
+    EXPECT_NE(log.find("req_fps=30"), std::string::npos);
+    EXPECT_NE(log.find("cur_fps=15"), std::string::npos);
+    EXPECT_NE(log.find("degrade=2"), std::string::npos);
+    EXPECT_NE(log.find("degrade_rec=1"), std::string::npos);
+    EXPECT_NE(log.find("degrade_fail=1"), std::string::npos);
 }
 
 TEST(MetricsAggregatorTest, ProviderUpdatesReflectedInSubsequentSnapshots)
@@ -198,4 +210,36 @@ TEST(MetricsAggregatorTest, ProviderUpdatesReflectedInSubsequentSnapshots)
 
     provider.SetCaptureCount(200);
     EXPECT_EQ(aggregator.GetStreamMetrics("stream0").capture_frame_count, 200U);
+}
+
+TEST(MetricsAggregatorTest, ProviderUnregisterRemovesData)
+{
+    MetricsAggregator aggregator;
+    CaptureMetricsProvider source_provider(100, 5);
+    BrokerMetricsProvider broker_provider(200);
+
+    aggregator.RegisterProvider("stream0", &source_provider);
+    aggregator.RegisterProvider("stream0", &broker_provider);
+
+    {
+        const auto metrics = aggregator.GetStreamMetrics("stream0");
+        EXPECT_EQ(metrics.capture_frame_count, 100U);
+        EXPECT_EQ(metrics.capture_dropped_count, 5U);
+        EXPECT_EQ(metrics.broker_published_count, 200U);
+    }
+
+    aggregator.UnregisterProvider("stream0", &source_provider);
+    {
+        const auto metrics = aggregator.GetStreamMetrics("stream0");
+        EXPECT_EQ(metrics.capture_frame_count, 0U);
+        EXPECT_EQ(metrics.capture_dropped_count, 0U);
+        EXPECT_EQ(metrics.broker_published_count, 200U);
+    }
+
+    aggregator.UnregisterProvider("stream0", &broker_provider);
+    {
+        const auto metrics = aggregator.GetStreamMetrics("stream0");
+        EXPECT_EQ(metrics.capture_frame_count, 0U);
+        EXPECT_EQ(metrics.broker_published_count, 0U);
+    }
 }

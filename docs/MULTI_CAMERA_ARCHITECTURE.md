@@ -1,8 +1,9 @@
 # 多路摄像头架构纠偏
 
-**文档版本:** v0.1<br>
-**最后更新:** 2026-05-09<br>
+**文档版本:** v0.2<br>
+**最后更新:** 2026-05-14<br>
 **适用范围:** CameraSubsystem 同时接入 USB/UVC 与 MIPI/RKISP 多路摄像头的目标架构、当前偏差、迁移顺序和验收口径<br>
+**当前状态:** 身份模型、publisher 多 runtime、DataPlaneV2/release 多字段 key、codec 多 session 和 Web W1-W2 已落地；真实 MIPI live 仍受硬件阻塞<br>
 **关联文档:** [README.md](../README.md)、[ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)、[DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)、[CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)、[IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)
 
 > **文档硬规范**

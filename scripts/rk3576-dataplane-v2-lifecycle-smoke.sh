@@ -26,6 +26,7 @@ MAX_RELEASE_TIMEOUT="${MAX_RELEASE_TIMEOUT:-0}"
 MAX_LEASE_EXHAUSTED="${MAX_LEASE_EXHAUSTED:-0}"
 MAX_EXPORT_FAIL="${MAX_EXPORT_FAIL:-0}"
 CHECK_CLEANUP="${CHECK_CLEANUP:-1}"
+REQUESTED_FPS="${REQUESTED_FPS:-15}"
 
 CONTROL_SOCKET="/tmp/camera_subsystem_control.sock"
 DATA_SOCKET="/tmp/camera_subsystem_data_v2.sock"
@@ -191,6 +192,9 @@ run_ssh "set -e; \
     cd '${BOARD_DIR}'; \
     nohup ./camera_publisher_example '${DEVICE}' '${CONTROL_SOCKET}' '${DATA_SOCKET}' \
         --io-method dmabuf --data-plane v2 --release-socket '${RELEASE_SOCKET}' \
+        --metrics-history-path '${BOARD_DIR}/metrics_history.jsonl' \
+        --metrics-history-interval '${SAMPLE_INTERVAL_SEC}' \
+        --metrics-snapshot-path '${BOARD_DIR}/metrics_snapshot.json' \
         > publisher.log 2>&1 & echo \$! > publisher.pid"
 
 sleep 2
@@ -246,6 +250,7 @@ run_ssh "set +e; \
     pkill -9 -f '[c]amera_subscriber_example' 2>/dev/null; \
     true"
 
+# 拉取必需日志：失败必须暴露
 run_scp \
     "${TARGET}:${BOARD_DIR}/publisher.log" \
     "${TARGET}:${BOARD_DIR}/fd_samples.log" \
@@ -253,11 +258,13 @@ run_scp \
     "${TARGET}:${BOARD_DIR}/subscriber-*.log" \
     "${LOCAL_LOG_DIR}/" >/dev/null
 
+# 拉取可选 metrics 文件：失败不阻断
+run_scp \
+    "${TARGET}:${BOARD_DIR}/metrics_history.jsonl" \
+    "${TARGET}:${BOARD_DIR}/metrics_snapshot.json" \
+    "${LOCAL_LOG_DIR}/" >/dev/null || true
+
 echo "Logs copied to ${LOCAL_LOG_DIR}"
-echo
-echo "Publisher counters:"
-grep -E "release_pending|lease_exhausted|v2_sent|release_timeout" \
-    "${LOCAL_LOG_DIR}/publisher.log" | tail -n 10 || true
 echo
 echo "FD samples:"
 tail -n 20 "${LOCAL_LOG_DIR}/fd_samples.log" || true
@@ -268,33 +275,50 @@ echo
 echo "Subscriber summaries:"
 grep -E "summary|release_fail|fps=" "${LOCAL_LOG_DIR}"/subscriber-*.log | tail -n 20 || true
 
-publisher_line="$(grep -E "release_pending|lease_exhausted|v2_sent|release_timeout" \
-    "${LOCAL_LOG_DIR}/publisher.log" | tail -n 1 || true)"
-
 echo
 echo "Automatic lifecycle checks:"
 
 failures=0
-if [[ -z "${publisher_line}" ]]; then
-    echo "FAIL: publisher counter line not found"
-    failures=$((failures + 1))
-else
-    dmabuf_enabled="$(extract_counter "${publisher_line}" "dmabuf_enabled")"
-    export_fail="$(extract_counter "${publisher_line}" "export_fail")"
-    v2_sent="$(extract_counter "${publisher_line}" "v2_sent")"
-    release_pending="$(extract_counter "${publisher_line}" "release_pending")"
-    release_timeout="$(extract_counter "${publisher_line}" "release_timeout")"
-    lease_exhausted="$(extract_counter "${publisher_line}" "lease_exhausted")"
-    active_leases="$(extract_counter "${publisher_line}" "active_leases")"
 
-    check_eq "publisher.dmabuf_enabled" "${dmabuf_enabled:-missing}" "1" || failures=$((failures + 1))
-    check_le "publisher.export_fail" "${export_fail:-999999}" "${MAX_EXPORT_FAIL}" || failures=$((failures + 1))
-    check_ge "publisher.v2_sent" "${v2_sent:-0}" 1 || failures=$((failures + 1))
-    check_le "publisher.release_pending" "${release_pending:-999999}" "${MAX_RELEASE_PENDING}" || failures=$((failures + 1))
-    check_le "publisher.active_leases" "${active_leases:-999999}" "${MAX_ACTIVE_LEASES}" || failures=$((failures + 1))
-    check_le "publisher.release_timeout" "${release_timeout:-999999}" "${MAX_RELEASE_TIMEOUT}" || failures=$((failures + 1))
-    check_le "publisher.lease_exhausted" "${lease_exhausted:-999999}" "${MAX_LEASE_EXHAUSTED}" || failures=$((failures + 1))
+# === Metrics-based publisher checks (replaces grep-based counter extraction) ===
+metrics_history_local="${LOCAL_LOG_DIR}/metrics_history.jsonl"
+metrics_snapshot_local="${LOCAL_LOG_DIR}/metrics_snapshot.json"
+
+# Build Python evaluator args — always pass history path (Python handles missing/empty);
+# pass snapshot as fallback if available.
+py_args=("${PROJECT_ROOT}/scripts/metrics_smoke_evaluator.py")
+py_args+=(--history "${metrics_history_local}")
+if [[ -s "${metrics_snapshot_local}" ]]; then
+    py_args+=(--snapshot "${metrics_snapshot_local}")
 fi
+
+py_args+=(
+    --tier "${TIER:-full}"
+    --output-report "${LOCAL_LOG_DIR}/metrics_smoke_report.json"
+    --device "${DEVICE}"
+    --duration-sec "${DURATION_SEC}"
+    --subscriber-count "${SUBSCRIBER_COUNT}"
+    --requested-fps "${REQUESTED_FPS}"
+)
+
+metrics_failures=0
+set +e
+python3 "${py_args[@]}"
+metrics_exit=$?
+set -e
+if (( metrics_exit == 0 )); then
+    echo "PASS: metrics evaluator"
+elif (( metrics_exit == 1 )); then
+    echo "FAIL: metrics evaluator detected threshold breach"
+    metrics_failures=$((metrics_failures + 1))
+elif (( metrics_exit == 2 )); then
+    echo "ERROR: metrics evaluator encountered input/environment error (exit 2)"
+    metrics_failures=$((metrics_failures + 1))
+else
+    echo "ERROR: metrics evaluator unexpected exit code ${metrics_exit}"
+    metrics_failures=$((metrics_failures + 1))
+fi
+failures=$((failures + metrics_failures))
 
 publisher_range="$(fd_count_range publisher "${LOCAL_LOG_DIR}/fd_samples.log")"
 if [[ -z "${publisher_range}" ]]; then

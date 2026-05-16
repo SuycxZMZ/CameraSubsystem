@@ -50,6 +50,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <thread>
+#include <fcntl.h>
 #include <unistd.h>
 #include <unordered_map>
 #include <vector>
@@ -447,6 +448,154 @@ struct PublisherStats
     std::atomic<uint64_t> send_fail_count{0};
 };
 
+class DataPlaneV2MetricsProvider : public camera_subsystem::core::IMetricsProvider
+{
+  public:
+    DataPlaneV2MetricsProvider(const PublisherStats* stats, CameraReleaseServer* release_server)
+        : stats_(stats), release_server_(release_server)
+    {
+    }
+
+    void FillMetrics(StreamMetrics* metrics) const override
+    {
+        if (!metrics || !stats_ || !release_server_)
+        {
+            return;
+        }
+        metrics->v2_sent_frame_count = stats_->v2_sent_frames.load();
+        metrics->v2_send_failure_count = stats_->v2_send_fail_count.load();
+        metrics->release_pending_count = static_cast<uint64_t>(release_server_->PendingFrameCount());
+        const auto rs = release_server_->GetServerStats();
+        metrics->release_timeout_count = rs.expired_reclaims;
+        metrics->release_reclaimed_count = rs.reclaimed_frames;
+    }
+
+  private:
+    const PublisherStats* stats_;
+    CameraReleaseServer* release_server_;
+};
+
+std::string JsonEscapeString(const std::string& raw)
+{
+    std::string escaped;
+    escaped.reserve(raw.size() + 16);
+    for (char c : raw)
+    {
+        switch (c)
+        {
+            case '"':
+                escaped += "\\\"";
+                break;
+            case '\\':
+                escaped += "\\\\";
+                break;
+            case '\b':
+                escaped += "\\b";
+                break;
+            case '\f':
+                escaped += "\\f";
+                break;
+            case '\n':
+                escaped += "\\n";
+                break;
+            case '\r':
+                escaped += "\\r";
+                break;
+            case '\t':
+                escaped += "\\t";
+                break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20)
+                {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+                    escaped += buf;
+                }
+                else
+                {
+                    escaped += c;
+                }
+                break;
+        }
+    }
+    return escaped;
+}
+
+std::string MetricsToJsonLine(const std::vector<StreamMetrics>& streams,
+                              const PublisherStats* stats,
+                              CameraReleaseServer* release_server)
+{
+    std::string result;
+    result.reserve(1024);
+
+    const uint64_t ts_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+
+    result += "{\"timestamp_ns\":" + std::to_string(ts_ns) + ",\"streams\":[";
+
+    for (size_t i = 0; i < streams.size(); ++i)
+    {
+        const auto& m = streams[i];
+        if (i > 0) result += ",";
+        result += "{\"stream_id\":\"" + JsonEscapeString(m.stream_id) + "\",";
+        result += "\"capture_frame_count\":" + std::to_string(m.capture_frame_count) + ",";
+        result += "\"capture_dropped_count\":" + std::to_string(m.capture_dropped_count) + ",";
+        result += "\"dma_buf_frame_count\":" + std::to_string(m.dma_buf_frame_count) + ",";
+        result += "\"lease_exhausted_count\":" + std::to_string(m.lease_exhausted_count) + ",";
+        result += "\"active_lease_count\":" + std::to_string(m.active_lease_count) + ",";
+        result += "\"broker_published_count\":" + std::to_string(m.broker_published_count) + ",";
+        result += "\"broker_dispatched_count\":" + std::to_string(m.broker_dispatched_count) + ",";
+        result += "\"broker_dropped_count\":" + std::to_string(m.broker_dropped_count) + ",";
+        result += "\"broker_queue_depth\":" + std::to_string(m.broker_queue_depth) + ",";
+        result += "\"broker_subscriber_count\":" + std::to_string(m.broker_subscriber_count) + ",";
+        result += "\"v2_sent_frame_count\":" + std::to_string(m.v2_sent_frame_count) + ",";
+        result += "\"v2_send_failure_count\":" + std::to_string(m.v2_send_failure_count) + ",";
+        result += "\"release_pending_count\":" + std::to_string(m.release_pending_count) + ",";
+        result += "\"release_timeout_count\":" + std::to_string(m.release_timeout_count) + ",";
+        result += "\"release_reclaimed_count\":" + std::to_string(m.release_reclaimed_count) + ",";
+        result += "\"disconnection_count\":" + std::to_string(m.disconnection_count) + ",";
+        result += "\"recovery_attempt_count\":" + std::to_string(m.recovery_attempt_count) + ",";
+        result += "\"current_state\":" + std::to_string(m.current_state) + ",";
+        result += "\"source_degraded\":" + std::string(m.source_degraded ? "true" : "false") + ",";
+        result += "\"source_requested_fps\":" + std::to_string(m.source_requested_fps) + ",";
+        result += "\"source_current_target_fps\":" + std::to_string(m.source_current_target_fps) + ",";
+        result += "\"source_degradation_count\":" + std::to_string(m.source_degradation_count) + ",";
+        result += "\"source_degradation_recovery_count\":" + std::to_string(m.source_degradation_recovery_count) + ",";
+        result += "\"source_degradation_failure_count\":" + std::to_string(m.source_degradation_failure_count) + "}";
+    }
+
+    const uint64_t v2_sent = stats ? stats->v2_sent_frames.load() : 0;
+    const uint64_t v2_fail = stats ? stats->v2_send_fail_count.load() : 0;
+    const uint64_t rel_pending = release_server ? static_cast<uint64_t>(release_server->PendingFrameCount()) : 0;
+    const auto rs = release_server ? release_server->GetServerStats() : camera_subsystem::ipc::CameraReleaseServerStats{};
+
+    result += "],\"global\":{"
+              "\"v2_sent_frame_count\":" + std::to_string(v2_sent) + ","
+              "\"v2_send_failure_count\":" + std::to_string(v2_fail) + ","
+              "\"release_pending_count\":" + std::to_string(rel_pending) + ","
+              "\"release_timeout_count\":" + std::to_string(rs.expired_reclaims) + ","
+              "\"release_reclaimed_count\":" + std::to_string(rs.reclaimed_frames) + "}}";
+
+    return result;
+}
+
+bool AppendMetricsLine(const std::string& path, const std::vector<StreamMetrics>& streams,
+                       const PublisherStats* stats, CameraReleaseServer* release_server)
+{
+    const std::string line = MetricsToJsonLine(streams, stats, release_server);
+    const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0)
+    {
+        return false;
+    }
+    const bool ok = WriteFull(fd, line.data(), line.size()) &&
+                    WriteFull(fd, "\n", 1);
+    close(fd);
+    return ok;
+}
+
 struct PendingLeaseKey
 {
     uint32_t stream_id = 0;
@@ -481,6 +630,7 @@ struct CameraStreamRuntime
     std::unordered_map<PendingLeaseKey, std::shared_ptr<FrameLease>, PendingLeaseKeyHash>
         pending_leases;
     bool callbacks_configured = false;
+    bool metrics_providers_registered = false;
 };
 
 const char* SourceStateName(SourceState state)
@@ -551,10 +701,17 @@ int main(int argc, char* argv[])
     IoMethod io_method = IoMethod::kMmap;
     DataPlaneMode data_plane_mode = DataPlaneMode::kV1Copy;
     bool enable_auto_recovery = false;
+    bool enable_degradation = false;
+    uint32_t degradation_target_fps = 15;
+    uint32_t degradation_window_sec = 5;
+    uint32_t degradation_recovery_frames = 30;
     uint32_t disconnect_threshold = 3;
     uint32_t max_recovery_attempts = 10;
     uint32_t recovery_backoff_base_ms = 1000;
     uint32_t recovery_backoff_max_ms = 30000;
+    std::string metrics_history_path;
+    std::string metrics_snapshot_path;
+    uint32_t metrics_history_interval_sec = 5;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -626,14 +783,56 @@ int main(int argc, char* argv[])
             ++i;
             recovery_backoff_max_ms = static_cast<uint32_t>(std::strtoul(argv[i], nullptr, 10));
         }
+        else if (arg == "--enable-degradation")
+        {
+            enable_degradation = true;
+        }
+        else if (arg == "--degradation-target-fps" && i + 1 < argc)
+        {
+            ++i;
+            degradation_target_fps = static_cast<uint32_t>(std::strtoul(argv[i], nullptr, 10));
+        }
+        else if (arg == "--degradation-window-sec" && i + 1 < argc)
+        {
+            ++i;
+            degradation_window_sec = static_cast<uint32_t>(std::strtoul(argv[i], nullptr, 10));
+        }
+        else if (arg == "--degradation-recovery-frames" && i + 1 < argc)
+        {
+            ++i;
+            degradation_recovery_frames = static_cast<uint32_t>(std::strtoul(argv[i], nullptr, 10));
+        }
+        else if (arg == "--metrics-history-path" && i + 1 < argc)
+        {
+            ++i;
+            metrics_history_path = argv[i];
+        }
+        else if (arg == "--metrics-snapshot-path" && i + 1 < argc)
+        {
+            ++i;
+            metrics_snapshot_path = argv[i];
+        }
+        else if (arg == "--metrics-history-interval" && i + 1 < argc)
+        {
+            ++i;
+            metrics_history_interval_sec = static_cast<uint32_t>(std::strtoul(argv[i], nullptr, 10));
+            if (metrics_history_interval_sec == 0)
+            {
+                metrics_history_interval_sec = 5;
+            }
+        }
         else if (arg == "--help" || arg == "-h")
         {
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
                                 "usage: %s [device_path] [control_socket] [data_socket] "
                                 "[--io-method mmap|dmabuf] [--data-plane v1|v2] "
                                 "[--release-socket path] [--enable-auto-recovery] "
+                                "[--enable-degradation] [--degradation-target-fps n] "
+                                "[--degradation-window-sec n] [--degradation-recovery-frames n] "
                                 "[--disconnect-threshold n] [--max-recovery-attempts n] "
-                                "[--recovery-backoff-ms ms] [--recovery-backoff-max-ms ms]",
+                                "[--recovery-backoff-ms ms] [--recovery-backoff-max-ms ms] "
+                                "[--metrics-history-path path] [--metrics-snapshot-path path] "
+                                "[--metrics-history-interval sec]",
                                 argv[0]);
             return 0;
         }
@@ -658,12 +857,14 @@ int main(int argc, char* argv[])
 
     PlatformLogger::Log(LogLevel::kInfo, "publisher",
                         "publisher start, device=%s, control_socket=%s, data_socket=%s, "
-                        "release_socket=%s, io_method=%s, data_plane=%s, auto_recovery=%s",
+                        "release_socket=%s, io_method=%s, data_plane=%s, auto_recovery=%s, "
+                        "degradation=%s",
                         device_path.c_str(), control_socket_path.c_str(), data_socket_path.c_str(),
                         release_socket_path.c_str(),
                         io_method == IoMethod::kDmaBuf ? "dmabuf" : "mmap",
                         data_plane_mode == DataPlaneMode::kV2DmaBuf ? "v2" : "v1",
-                        enable_auto_recovery ? "enabled" : "disabled");
+                        enable_auto_recovery ? "enabled" : "disabled",
+                        enable_degradation ? "enabled" : "disabled");
 
     DataSocketServer data_server;
     DataPlaneV2SocketServer data_v2_server;
@@ -688,6 +889,10 @@ int main(int argc, char* argv[])
     config.buffer_count_ = 4;
     config.io_method_ = static_cast<uint32_t>(io_method);
     config.enable_auto_recovery = enable_auto_recovery;
+    config.enable_degradation = enable_degradation ? 1u : 0u;
+    config.degradation_target_fps = degradation_target_fps;
+    config.degradation_window_sec = degradation_window_sec;
+    config.degradation_recovery_frames = degradation_recovery_frames;
     config.disconnect_threshold = std::max<uint32_t>(1, disconnect_threshold);
     config.max_recovery_attempts = std::max<uint32_t>(1, max_recovery_attempts);
     config.recovery_backoff_base_ms = std::max<uint32_t>(1, recovery_backoff_base_ms);
@@ -700,6 +905,7 @@ int main(int argc, char* argv[])
     std::unordered_map<std::string, std::shared_ptr<CameraStreamRuntime>> runtimes_by_stream;
     std::unordered_map<uint32_t, std::weak_ptr<CameraStreamRuntime>> runtimes_by_camera_id;
     CameraReleaseServer release_server(std::chrono::milliseconds(1000));
+    DataPlaneV2MetricsProvider dp_metrics_provider(&stats, &release_server);
     if (io_method == IoMethod::kDmaBuf)
     {
         if (!release_server.Start(
@@ -901,7 +1107,6 @@ int main(int argc, char* argv[])
                     configure_runtime_callbacks(runtime);
                     runtimes_by_stream.emplace(stream_id, runtime);
                     runtimes_by_camera_id[identity.camera_id] = runtime;
-                    metrics_aggregator.RegisterProvider(stream_id, &runtime->source);
                 }
                 else
                 {
@@ -938,6 +1143,13 @@ int main(int argc, char* argv[])
                 return false;
             }
 
+            if (!runtime->metrics_providers_registered)
+            {
+                metrics_aggregator.RegisterProvider(stream_id, &runtime->source);
+                metrics_aggregator.RegisterProvider(stream_id, &dp_metrics_provider);
+                runtime->metrics_providers_registered = true;
+            }
+
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
                                 "CameraSource started, stream=%s camera_id=%u device=%s",
                                 identity.stream_id.data(), identity.camera_id,
@@ -958,7 +1170,12 @@ int main(int argc, char* argv[])
             }
             if (runtime)
             {
-                metrics_aggregator.UnregisterProvider(identity.stream_id.data(), &runtime->source);
+                if (runtime->metrics_providers_registered)
+                {
+                    metrics_aggregator.UnregisterProvider(identity.stream_id.data(), &runtime->source);
+                    metrics_aggregator.UnregisterProvider(identity.stream_id.data(), &dp_metrics_provider);
+                    runtime->metrics_providers_registered = false;
+                }
                 runtime->source.Stop();
             }
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
@@ -1099,6 +1316,42 @@ int main(int argc, char* argv[])
                 elapsed_sec, frames, fps, data_server.GetClientCount(), stats.sent_bytes.load(),
                 stats.send_fail_count.load(), SourceStateName(source_status.state),
                 source_status.disconnections, source_status.recovery_attempts);
+        }
+
+        // Append metrics history line every N seconds
+        if (!metrics_history_path.empty() && elapsed_sec % metrics_history_interval_sec == 0)
+        {
+            const auto all_metrics = metrics_aggregator.GetAllStreamMetrics();
+            if (!AppendMetricsLine(metrics_history_path, all_metrics, &stats, &release_server))
+            {
+                PlatformLogger::Log(LogLevel::kWarning, "publisher",
+                                    "failed to append metrics history line to %s",
+                                    metrics_history_path.c_str());
+            }
+        }
+    }
+
+    // Write final snapshot before stopping servers
+    if (!metrics_snapshot_path.empty())
+    {
+        const auto all_metrics = metrics_aggregator.GetAllStreamMetrics();
+        const std::string line = MetricsToJsonLine(all_metrics, &stats, &release_server);
+        const int fd = open(metrics_snapshot_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0)
+        {
+            if (!WriteFull(fd, line.data(), line.size()) || !WriteFull(fd, "\n", 1))
+            {
+                PlatformLogger::Log(LogLevel::kWarning, "publisher",
+                                    "failed to write final metrics snapshot to %s",
+                                    metrics_snapshot_path.c_str());
+            }
+            close(fd);
+        }
+        else
+        {
+            PlatformLogger::Log(LogLevel::kWarning, "publisher",
+                                "failed to open metrics snapshot path %s",
+                                metrics_snapshot_path.c_str());
         }
     }
 

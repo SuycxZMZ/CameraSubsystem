@@ -61,6 +61,14 @@ struct StreamMetrics
     uint64_t disconnection_count = 0;    // 断连发生次数
     uint64_t recovery_attempt_count = 0; // 恢复尝试总次数
     uint32_t current_state = 0;          // 当前 SourceState 值
+
+    // ---- 降级指标 (CameraSource 负责) ----
+    bool source_degraded = false;           // 是否处于降级模式
+    uint32_t source_requested_fps = 0;      // 原始请求帧率
+    uint32_t source_current_target_fps = 0; // 当前目标帧率
+    uint64_t source_degradation_count = 0;       // 降级触发次数
+    uint64_t source_degradation_recovery_count = 0; // 降级恢复次数
+    uint64_t source_degradation_failure_count = 0;  // 降级/恢复失败次数
 };
 
 /**

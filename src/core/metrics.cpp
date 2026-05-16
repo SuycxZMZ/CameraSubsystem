@@ -121,7 +121,9 @@ std::string MetricsAggregator::FormatForLog(const StreamMetrics& metrics)
         " | leases=%zu | lease_exhausted=%" PRIu64 " | queue=%zu | subscribers=%zu"
         " | v2_sent=%" PRIu64 " | v2_fail=%" PRIu64
         " | release_pending=%" PRIu64 " | release_timeout=%" PRIu64
-        " | release_reclaimed=%" PRIu64,
+        " | release_reclaimed=%" PRIu64
+        " | degraded=%u | req_fps=%u | cur_fps=%u"
+        " | degrade=%" PRIu64 " | degrade_rec=%" PRIu64 " | degrade_fail=%" PRIu64,
         metrics.stream_id.c_str(),
         metrics.capture_frame_count,
         metrics.capture_dropped_count,
@@ -134,7 +136,13 @@ std::string MetricsAggregator::FormatForLog(const StreamMetrics& metrics)
         metrics.v2_send_failure_count,
         metrics.release_pending_count,
         metrics.release_timeout_count,
-        metrics.release_reclaimed_count);
+        metrics.release_reclaimed_count,
+        metrics.source_degraded ? 1u : 0u,
+        metrics.source_requested_fps,
+        metrics.source_current_target_fps,
+        metrics.source_degradation_count,
+        metrics.source_degradation_recovery_count,
+        metrics.source_degradation_failure_count);
 
     if (n < 0 || static_cast<size_t>(n) >= sizeof(buffer))
     {
