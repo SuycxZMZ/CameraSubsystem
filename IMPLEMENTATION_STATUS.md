@@ -328,7 +328,7 @@ flowchart TB
    - 如果驱动在 streaming 状态下拒绝 `VIDIOC_S_PARM`，继续保持 CaptureLoop 单线程 STREAMOFF/S_PARM/QBUF/STREAMON 策略。
 
 3. **热插拔能力发现与设备重枚举策略**
-   - 设备发现与恢复 M0/M1/M2a/M2b 均已完成。M2b start 失败路径重绑定已通过板端实证（错误路径 `/dev/video99` → 真实 USB 节点重绑定成功），默认关闭（`--enable-device-rebind-on-start-failure`）。M2b 增加 `stable_physical_id` 不可用时的 USB 候选推断。下一阶段入口已冻结：暂不做 normal streaming 热切换，只允许 `CameraSource` recovery failed hook 或 status/control refresh 二选一先设计。详见 [docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md](docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md)。
+   - 设备发现与恢复 M0/M1/M2a/M2b/M3 均已完成。M2b start 失败路径重绑定已通过板端实证（错误路径 `/dev/video99` → 真实 USB 节点重绑定成功），默认关闭（`--enable-device-rebind-on-start-failure`）。M3 recovery failed hook 已实现：CameraSource 恢复失败时回调 publisher runtime 触发重绑定，默认关闭（`--enable-device-rebind-on-recovery-failure`）。下一阶段入口：方向 B（status/control refresh）暂不实现。详见 [docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md](docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md)。
 
 ### P2：暂缓或只做轻量维护
 
@@ -503,6 +503,7 @@ flowchart TB
 - [x] 降级策略（ARCH-008）：已完成；RK3576 `/dev/video45` USB UVC、`mmap/v1` 路径 enable=1 降级/恢复/Stop 清理验证通过；DMA-BUF 重配置策略待后续单独验证 ✅ 2026-05-13
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
 - [x] M2b 启动失败路径设备重绑定板端实证通过 ✅ 2026-05-16
+- [x] M3 CameraSource 恢复失败重绑定 hook 已实现 ✅ 2026-05-16
 
 ## 贡献指南
 

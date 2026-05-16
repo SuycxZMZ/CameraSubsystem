@@ -454,7 +454,16 @@ M2b 增加了 `stable_physical_id` 不可用时的 USB 候选推断：当 `stabl
 M2b 收口完成后，明确以下约束：
 
 1. 暂不在 normal `Streaming` 状态下做设备路径热切换。
-2. 下一阶段只允许考虑两个方向，二选一先设计：
-   - **方向 A：** `CameraSource` recovery failed hook — 在 `CameraSource` 恢复失败时回调 publisher runtime，触发 `TryRebindRuntimeDevice`。
-   - **方向 B：** status/control refresh — 通过控制面命令手动触发设备发现刷新和重绑定。
-3. 在方向 A 或 B 的设计评审通过前，不编码任何新重绑定触发路径。
+2. **方向 A（recovery failed hook）已实现（M3）：** `CameraSource` 恢复失败时回调 publisher runtime，触发 `TryRebindRuntimeDevice`。默认关闭（`--enable-device-rebind-on-recovery-failure`）。
+3. **方向 B（status/control refresh）暂不实现：** 通过控制面命令手动触发设备发现刷新和重绑定，留作后续需求。
+4. 在方向 B 设计评审通过前，不编码任何新重绑定触发路径。
+
+### 13.8 M3 recovery failed hook 设计摘要
+
+M3 在 M2b 基础上新增重绑定触发路径：CameraSource 恢复失败时。
+
+- **CameraSource 新增 `SetRecoveryFailedHook` 接口**：允许外部注册回调，在 MonitorLoop 恢复尝试耗尽时通知。
+- **MonitorLoop 在进入 kPermanentFailure 前调用 hook**：给 publisher runtime 一次重绑定机会。hook 成功后 state 变为 kStreaming，不进入 kPermanentFailure。
+- **publisher 注册 hook 并调用 TryRebind**：复用 M2b 的 `TryRebindRuntimeDeviceOnStartFailure`，`last_rebind_reason` 为 `"recovery_failed"`。
+- **默认关闭**：`--enable-device-rebind-on-recovery-failure`，与 M2b 一致。
+- **板端验证**：RK3576 60 秒 lifecycle smoke PASS（recovery_failure_rebind=enabled），正常路径不破坏。recovery failed hook 的完整端到端验证需物理拔插 USB 摄像头触发断连恢复失败。
