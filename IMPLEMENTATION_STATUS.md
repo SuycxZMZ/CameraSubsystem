@@ -323,6 +323,7 @@ flowchart TB
 
 2. **DMA-BUF 降级重配置验证**
    - 当前 `mmap/v1` 降级/恢复已完成，DMA-BUF active lease 场景仍需单独验证。
+   - 验证设计见 [docs/design/DMABUF_DEGRADATION_RECONFIG_VALIDATION_DESIGN.md](docs/design/DMABUF_DEGRADATION_RECONFIG_VALIDATION_DESIGN.md)，编码前先确认 slow-consumer smoke 的降级参数透传和 active lease skip 判定口径。
    - 验证重点是 active lease 未 release 时跳过重配置、后续重试、Stop 清理和 fd drift。
    - 如果驱动在 streaming 状态下拒绝 `VIDIOC_S_PARM`，继续保持 CaptureLoop 单线程 STREAMOFF/S_PARM/QBUF/STREAMON 策略。
 
