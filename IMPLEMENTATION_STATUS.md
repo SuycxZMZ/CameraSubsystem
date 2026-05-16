@@ -329,7 +329,7 @@ flowchart TB
 
 3. **热插拔能力发现与设备重枚举策略**
    - USB 物理拔插恢复已经通过，但仍假设设备回到原路径 `/dev/video45`。
-   - device discovery 设计见 [docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md](docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md)：下一步先评审 USB 物理身份匹配、节点变化重绑定、MIPI readiness failed 状态暴露，再决定是否进入脚本层扫描报告或 runtime 接入。
+   - device discovery 设计见 [docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md](docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md)：脚本层扫描报告已接入并通过 RK3576 验证，当前 USB 摄像头可由 `vendor_id=32e6 product_id=9221 serial=202509021958` 稳定识别；下一步先评审 `StreamMetrics/status` 是否新增 discovery 字段，再进入 runtime 接入。
 
 ### P2：暂缓或只做轻量维护
 

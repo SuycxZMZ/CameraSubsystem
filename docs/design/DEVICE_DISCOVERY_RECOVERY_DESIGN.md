@@ -1,9 +1,9 @@
 # 设备发现与重枚举恢复设计
 
-**文档版本:** v0.1<br>
+**文档版本:** v0.3<br>
 **最后更新:** 2026-05-16<br>
 **设计范围:** USB 热插拔后设备节点变化、能力变化、MIPI pipeline 缺失时的发现、恢复和状态暴露策略<br>
-**当前状态:** 设计阶段，未进入代码开发<br>
+**当前状态:** 脚本层扫描报告已接入并通过 RK3576 验证；尚未进入 runtime 接入<br>
 **关联文档:** [../MULTI_CAMERA_ARCHITECTURE.md](../MULTI_CAMERA_ARCHITECTURE.md)、[../ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md)、[../../IMPLEMENTATION_STATUS.md](../../IMPLEMENTATION_STATUS.md)
 
 > **文档硬规范**
@@ -95,6 +95,25 @@ MIPI 匹配优先级：
 | `VIDIOC_ENUM_FMT` | 判断目标 pixel format 是否仍可用 |
 | `media-ctl` 或 media graph | 后续 MIPI pipeline readiness |
 
+脚本层扫描入口：
+
+```bash
+BOARD_HOST=192.168.31.9 BOARD_USER=luckfox BOARD_PASSWORD=luckfox \
+  ./scripts/rk3576-device-discovery-scan.sh
+```
+
+该入口只输出 `device_discovery.tsv` 和 `device_discovery_report.json`，用于观察当前 `/dev/videoX`、driver、card/name、USB vendor/product/serial、sysfs physical path 等信息。它不做 PASS/FAIL 判定，不接入 board suite，避免测试脚本过度扩张。
+
+RK3576 当前扫描结论：
+
+| 项 | 结果 |
+|----|------|
+| video 节点数量 | 47 |
+| USB 摄像头节点 | `/dev/video45`、`/dev/video46` |
+| USB driver/name | `uvcvideo` / `WebCamera: WebCamera` |
+| USB 物理身份 | `vendor_id=32e6 product_id=9221 serial=202509021958` |
+| USB physical path | `/sys/devices/platform/23400000.usb/xhci-hcd.0.auto/usb1/1-1/1-1.2/1-1.2:1.0` |
+
 扫描触发时机：
 
 1. publisher 启动时构建初始 device registry。
@@ -173,6 +192,8 @@ stateDiagram-v2
 - [x] 明确 `/dev/videoX` 不能作为生产唯一身份。
 - [x] 明确 USB 匹配优先级与歧义处理。
 - [x] 明确 MIPI readiness 与 live 的边界。
-- [ ] 评审是否先在脚本层增加设备扫描报告，而不是直接接入 runtime。
+- [x] 评审是否先在脚本层增加设备扫描报告，而不是直接接入 runtime。
+- [x] 已新增 `scripts/rk3576-device-discovery-scan.sh`，仅生成扫描报告，不接入 smoke suite。
+- [x] RK3576 扫描报告已验证可生成和解析。
 - [ ] 评审 `StreamMetrics` 是否需要新增 discovery 字段。
 - [ ] 确认是否有条件制造 `/dev/videoX` 变化的板端测试。
