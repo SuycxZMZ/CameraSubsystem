@@ -1,6 +1,6 @@
 # CameraSubsystem 实现状态
 
-**更新日期:** 2026-05-14
+**更新日期:** 2026-05-16
 
 > **文档硬规范**
 >
@@ -328,10 +328,7 @@ flowchart TB
    - 如果驱动在 streaming 状态下拒绝 `VIDIOC_S_PARM`，继续保持 CaptureLoop 单线程 STREAMOFF/S_PARM/QBUF/STREAMON 策略。
 
 3. **热插拔能力发现与设备重枚举策略**
-   - USB 物理拔插恢复已经通过，但仍假设设备回到原路径 `/dev/video45`。
-   - device discovery 设计见 [docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md](docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md)：脚本层扫描报告已接入并通过 RK3576 验证，当前 USB 摄像头可由 `vendor_id=32e6 product_id=9221 serial=202509021958` 稳定识别；已明确字符串类 discovery 字段进入 status/log，`StreamMetrics` 暂不扩展字符串字段。
-   - Runtime M0/M1 已完成小步接入：新增 video device identity 解析工具，publisher 在 stream start 路径输出当前 `device_path`、driver/name、bus_info、USB vendor/product/serial、`physical_id`；`--device-discovery-status-path` 可选输出状态 JSON。RK3576 `/dev/video45` 最小 lifecycle smoke 用 `DEVICE_DISCOVERY_STATUS=1` 验收即可，不扩大 board suite；当前仍不做自动重绑定、不改变控制协议。
-   - M2 受控重绑定已完成最小实现：显式传入 `--enable-device-rebind-on-start-failure` 后，自动切换只允许在 start callback 的 `Initialize()` / `Start()` 失败路径发生，必须已有可信 `stable_physical_id`、唯一 capture 候选且无 pending lease；正常 `Streaming` 状态不做热切换。M2a 扫描工具与候选匹配单测已接入，M2b 仍待制造节点变化场景做板端实证。
+   - 设备发现与恢复 M0/M1/M2a/M2b 均已完成。M2b start 失败路径重绑定已通过板端实证（错误路径 `/dev/video99` → 真实 USB 节点重绑定成功），默认关闭（`--enable-device-rebind-on-start-failure`）。M2b 增加 `stable_physical_id` 不可用时的 USB 候选推断。下一阶段入口已冻结：暂不做 normal streaming 热切换，只允许 `CameraSource` recovery failed hook 或 status/control refresh 二选一先设计。详见 [docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md](docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md)。
 
 ### P2：暂缓或只做轻量维护
 
@@ -505,6 +502,7 @@ flowchart TB
 - [x] 设备断连恢复状态机（ARCH-007）：自动恢复默认关闭，`SourceState` / Metrics / capture-monitor 双线程已落地，RK3576 smoke 与 USB 物理拔插/重插恢复实测通过 ✅ 2026-05-13
 - [x] 降级策略（ARCH-008）：已完成；RK3576 `/dev/video45` USB UVC、`mmap/v1` 路径 enable=1 降级/恢复/Stop 清理验证通过；DMA-BUF 重配置策略待后续单独验证 ✅ 2026-05-13
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
+- [x] M2b 启动失败路径设备重绑定板端实证通过 ✅ 2026-05-16
 
 ## 贡献指南
 
@@ -527,5 +525,5 @@ flowchart TB
 
 ---
 
-**最后更新:** 2026-05-14
-**文档版本:** v0.4
+**最后更新:** 2026-05-16
+**文档版本:** v0.5

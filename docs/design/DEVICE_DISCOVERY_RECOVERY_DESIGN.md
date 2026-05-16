@@ -31,6 +31,7 @@
 - [11. M1 状态快照编码方案](#11-m1-状态快照编码方案)
 - [12. 自动化测试快速收口](#12-自动化测试快速收口)
 - [13. M2 受控重绑定设计](#13-m2-受控重绑定设计)
+- [13.7 下一阶段入口冻结](#137-下一阶段入口冻结)
 
 ---
 
@@ -228,6 +229,8 @@ M0 的价值是把脚本层已经验证过的身份模型接入 runtime，让后
 device discovery snapshot: stream=default0 device=/dev/video45 exists=1 physical_id=usb:32e6:9221:202509021958 driver=uvcvideo name=WebCamera: WebCamera bus_info=usb-xhci-hcd.0.auto-1.2 subsystem=usb vendor_id=32e6 product_id=9221 serial=202509021958
 ```
 
+**状态：✅ 已完成**
+
 ### 10.2 M1：状态快照与候选扫描
 
 M1 只在 M0 通过后启动：
@@ -239,6 +242,8 @@ M1 只在 M0 通过后启动：
 | 输出形式 | 后续 control/status snapshot 或独立 JSON 状态文件 |
 | 风险边界 | 仍不自动替换 `CameraSource` 的 `device_path` |
 
+**状态：✅ 已完成**
+
 ### 10.3 M2：受控重绑定
 
 M2 需要单独评审后再写代码：
@@ -247,6 +252,8 @@ M2 需要单独评审后再写代码：
 2. 切换必须发生在 stream 停止或恢复窗口内，不能在 DQBUF/QBUF 主循环中直接替换 fd。
 3. 同型号多实例无 serial 时必须进入 `Ambiguous`，禁止自动绑定。
 4. 能力变化默认进入 `CapabilityChanged`，禁止自动改分辨率或 pixel format。
+
+**状态：✅ M2a 扫描工具已完成，M2b start 失败路径重绑定已完成（板端实证通过）**
 
 ## 11. M1 状态快照编码方案
 
@@ -436,13 +443,18 @@ M2 仍先在 publisher 示例内实现，不下沉为库级恢复策略：
 
 ### 13.6 当前不编码的原因
 
-M2 仍缺两个前置确认：
+M2b 已完成板端实证（2026-05-16）：使用错误路径 `/dev/video99` 启动 publisher 并打开 `--enable-device-rebind-on-start-failure`，重绑定到真实 USB 节点 `/dev/video45` 成功，`rebind_count=1`，订阅端正常收帧。
 
-1. 当前 `CameraSource` 的恢复失败信号没有明确 callback 给 publisher runtime。若直接轮询状态，容易引入竞态和额外线程。
-2. 当前只有一个 USB 摄像头，无法真实验证 `Ambiguous`。因此第一版 M2 只能做“原节点缺失后唯一匹配”的最小闭环。
-
-M2a 已完成：`ScanVideoDevices()` 可枚举当前 `/sys/class/video4linux/video*`，`FindUniqueVideoDeviceByPhysicalId()` 可基于原始 `physical_id` 和 capture capability 判断唯一匹配、缺失或歧义，并有单元测试覆盖唯一匹配、重复歧义、`unknown` 不匹配和同一 UVC 设备的非 capture companion node 过滤。
-
-M2b 已进入最小实现：仅在 `camera_publisher_example` 的 start callback 失败路径触发，并且必须显式传入 `--enable-device-rebind-on-start-failure`。如果旧路径 `Initialize()` 或 `Start()` 失败，且 runtime 已有可信 `stable_physical_id`，publisher 会扫描当前 video 节点并在唯一 capture 候选存在时尝试 `Stop()` -> `SetDevicePath(new_path)` -> `Initialize()` -> `Start()`。正常 `Streaming` 状态下仍不做主动切换。
+M2b 增加了 `stable_physical_id` 不可用时的 USB 候选推断：当 `stable_physical_id` 为空或 `unknown` 时，扫描所有 video 设备，若只有一个 USB capture 候选（`subsystem=usb`）且路径与失败路径不同，则用其 `physical_id` 作为重绑定依据。多 USB 候选时仍进入 `Missing` 状态，不自动绑定。
 
 默认关闭该能力是刻意选择：M2b 改变的是设备路径绑定行为，必须由板端验证或明确部署策略打开；普通 publisher 启动继续保持原有失败语义。
+
+### 13.7 下一阶段入口冻结
+
+M2b 收口完成后，明确以下约束：
+
+1. 暂不在 normal `Streaming` 状态下做设备路径热切换。
+2. 下一阶段只允许考虑两个方向，二选一先设计：
+   - **方向 A：** `CameraSource` recovery failed hook — 在 `CameraSource` 恢复失败时回调 publisher runtime，触发 `TryRebindRuntimeDevice`。
+   - **方向 B：** status/control refresh — 通过控制面命令手动触发设备发现刷新和重绑定。
+3. 在方向 A 或 B 的设计评审通过前，不编码任何新重绑定触发路径。
