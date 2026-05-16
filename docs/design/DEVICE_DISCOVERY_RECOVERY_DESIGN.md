@@ -1,6 +1,6 @@
 # 设备发现与重枚举恢复设计
 
-**文档版本:** v0.8<br>
+**文档版本:** v0.9<br>
 **最后更新:** 2026-05-16<br>
 **设计范围:** USB 热插拔后设备节点变化、能力变化、MIPI pipeline 缺失时的发现、恢复和状态暴露策略<br>
 **当前状态:** 脚本层扫描报告、runtime M0 身份日志、M1 状态快照与 M2a 扫描/匹配工具已接入；M2b 自动重绑定尚未编码<br>
@@ -370,7 +370,7 @@ M2 的目标是解决 USB 摄像头重插后 `/dev/videoX` 变化的问题，但
 
 1. stream 已经进入 `Disconnected`、`Retrying` 或 start 失败路径，不能在正常 `Streaming` 中主动切换。
 2. 原 `physical_id` 已知且不是 `unknown`。
-3. 主动扫描当前 `/sys/class/video4linux/video*` 后，只有一个候选节点的 `physical_id` 与原值一致。
+3. 主动扫描当前 `/sys/class/video4linux/video*` 后，只有一个具备 `V4L2_CAP_VIDEO_CAPTURE` 或 `V4L2_CAP_VIDEO_CAPTURE_MPLANE` 的候选节点与原 `physical_id` 一致。
 4. 候选节点通过 `VIDIOC_QUERYCAP`，且 driver/name/bus_info 至少能被读取。
 5. 候选节点能力与当前 `CameraConfig` 兼容。第一版只检查目标 pixel format 与尺寸是否能枚举到；不能兼容则进入 `CapabilityChanged`。
 6. DataPlaneV2 pending leases 为 0，release server 没有未决帧；否则等待一个短窗口后仍未清空则进入 `Missing` 或 `RebindBlocked`。
@@ -441,6 +441,6 @@ M2 仍缺两个前置确认：
 1. 当前 `CameraSource` 的恢复失败信号没有明确 callback 给 publisher runtime。若直接轮询状态，容易引入竞态和额外线程。
 2. 当前只有一个 USB 摄像头，无法真实验证 `Ambiguous`。因此第一版 M2 只能做“原节点缺失后唯一匹配”的最小闭环。
 
-M2a 已完成：`ScanVideoDevices()` 可枚举当前 `/sys/class/video4linux/video*`，`FindUniqueVideoDeviceByPhysicalId()` 可基于原始 `physical_id` 判断唯一匹配、缺失或歧义，并有单元测试覆盖唯一匹配、重复歧义和 `unknown` 不匹配。
+M2a 已完成：`ScanVideoDevices()` 可枚举当前 `/sys/class/video4linux/video*`，`FindUniqueVideoDeviceByPhysicalId()` 可基于原始 `physical_id` 和 capture capability 判断唯一匹配、缺失或歧义，并有单元测试覆盖唯一匹配、重复歧义、`unknown` 不匹配和同一 UVC 设备的非 capture companion node 过滤。
 
-下一步如果继续编码，只能进入 **M2b：start 失败路径的受控重绑定**；仍不接入正常 streaming 状态下的主动切换。
+M2b 已进入最小实现：仅在 `camera_publisher_example` 的 start callback 失败路径触发。如果旧路径 `Initialize()` 或 `Start()` 失败，且 runtime 已有可信 `stable_physical_id`，publisher 会扫描当前 video 节点并在唯一 capture 候选存在时尝试 `Stop()` -> `SetDevicePath(new_path)` -> `Initialize()` -> `Start()`。正常 `Streaming` 状态下仍不做主动切换。

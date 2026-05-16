@@ -21,6 +21,7 @@ TEST(VideoDeviceDiscoveryTest, FormatIncludesStableFields)
     VideoDeviceDiscoveryInfo info;
     info.device_path = "/dev/video45";
     info.exists = true;
+    info.can_capture = true;
     info.physical_id = "usb:32e6:9221:202509021958";
     info.driver = "uvcvideo";
     info.name = "WebCamera: WebCamera";
@@ -33,6 +34,7 @@ TEST(VideoDeviceDiscoveryTest, FormatIncludesStableFields)
 
     EXPECT_NE(log.find("device=/dev/video45"), std::string::npos);
     EXPECT_NE(log.find("exists=1"), std::string::npos);
+    EXPECT_NE(log.find("can_capture=1"), std::string::npos);
     EXPECT_NE(log.find("physical_id=usb:32e6:9221:202509021958"), std::string::npos);
     EXPECT_NE(log.find("driver=uvcvideo"), std::string::npos);
     EXPECT_NE(log.find("serial=202509021958"), std::string::npos);
@@ -43,11 +45,13 @@ TEST(VideoDeviceDiscoveryTest, FindUniquePhysicalIdMatch)
     VideoDeviceDiscoveryInfo first;
     first.device_path = "/dev/video45";
     first.exists = true;
+    first.can_capture = true;
     first.physical_id = "usb:32e6:9221:202509021958";
 
     VideoDeviceDiscoveryInfo second;
     second.device_path = "/dev/video12";
     second.exists = true;
+    second.can_capture = true;
     second.physical_id = "usb:abcd:0001:other";
 
     const auto result = FindUniqueVideoDeviceByPhysicalId({first, second}, first.physical_id);
@@ -62,6 +66,7 @@ TEST(VideoDeviceDiscoveryTest, DuplicatePhysicalIdIsAmbiguous)
     VideoDeviceDiscoveryInfo first;
     first.device_path = "/dev/video45";
     first.exists = true;
+    first.can_capture = true;
     first.physical_id = "usb:32e6:9221:202509021958";
 
     VideoDeviceDiscoveryInfo second = first;
@@ -79,10 +84,33 @@ TEST(VideoDeviceDiscoveryTest, UnknownPhysicalIdNeverMatches)
     VideoDeviceDiscoveryInfo device;
     device.device_path = "/dev/video45";
     device.exists = true;
+    device.can_capture = true;
     device.physical_id = "unknown";
 
     const auto result = FindUniqueVideoDeviceByPhysicalId({device}, "unknown");
 
     EXPECT_FALSE(result.has_unique_match);
     EXPECT_EQ(result.candidate_count, 0U);
+}
+
+TEST(VideoDeviceDiscoveryTest, NonCaptureNodeDoesNotMatch)
+{
+    VideoDeviceDiscoveryInfo capture;
+    capture.device_path = "/dev/video45";
+    capture.exists = true;
+    capture.can_capture = true;
+    capture.physical_id = "usb:32e6:9221:202509021958";
+
+    VideoDeviceDiscoveryInfo metadata;
+    metadata.device_path = "/dev/video46";
+    metadata.exists = true;
+    metadata.can_capture = false;
+    metadata.physical_id = capture.physical_id;
+
+    const auto result =
+        FindUniqueVideoDeviceByPhysicalId({capture, metadata}, capture.physical_id);
+
+    EXPECT_TRUE(result.has_unique_match);
+    EXPECT_EQ(result.candidate_count, 1U);
+    EXPECT_EQ(result.device.device_path, "/dev/video45");
 }

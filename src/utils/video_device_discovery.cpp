@@ -119,6 +119,13 @@ void FillQueryCapInfo(const std::string& device_path, VideoDeviceDiscoveryInfo* 
             info->name = reinterpret_cast<const char*>(cap.card);
         }
         info->bus_info = reinterpret_cast<const char*>(cap.bus_info);
+        info->capabilities = cap.capabilities;
+        info->device_capabilities = (cap.capabilities & V4L2_CAP_DEVICE_CAPS) != 0
+                                        ? cap.device_caps
+                                        : cap.capabilities;
+        info->can_capture =
+            (info->device_capabilities & V4L2_CAP_VIDEO_CAPTURE) != 0 ||
+            (info->device_capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE) != 0;
     }
 
     close(fd);
@@ -218,7 +225,7 @@ VideoDeviceMatchResult FindUniqueVideoDeviceByPhysicalId(
 
     for (const auto& device : devices)
     {
-        if (!device.exists || device.physical_id != physical_id)
+        if (!device.exists || !device.can_capture || device.physical_id != physical_id)
         {
             continue;
         }
@@ -242,6 +249,7 @@ std::string FormatVideoDeviceDiscoveryForLog(const VideoDeviceDiscoveryInfo& inf
 {
     std::ostringstream output;
     output << "device=" << info.device_path << " exists=" << (info.exists ? 1 : 0)
+           << " can_capture=" << (info.can_capture ? 1 : 0)
            << " physical_id=" << info.physical_id << " driver=" << info.driver
            << " name=" << info.name << " bus_info=" << info.bus_info
            << " subsystem=" << info.subsystem << " vendor_id=" << info.vendor_id

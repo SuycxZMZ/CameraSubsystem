@@ -8,6 +8,7 @@
 #ifndef CAMERA_SUBSYSTEM_UTILS_VIDEO_DEVICE_DISCOVERY_H
 #define CAMERA_SUBSYSTEM_UTILS_VIDEO_DEVICE_DISCOVERY_H
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,9 @@ struct VideoDeviceDiscoveryInfo
     std::string serial;
     std::string physical_path;
     std::string physical_id;
+    uint32_t capabilities = 0;
+    uint32_t device_capabilities = 0;
+    bool can_capture = false;
     bool exists = false;
 };
 
