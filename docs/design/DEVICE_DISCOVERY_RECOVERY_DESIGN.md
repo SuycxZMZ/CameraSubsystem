@@ -1,9 +1,9 @@
 # 设备发现与重枚举恢复设计
 
-**文档版本:** v0.3<br>
+**文档版本:** v0.4<br>
 **最后更新:** 2026-05-16<br>
 **设计范围:** USB 热插拔后设备节点变化、能力变化、MIPI pipeline 缺失时的发现、恢复和状态暴露策略<br>
-**当前状态:** 脚本层扫描报告已接入并通过 RK3576 验证；尚未进入 runtime 接入<br>
+**当前状态:** 脚本层扫描报告已接入并通过 RK3576 验证；进入 runtime 最小身份解析接入<br>
 **关联文档:** [../MULTI_CAMERA_ARCHITECTURE.md](../MULTI_CAMERA_ARCHITECTURE.md)、[../ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md)、[../../IMPLEMENTATION_STATUS.md](../../IMPLEMENTATION_STATUS.md)
 
 > **文档硬规范**
@@ -27,6 +27,7 @@
 - [7. 控制面与 Metrics](#7-控制面与-metrics)
 - [8. 验证计划](#8-验证计划)
 - [9. 编码准入清单](#9-编码准入清单)
+- [10. Runtime 接入分阶段方案](#10-runtime-接入分阶段方案)
 
 ---
 
@@ -158,7 +159,13 @@ stateDiagram-v2
 
 ## 7. 控制面与 Metrics
 
-建议新增或扩展的可观测字段先在文档冻结，编码前再决定落点：
+Runtime 设备发现信息按以下原则落点：
+
+1. 字符串类身份字段（`current_device_path`、`physical_id`、`vendor_id`、`product_id`、`serial`、`physical_path`）进入 status/log/后续 control-plane snapshot，不进入 `StreamMetrics`。
+2. `StreamMetrics` 继续保持数值健康指标定位。后续如确实需要自动判定，只新增 `device_rebind_count`、`capability_change_count`、`discovery_failure_count` 这类数值计数器。
+3. `metrics_history.jsonl` 第一阶段不扩展 device registry 段，避免把设备枚举语义和帧流转健康判定耦合。
+
+建议新增或扩展的可观测字段先在文档冻结，再按阶段落地：
 
 | 字段 | 说明 |
 |------|------|
@@ -195,5 +202,41 @@ stateDiagram-v2
 - [x] 评审是否先在脚本层增加设备扫描报告，而不是直接接入 runtime。
 - [x] 已新增 `scripts/rk3576-device-discovery-scan.sh`，仅生成扫描报告，不接入 smoke suite。
 - [x] RK3576 扫描报告已验证可生成和解析。
-- [ ] 评审 `StreamMetrics` 是否需要新增 discovery 字段。
+- [x] 已评审 discovery 字段落点：字符串身份进入 status/log；`StreamMetrics` 暂不扩展字符串字段。
 - [ ] 确认是否有条件制造 `/dev/videoX` 变化的板端测试。
+
+## 10. Runtime 接入分阶段方案
+
+### 10.1 M0：启动期身份解析与日志
+
+M0 是当前可立即编码的最小主线接入点：
+
+| 项 | 策略 |
+|----|------|
+| 接入位置 | `camera_publisher_example` 的 stream start callback，`CameraSource::Initialize()` 前 |
+| 解析范围 | 当前 `endpoint.device_path` 对应的 video 节点 |
+| 数据来源 | `/sys/class/video4linux/video*/name`、`device/driver`、`device/subsystem`、USB 父节点 `idVendor/idProduct/serial`、`VIDIOC_QUERYCAP` |
+| 输出形式 | publisher 日志，包含 `stream_id`、`device_path`、`physical_id`、driver/name/bus_info |
+| 不做事项 | 不改 `CameraEndpoint`、不改 `StreamMetrics`、不自动扫描候选列表、不自动重绑定 |
+
+M0 的价值是把脚本层已经验证过的身份模型接入 runtime，让后续热插拔恢复日志可以明确“当前绑定的是哪个物理设备”。如果 M0 在 RK3576 上稳定，再进入 M1。
+
+### 10.2 M1：状态快照与候选扫描
+
+M1 只在 M0 通过后启动：
+
+| 项 | 策略 |
+|----|------|
+| Runtime registry | publisher 维护每个 `stream_id` 的 `configured_device_path`、`current_device_path`、`physical_id` |
+| 触发时机 | 启动、恢复失败、手动 refresh |
+| 输出形式 | 后续 control/status snapshot 或独立 JSON 状态文件 |
+| 风险边界 | 仍不自动替换 `CameraSource` 的 `device_path` |
+
+### 10.3 M2：受控重绑定
+
+M2 需要单独评审后再写代码：
+
+1. 只有唯一物理匹配时允许把 `current_device_path` 从旧节点切换到新节点。
+2. 切换必须发生在 stream 停止或恢复窗口内，不能在 DQBUF/QBUF 主循环中直接替换 fd。
+3. 同型号多实例无 serial 时必须进入 `Ambiguous`，禁止自动绑定。
+4. 能力变化默认进入 `CapabilityChanged`，禁止自动改分辨率或 pixel format。

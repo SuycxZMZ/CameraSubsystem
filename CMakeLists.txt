@@ -66,6 +66,7 @@ set(PLATFORM_SOURCES
 
 set(UTILS_SOURCES
     src/utils/signal_handler.cpp
+    src/utils/video_device_discovery.cpp
 )
 
 set(IPC_SOURCES

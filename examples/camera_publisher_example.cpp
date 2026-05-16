@@ -34,6 +34,7 @@
 #include "camera_subsystem/ipc/camera_data_ipc.h"
 #include "camera_subsystem/ipc/camera_data_plane_v2.h"
 #include "camera_subsystem/platform/platform_logger.h"
+#include "camera_subsystem/utils/video_device_discovery.h"
 
 #include <algorithm>
 #include <atomic>
@@ -82,6 +83,8 @@ using camera_subsystem::ipc::MakeCameraDataFrameDescriptorV2;
 using camera_subsystem::ipc::MakeCameraStreamIdentityFromEndpoint;
 using camera_subsystem::ipc::SendCameraDataFrameDescriptorV2;
 using camera_subsystem::platform::PlatformLogger;
+using camera_subsystem::utils::FormatVideoDeviceDiscoveryForLog;
+using camera_subsystem::utils::InspectVideoDevice;
 
 std::atomic<bool> g_running(true);
 
@@ -1126,6 +1129,12 @@ int main(int argc, char* argv[])
 
             runtime->source.SetStreamIdentity(identity);
             runtime->source.SetDevicePath(endpoint.device_path);
+
+            const auto discovery_info = InspectVideoDevice(endpoint.device_path);
+            PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                                "device discovery snapshot: stream=%s %s",
+                                identity.stream_id.data(),
+                                FormatVideoDeviceDiscoveryForLog(discovery_info).c_str());
 
             if (!runtime->source.Initialize(config))
             {
