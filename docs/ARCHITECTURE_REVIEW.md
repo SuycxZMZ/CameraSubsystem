@@ -231,7 +231,7 @@
 | ARCH-006 | 订阅者优先级静态 | 已完成 | 慢消费者检测：`consecutive_drops >= threshold` 标记 `is_slow_consumer`；worker 成功处理后重置；日志告警与恢复通知 |
 | ARCH-007 | 设备自动重连 | 已完成 | `CameraSource` 已新增 `SourceState`、断连/恢复 Metrics、capture/monitor 双线程和可控恢复配置；自动恢复默认关闭；RK3576 quick、DataPlaneV2 lifecycle、multi-camera-topology smoke 与 USB 物理拔插/重插恢复实测已通过 |
 | ARCH-008 | 降级策略 | 已完成 | RK3576 `/dev/video45` USB UVC、`mmap/v1` 路径 enable=1 降级/恢复/Stop 清理验证通过；DMA-BUF 重配置策略待后续单独验证 |
-| ARCH-009 | 统一 Metrics | 已完成 | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`；CameraSource/FrameBroker 已接入；publisher 示例已替换手动聚合；10 个单元测试通过 |
+| ARCH-009 | 统一 Metrics | 已完成 | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`；CameraSource/FrameBroker 已接入；publisher 示例已导出 JSON Lines；RK3576 lifecycle smoke 已接入自动判定 |
 | ARCH-010 | 数据面生产协议 | 进行中 | DMA-BUF Phase 2 最小跨进程链路已完成；已补慢消费者参数和 RK3576 slow-consumer smoke 脚本，`/dev/video45` 双订阅者 60 秒长稳与 counters 自动判定已通过；后续补更长时间长稳和生产级背压 |
 | ARCH-010A | DMA-BUF CPU sync helper | 已完成 | 已抽象 `core::DmaBufSyncHelper`，板端 CPU mmap/sync smoke 通过 |
 | ARCH-010B | DataPlaneV2 协议层 | 已完成 | 跨进程 fd 传递、ReleaseFrame 通道、超时/断连回收、subscriber 崩溃 failover、fd 泄漏长稳、publisher 退出清理均已验证 |
@@ -251,7 +251,7 @@
 
 下一阶段建议以“可观测、可回归、可承接 MIPI 实帧”为目标，而不是继续扩大外围功能面。
 
-1. RK3576 quick/full/extended smoke 能通过 `StreamMetrics` 快照自动判断 PASS/FAIL。
+1. RK3576 lifecycle 与 `stream-metrics` smoke 能通过 `StreamMetrics` 快照自动判断 PASS/FAIL，后续扩展到 failover / release-disconnect。
 2. CameraSource 降级策略在 `mmap/v1` 与 DataPlaneV2 active lease 场景都有明确验证结论。
 3. 真实 MIPI sensor 到位后，MPLANE live STREAMON 能纳入 `multi-camera-topology` smoke，而不是停留在一次性手工验证。
 4. DataPlaneV2 -> MPP fd path 只在真实 `NV12 + kDmaBuf` 实帧验证后合入，并保持 copy path fallback。

@@ -293,6 +293,7 @@ cd /home/luckfox/CameraSubsystem
 
 ```bash
 ./scripts/rk3576-board-smoke-suite.sh
+./scripts/rk3576-board-smoke-suite.sh stream-metrics
 ./scripts/rk3576-board-smoke-suite.sh dataplane-lifecycle codec-multi-session-control codec-mp4 web-record-mp4
 ./scripts/rk3576-board-smoke-suite.sh multi-camera-topology
 ```

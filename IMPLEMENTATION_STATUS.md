@@ -314,10 +314,10 @@ flowchart TB
 
 ### P1：不依赖新增摄像头的主线增强
 
-1. **板端 Metrics smoke 自动判定**
-   - 将 `core::StreamMetrics` 快照接入 smoke 脚本判定。
-   - 首批阈值覆盖 `capture_frame_count`、`broker_dropped_count`、`release_pending_count`、`active_leases`、`source_degradation_count`、`source_recovery_count`。
-   - 目标是让 quick/full/extended smoke 输出明确 PASS/FAIL，而不是依赖人工 grep。
+1. **Metrics smoke Phase 2 扩展**
+   - `dataplane-lifecycle` 已改为基于 `StreamMetrics` JSON Lines 自动判定，并通过 RK3576 `/dev/video45` 双订阅者 60 秒 smoke。
+   - `rk3576-board-smoke-suite.sh` 已新增显式 `stream-metrics` suite，作为团队快速入口。
+   - 下一步优先把 failover / release-disconnect smoke 的 publisher 计数判定迁移到同一 evaluator，避免重新引入日志 grep。
 
 2. **DMA-BUF 降级重配置验证**
    - 当前 `mmap/v1` 降级/恢复已完成，DMA-BUF active lease 场景仍需单独验证。

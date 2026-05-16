@@ -877,7 +877,7 @@ DEVICE=/dev/video45 SKIP_BUILD=1 \
 
 | 项 | 阶段 |
 |----|------|
-| `rk3576-board-smoke-suite.sh` 接入 `stream-metrics` | Phase 2 |
+| `rk3576-board-smoke-suite.sh` 接入 `stream-metrics` | 已进入 Phase 2：新增显式 suite，复用 lifecycle metrics 判定路径 |
 | `rk3576-dataplane-v2-failover-smoke.sh` 接入 metrics | Phase 2 |
 | `rk3576-multi-camera-topology-smoke.sh` 接入 metrics | Phase 2（等 MIPI） |
 | per-stream DataPlaneV2 指标 | Phase 2 |
