@@ -85,6 +85,7 @@ using camera_subsystem::ipc::SendCameraDataFrameDescriptorV2;
 using camera_subsystem::platform::PlatformLogger;
 using camera_subsystem::utils::FormatVideoDeviceDiscoveryForLog;
 using camera_subsystem::utils::InspectVideoDevice;
+using camera_subsystem::utils::VideoDeviceDiscoveryInfo;
 
 std::atomic<bool> g_running(true);
 
@@ -524,6 +525,13 @@ std::string JsonEscapeString(const std::string& raw)
     return escaped;
 }
 
+uint64_t NowNs()
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
 std::string MetricsToJsonLine(const std::vector<StreamMetrics>& streams,
                               const PublisherStats* stats,
                               CameraReleaseServer* release_server)
@@ -531,10 +539,7 @@ std::string MetricsToJsonLine(const std::vector<StreamMetrics>& streams,
     std::string result;
     result.reserve(1024);
 
-    const uint64_t ts_ns =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count();
+    const uint64_t ts_ns = NowNs();
 
     result += "{\"timestamp_ns\":" + std::to_string(ts_ns) + ",\"streams\":[";
 
@@ -599,6 +604,15 @@ bool AppendMetricsLine(const std::string& path, const std::vector<StreamMetrics>
     return ok;
 }
 
+std::string DiscoveryStateName(const VideoDeviceDiscoveryInfo& info)
+{
+    if (info.exists)
+    {
+        return "Bound";
+    }
+    return "Missing";
+}
+
 struct PendingLeaseKey
 {
     uint32_t stream_id = 0;
@@ -630,11 +644,86 @@ struct CameraStreamRuntime
     std::mutex mutex;
     CameraSource source;
     CameraStreamIdentity identity;
+    std::string configured_device_path;
+    std::string current_device_path;
+    VideoDeviceDiscoveryInfo discovery_info;
+    uint64_t discovery_last_refresh_ns = 0;
     std::unordered_map<PendingLeaseKey, std::shared_ptr<FrameLease>, PendingLeaseKeyHash>
         pending_leases;
     bool callbacks_configured = false;
     bool metrics_providers_registered = false;
 };
+
+std::string DeviceDiscoveryStatusToJson(
+    const std::unordered_map<std::string, std::shared_ptr<CameraStreamRuntime>>& runtimes)
+{
+    std::string result;
+    result.reserve(1024);
+    result += "{\"streams\":[";
+
+    bool first = true;
+    for (const auto& item : runtimes)
+    {
+        const auto& runtime = item.second;
+        if (!runtime)
+        {
+            continue;
+        }
+
+        std::lock_guard<std::mutex> lock(runtime->mutex);
+        const auto& info = runtime->discovery_info;
+
+        if (!first)
+        {
+            result += ",";
+        }
+        first = false;
+
+        result += "{\"stream_id\":\"" + JsonEscapeString(runtime->identity.stream_id.data()) +
+                  "\",";
+        result += "\"camera_id\":" + std::to_string(runtime->identity.camera_id) + ",";
+        result += "\"configured_device_path\":\"" +
+                  JsonEscapeString(runtime->configured_device_path) + "\",";
+        result += "\"current_device_path\":\"" + JsonEscapeString(runtime->current_device_path) +
+                  "\",";
+        result += "\"discovery_state\":\"" + DiscoveryStateName(info) + "\",";
+        result += "\"device_exists\":" + std::string(info.exists ? "true" : "false") + ",";
+        result += "\"physical_id\":\"" + JsonEscapeString(info.physical_id) + "\",";
+        result += "\"driver\":\"" + JsonEscapeString(info.driver) + "\",";
+        result += "\"name\":\"" + JsonEscapeString(info.name) + "\",";
+        result += "\"bus_info\":\"" + JsonEscapeString(info.bus_info) + "\",";
+        result += "\"subsystem\":\"" + JsonEscapeString(info.subsystem) + "\",";
+        result += "\"vendor_id\":\"" + JsonEscapeString(info.vendor_id) + "\",";
+        result += "\"product_id\":\"" + JsonEscapeString(info.product_id) + "\",";
+        result += "\"serial\":\"" + JsonEscapeString(info.serial) + "\",";
+        result += "\"last_refresh_ns\":" +
+                  std::to_string(runtime->discovery_last_refresh_ns) + "}";
+    }
+
+    result += "]}";
+    return result;
+}
+
+bool WriteDeviceDiscoveryStatusFile(
+    const std::string& path,
+    const std::unordered_map<std::string, std::shared_ptr<CameraStreamRuntime>>& runtimes)
+{
+    if (path.empty())
+    {
+        return true;
+    }
+
+    const std::string content = DeviceDiscoveryStatusToJson(runtimes);
+    const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+    {
+        return false;
+    }
+
+    const bool ok = WriteFull(fd, content.data(), content.size()) && WriteFull(fd, "\n", 1);
+    close(fd);
+    return ok;
+}
 
 const char* SourceStateName(SourceState state)
 {
@@ -714,6 +803,7 @@ int main(int argc, char* argv[])
     uint32_t recovery_backoff_max_ms = 30000;
     std::string metrics_history_path;
     std::string metrics_snapshot_path;
+    std::string device_discovery_status_path;
     uint32_t metrics_history_interval_sec = 5;
 
     for (int i = 1; i < argc; ++i)
@@ -824,6 +914,11 @@ int main(int argc, char* argv[])
                 metrics_history_interval_sec = 5;
             }
         }
+        else if (arg == "--device-discovery-status-path" && i + 1 < argc)
+        {
+            ++i;
+            device_discovery_status_path = argv[i];
+        }
         else if (arg == "--help" || arg == "-h")
         {
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
@@ -835,7 +930,8 @@ int main(int argc, char* argv[])
                                 "[--disconnect-threshold n] [--max-recovery-attempts n] "
                                 "[--recovery-backoff-ms ms] [--recovery-backoff-max-ms ms] "
                                 "[--metrics-history-path path] [--metrics-snapshot-path path] "
-                                "[--metrics-history-interval sec]",
+                                "[--metrics-history-interval sec] "
+                                "[--device-discovery-status-path path]",
                                 argv[0]);
             return 0;
         }
@@ -861,13 +957,14 @@ int main(int argc, char* argv[])
     PlatformLogger::Log(LogLevel::kInfo, "publisher",
                         "publisher start, device=%s, control_socket=%s, data_socket=%s, "
                         "release_socket=%s, io_method=%s, data_plane=%s, auto_recovery=%s, "
-                        "degradation=%s",
+                        "degradation=%s, device_discovery_status=%s",
                         device_path.c_str(), control_socket_path.c_str(), data_socket_path.c_str(),
                         release_socket_path.c_str(),
                         io_method == IoMethod::kDmaBuf ? "dmabuf" : "mmap",
                         data_plane_mode == DataPlaneMode::kV2DmaBuf ? "v2" : "v1",
                         enable_auto_recovery ? "enabled" : "disabled",
-                        enable_degradation ? "enabled" : "disabled");
+                        enable_degradation ? "enabled" : "disabled",
+                        device_discovery_status_path.empty() ? "disabled" : "enabled");
 
     DataSocketServer data_server;
     DataPlaneV2SocketServer data_v2_server;
@@ -1131,6 +1228,10 @@ int main(int argc, char* argv[])
             runtime->source.SetDevicePath(endpoint.device_path);
 
             const auto discovery_info = InspectVideoDevice(endpoint.device_path);
+            runtime->configured_device_path = endpoint.device_path;
+            runtime->current_device_path = endpoint.device_path;
+            runtime->discovery_info = discovery_info;
+            runtime->discovery_last_refresh_ns = NowNs();
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
                                 "device discovery snapshot: stream=%s %s",
                                 identity.stream_id.data(),
@@ -1338,6 +1439,18 @@ int main(int argc, char* argv[])
                                     metrics_history_path.c_str());
             }
         }
+
+        if (!device_discovery_status_path.empty() &&
+            elapsed_sec % metrics_history_interval_sec == 0)
+        {
+            std::lock_guard<std::mutex> lock(runtimes_mutex);
+            if (!WriteDeviceDiscoveryStatusFile(device_discovery_status_path, runtimes_by_stream))
+            {
+                PlatformLogger::Log(LogLevel::kWarning, "publisher",
+                                    "failed to write device discovery status to %s",
+                                    device_discovery_status_path.c_str());
+            }
+        }
     }
 
     // Write final snapshot before stopping servers
@@ -1361,6 +1474,17 @@ int main(int argc, char* argv[])
             PlatformLogger::Log(LogLevel::kWarning, "publisher",
                                 "failed to open metrics snapshot path %s",
                                 metrics_snapshot_path.c_str());
+        }
+    }
+
+    if (!device_discovery_status_path.empty())
+    {
+        std::lock_guard<std::mutex> lock(runtimes_mutex);
+        if (!WriteDeviceDiscoveryStatusFile(device_discovery_status_path, runtimes_by_stream))
+        {
+            PlatformLogger::Log(LogLevel::kWarning, "publisher",
+                                "failed to write final device discovery status to %s",
+                                device_discovery_status_path.c_str());
         }
     }
 

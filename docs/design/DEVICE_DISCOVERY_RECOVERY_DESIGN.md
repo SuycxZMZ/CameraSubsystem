@@ -1,9 +1,9 @@
 # 设备发现与重枚举恢复设计
 
-**文档版本:** v0.5<br>
+**文档版本:** v0.6<br>
 **最后更新:** 2026-05-16<br>
 **设计范围:** USB 热插拔后设备节点变化、能力变化、MIPI pipeline 缺失时的发现、恢复和状态暴露策略<br>
-**当前状态:** 脚本层扫描报告与 runtime M0 身份日志已接入并通过 RK3576 验证；M1 状态快照进入设计冻结<br>
+**当前状态:** 脚本层扫描报告、runtime M0 身份日志与 M1 状态快照已接入；自动化测试只保留最小可选验收入口<br>
 **关联文档:** [../MULTI_CAMERA_ARCHITECTURE.md](../MULTI_CAMERA_ARCHITECTURE.md)、[../ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md)、[../../IMPLEMENTATION_STATUS.md](../../IMPLEMENTATION_STATUS.md)
 
 > **文档硬规范**
@@ -29,6 +29,7 @@
 - [9. 编码准入清单](#9-编码准入清单)
 - [10. Runtime 接入分阶段方案](#10-runtime-接入分阶段方案)
 - [11. M1 状态快照编码方案](#11-m1-状态快照编码方案)
+- [12. 自动化测试快速收口](#12-自动化测试快速收口)
 
 ---
 
@@ -327,3 +328,23 @@ JSON 形态固定为：
 2. RK3576 交叉编译通过。
 3. RK3576 `/dev/video45` lifecycle smoke 仍通过。
 4. 指定 `--device-discovery-status-path` 后，板端能生成包含 `physical_id=usb:32e6:9221:202509021958` 对应 JSON 字段的状态文件。
+
+## 12. 自动化测试快速收口
+
+设备发现不是当前测试脚本的主战场，自动化只保留一个最小入口：
+
+```bash
+BOARD_HOST=192.168.31.9 BOARD_USER=luckfox BOARD_PASSWORD=luckfox \
+DEVICE=/dev/video45 DURATION_SEC=12 SAMPLE_INTERVAL_SEC=5 SUBSCRIBER_COUNT=1 \
+DEVICE_DISCOVERY_STATUS=1 SKIP_BUILD=1 CHECK_CLEANUP=0 \
+LOCAL_LOG_DIR=logs/runtime-device-discovery-status-smoke \
+./scripts/rk3576-dataplane-v2-lifecycle-smoke.sh
+```
+
+该入口只验证三件事：
+
+1. 现有 lifecycle smoke 仍然 PASS。
+2. `publisher.log` 中存在 `device discovery snapshot`。
+3. `device_discovery_status.json` 能被拉回，并包含当前 USB 摄像头的 `physical_id`。
+
+禁止把这里扩展为新的复杂 suite。后续只有进入 M2 自动重绑定时，才允许单独设计重枚举验证脚本。
