@@ -251,7 +251,7 @@
 
 下一阶段建议以“可观测、可回归、可承接 MIPI 实帧”为目标，而不是继续扩大外围功能面。
 
-1. RK3576 lifecycle 与 `stream-metrics` smoke 能通过 `StreamMetrics` 快照自动判断 PASS/FAIL，后续扩展到 failover / release-disconnect。
+1. RK3576 lifecycle、`stream-metrics`、failover 与 release-disconnect smoke 能通过 `StreamMetrics` 快照自动判断 PASS/FAIL，后续扩展到真实多 stream。
 2. CameraSource 降级策略在 `mmap/v1` 与 DataPlaneV2 active lease 场景都有明确验证结论。
 3. 真实 MIPI sensor 到位后，MPLANE live STREAMON 能纳入 `multi-camera-topology` smoke，而不是停留在一次性手工验证。
 4. DataPlaneV2 -> MPP fd path 只在真实 `NV12 + kDmaBuf` 实帧验证后合入，并保持 copy path fallback。

@@ -12,6 +12,8 @@ BOARD_DIR="${BOARD_DIR:-/tmp/camera_subsystem_dmabuf_v2_failover}"
 DEVICE="${DEVICE:-/dev/video45}"
 PRE_CRASH_SEC="${PRE_CRASH_SEC:-6}"
 POST_CRASH_SEC="${POST_CRASH_SEC:-8}"
+SAMPLE_INTERVAL_SEC="${SAMPLE_INTERVAL_SEC:-5}"
+REQUESTED_FPS="${REQUESTED_FPS:-15}"
 FAULT_MODE="${FAULT_MODE:-crash}"
 FAULT_RELEASE_DISCONNECT_AFTER_FRAMES="${FAULT_RELEASE_DISCONNECT_AFTER_FRAMES:-5}"
 CRASH_RELEASE_DELAY_MS="${CRASH_RELEASE_DELAY_MS:-700}"
@@ -22,6 +24,7 @@ MIN_CRASHED_FRAMES="${MIN_CRASHED_FRAMES:-3}"
 MIN_FAULT_RELEASE_FAIL="${MIN_FAULT_RELEASE_FAIL:-1}"
 MAX_RELEASE_PENDING="${MAX_RELEASE_PENDING:-0}"
 MAX_ACTIVE_LEASES="${MAX_ACTIVE_LEASES:-0}"
+MAX_CAPTURE_DROPPED="${MAX_CAPTURE_DROPPED:--1}"
 MAX_RELEASE_TIMEOUT="${MAX_RELEASE_TIMEOUT:--1}"
 MAX_LEASE_EXHAUSTED="${MAX_LEASE_EXHAUSTED:--1}"
 MAX_EXPORT_FAIL="${MAX_EXPORT_FAIL:-0}"
@@ -160,13 +163,16 @@ run_ssh "set -e; \
     pkill -f '[c]amera_publisher_example' 2>/dev/null || true; \
     pkill -f '[c]amera_subscriber_example' 2>/dev/null || true; \
     rm -f '${CONTROL_SOCKET}' '${DATA_SOCKET}' '${RELEASE_SOCKET}'; \
-    rm -f publisher.log subscriber-normal.log subscriber-crash.log *.pid; \
+    rm -f publisher.log subscriber-normal.log subscriber-crash.log metrics_history.jsonl metrics_snapshot.json *.pid; \
     mkdir -p normal_frames crash_frames"
 
 run_ssh "set -e; \
     cd '${BOARD_DIR}'; \
     nohup ./camera_publisher_example '${DEVICE}' '${CONTROL_SOCKET}' '${DATA_SOCKET}' \
         --io-method dmabuf --data-plane v2 --release-socket '${RELEASE_SOCKET}' \
+        --metrics-history-path '${BOARD_DIR}/metrics_history.jsonl' \
+        --metrics-history-interval '${SAMPLE_INTERVAL_SEC}' \
+        --metrics-snapshot-path '${BOARD_DIR}/metrics_snapshot.json' \
         > publisher.log 2>&1 & echo \$! > publisher.pid"
 
 sleep 2
@@ -212,11 +218,15 @@ run_scp \
     "${TARGET}:${BOARD_DIR}/subscriber-crash.log" \
     "${LOCAL_LOG_DIR}/" >/dev/null
 
+run_scp \
+    "${TARGET}:${BOARD_DIR}/metrics_history.jsonl" \
+    "${TARGET}:${BOARD_DIR}/metrics_snapshot.json" \
+    "${LOCAL_LOG_DIR}/" >/dev/null || true
+
 echo "Logs copied to ${LOCAL_LOG_DIR}"
 echo
-echo "Publisher counters:"
-grep -E "release_pending|lease_exhausted|v2_sent|release_timeout" \
-    "${LOCAL_LOG_DIR}/publisher.log" | tail -n 12 || true
+echo "Publisher metrics:"
+tail -n 3 "${LOCAL_LOG_DIR}/metrics_history.jsonl" 2>/dev/null || true
 echo
 echo "Normal subscriber summary:"
 grep -E "summary|release_fail|fps=" "${LOCAL_LOG_DIR}/subscriber-normal.log" | tail -n 10 || true
@@ -224,8 +234,6 @@ echo
 echo "Fault subscriber last counters:"
 grep -E "sec=|summary|release_fail|fps=" "${LOCAL_LOG_DIR}/subscriber-crash.log" | tail -n 10 || true
 
-publisher_line="$(grep -E "release_pending|lease_exhausted|v2_sent|release_timeout" \
-    "${LOCAL_LOG_DIR}/publisher.log" | tail -n 1 || true)"
 normal_summary="$(grep -E "summary:" "${LOCAL_LOG_DIR}/subscriber-normal.log" | tail -n 1 || true)"
 crashed_line="$(grep -E "sec=" "${LOCAL_LOG_DIR}/subscriber-crash.log" | tail -n 1 || true)"
 crashed_summary="$(grep -E "summary:" "${LOCAL_LOG_DIR}/subscriber-crash.log" | tail -n 1 || true)"
@@ -234,39 +242,47 @@ echo
 echo "Automatic failover checks:"
 
 failures=0
-if [[ -z "${publisher_line}" ]]; then
-    echo "FAIL: publisher counter line not found"
+
+metrics_history_local="${LOCAL_LOG_DIR}/metrics_history.jsonl"
+metrics_snapshot_local="${LOCAL_LOG_DIR}/metrics_snapshot.json"
+duration_sec=$((PRE_CRASH_SEC + POST_CRASH_SEC))
+
+py_args=("${PROJECT_ROOT}/scripts/metrics_smoke_evaluator.py")
+py_args+=(--history "${metrics_history_local}")
+if [[ -s "${metrics_snapshot_local}" ]]; then
+    py_args+=(--snapshot "${metrics_snapshot_local}")
+fi
+py_args+=(
+    --tier "${TIER:-full}"
+    --output-report "${LOCAL_LOG_DIR}/metrics_smoke_report.json"
+    --device "${DEVICE}"
+    --duration-sec "${duration_sec}"
+    --subscriber-count 2
+    --requested-fps "${REQUESTED_FPS}"
+)
+
+set +e
+METRICS_MAX_RELEASE_PENDING="${MAX_RELEASE_PENDING}" \
+METRICS_MAX_ACTIVE_LEASES="${MAX_ACTIVE_LEASES}" \
+METRICS_MAX_CAPTURE_DROPPED="${MAX_CAPTURE_DROPPED}" \
+METRICS_MAX_RELEASE_TIMEOUT="${MAX_RELEASE_TIMEOUT}" \
+METRICS_MAX_LEASE_EXHAUSTED="${MAX_LEASE_EXHAUSTED}" \
+METRICS_MIN_CAPTURE_FRAMES="${METRICS_MIN_CAPTURE_FRAMES:-1}" \
+METRICS_MIN_V2_SENT="${METRICS_MIN_V2_SENT:-1}" \
+    python3 "${py_args[@]}"
+metrics_exit=$?
+set -e
+if (( metrics_exit == 0 )); then
+    echo "PASS: metrics evaluator"
+elif (( metrics_exit == 1 )); then
+    echo "FAIL: metrics evaluator detected threshold breach"
+    failures=$((failures + 1))
+elif (( metrics_exit == 2 )); then
+    echo "ERROR: metrics evaluator encountered input/environment error (exit 2)"
     failures=$((failures + 1))
 else
-    dmabuf_enabled="$(extract_counter "${publisher_line}" "dmabuf_enabled")"
-    export_fail="$(extract_counter "${publisher_line}" "export_fail")"
-    v2_sent="$(extract_counter "${publisher_line}" "v2_sent")"
-    release_pending="$(extract_counter "${publisher_line}" "release_pending")"
-    release_timeout="$(extract_counter "${publisher_line}" "release_timeout")"
-    lease_exhausted="$(extract_counter "${publisher_line}" "lease_exhausted")"
-    active_leases="$(extract_counter "${publisher_line}" "active_leases")"
-
-    check_eq "publisher.dmabuf_enabled" "${dmabuf_enabled:-missing}" "1" || failures=$((failures + 1))
-    check_le "publisher.export_fail" "${export_fail:-999999}" "${MAX_EXPORT_FAIL}" || failures=$((failures + 1))
-    check_ge "publisher.v2_sent" "${v2_sent:-0}" 1 || failures=$((failures + 1))
-    check_le "publisher.release_pending" "${release_pending:-999999}" "${MAX_RELEASE_PENDING}" || failures=$((failures + 1))
-    check_le "publisher.active_leases" "${active_leases:-999999}" "${MAX_ACTIVE_LEASES}" || failures=$((failures + 1))
-    if [[ -z "${release_timeout}" ]]; then
-        echo "FAIL: publisher.release_timeout counter not found"
-        failures=$((failures + 1))
-    elif (( MAX_RELEASE_TIMEOUT >= 0 )); then
-        check_le "publisher.release_timeout" "${release_timeout}" "${MAX_RELEASE_TIMEOUT}" || failures=$((failures + 1))
-    else
-        echo "INFO: publisher.release_timeout=${release_timeout} (not capped in forced-crash smoke)"
-    fi
-    if [[ -z "${lease_exhausted}" ]]; then
-        echo "FAIL: publisher.lease_exhausted counter not found"
-        failures=$((failures + 1))
-    elif (( MAX_LEASE_EXHAUSTED >= 0 )); then
-        check_le "publisher.lease_exhausted" "${lease_exhausted}" "${MAX_LEASE_EXHAUSTED}" || failures=$((failures + 1))
-    else
-        echo "INFO: publisher.lease_exhausted=${lease_exhausted} (not capped in forced-crash smoke)"
-    fi
+    echo "ERROR: metrics evaluator unexpected exit code ${metrics_exit}"
+    failures=$((failures + 1))
 fi
 
 if [[ -z "${normal_summary}" ]]; then

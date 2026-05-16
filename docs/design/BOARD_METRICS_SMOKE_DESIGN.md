@@ -687,7 +687,7 @@ sequenceDiagram
 | **Step 2** | 验证 metrics_history.jsonl 生成与拉回 | 检查本地 `logs/rk3576-dataplane-v2-lifecycle-smoke/metrics_history.jsonl` 存在且非空 |
 | **Step 3** | 验证 Python 判定输出 | 检查 `logs/rk3576-dataplane-v2-lifecycle-smoke/metrics_smoke_report.json` 的 `result` 字段 |
 | **Step 4** | 验证与现有判定等价 | 对比新旧两种方式的判定结果（应均为 PASS），确认无 regression |
-| **Step 5（暂缓）** | failover 场景 | 等 lifecycle 单场景稳定后，再修改 `rk3576-dataplane-v2-failover-smoke.sh` |
+| **Step 5** | failover 场景 | `rk3576-dataplane-v2-failover-smoke.sh` 已复用 evaluator，覆盖 crash 与 release-disconnect |
 | **Step 6（暂缓）** | multi-camera-topology | 等 MIPI sensor 到位后再扩展 |
 
 ---
@@ -720,7 +720,7 @@ sequenceDiagram
 | 文件 | 暂缓原因 |
 |------|----------|
 | `scripts/rk3576-board-smoke-suite.sh` | 等 `stream-metrics` suite 自身验证通过后再接入 tier 列表，避免破坏现有 board-smoke-suite。Phase 2 |
-| `scripts/rk3576-dataplane-v2-failover-smoke.sh` | 等 lifecycle 单场景稳定后再接入 metrics，避免同时改两个脚本增加回归难度 |
+| `scripts/rk3576-dataplane-v2-failover-smoke.sh` | 已复用 `metrics_smoke_evaluator.py` 判定 publisher metrics，subscriber fault 语义仍由脚本检查 |
 | `scripts/rk3576-multi-camera-topology-smoke.sh` | 无 MIPI sensor，无法验证多 stream 场景 |
 | `src/broker/frame_broker.cpp` | publisher example 未使用 FrameBroker，无需修改 |
 
@@ -878,7 +878,7 @@ DEVICE=/dev/video45 SKIP_BUILD=1 \
 | 项 | 阶段 |
 |----|------|
 | `rk3576-board-smoke-suite.sh` 接入 `stream-metrics` | 已进入 Phase 2：新增显式 suite，复用 lifecycle metrics 判定路径 |
-| `rk3576-dataplane-v2-failover-smoke.sh` 接入 metrics | Phase 2 |
+| `rk3576-dataplane-v2-failover-smoke.sh` 接入 metrics | 已完成：crash 与 release-disconnect 均通过 RK3576 smoke |
 | `rk3576-multi-camera-topology-smoke.sh` 接入 metrics | Phase 2（等 MIPI） |
 | per-stream DataPlaneV2 指标 | Phase 2 |
 | publisher example 引入 FrameBroker | 按需 |
