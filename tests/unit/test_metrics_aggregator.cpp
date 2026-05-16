@@ -211,3 +211,35 @@ TEST(MetricsAggregatorTest, ProviderUpdatesReflectedInSubsequentSnapshots)
     provider.SetCaptureCount(200);
     EXPECT_EQ(aggregator.GetStreamMetrics("stream0").capture_frame_count, 200U);
 }
+
+TEST(MetricsAggregatorTest, ProviderUnregisterRemovesData)
+{
+    MetricsAggregator aggregator;
+    CaptureMetricsProvider source_provider(100, 5);
+    BrokerMetricsProvider broker_provider(200);
+
+    aggregator.RegisterProvider("stream0", &source_provider);
+    aggregator.RegisterProvider("stream0", &broker_provider);
+
+    {
+        const auto metrics = aggregator.GetStreamMetrics("stream0");
+        EXPECT_EQ(metrics.capture_frame_count, 100U);
+        EXPECT_EQ(metrics.capture_dropped_count, 5U);
+        EXPECT_EQ(metrics.broker_published_count, 200U);
+    }
+
+    aggregator.UnregisterProvider("stream0", &source_provider);
+    {
+        const auto metrics = aggregator.GetStreamMetrics("stream0");
+        EXPECT_EQ(metrics.capture_frame_count, 0U);
+        EXPECT_EQ(metrics.capture_dropped_count, 0U);
+        EXPECT_EQ(metrics.broker_published_count, 200U);
+    }
+
+    aggregator.UnregisterProvider("stream0", &broker_provider);
+    {
+        const auto metrics = aggregator.GetStreamMetrics("stream0");
+        EXPECT_EQ(metrics.capture_frame_count, 0U);
+        EXPECT_EQ(metrics.broker_published_count, 0U);
+    }
+}
