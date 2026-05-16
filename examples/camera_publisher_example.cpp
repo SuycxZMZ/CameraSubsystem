@@ -958,6 +958,7 @@ int main(int argc, char* argv[])
     std::string device_discovery_status_path;
     uint32_t metrics_history_interval_sec = 5;
     bool enable_device_rebind_on_start_failure = false;
+    bool enable_device_rebind_on_recovery_failure = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -1076,6 +1077,10 @@ int main(int argc, char* argv[])
         {
             enable_device_rebind_on_start_failure = true;
         }
+        else if (arg == "--enable-device-rebind-on-recovery-failure")
+        {
+            enable_device_rebind_on_recovery_failure = true;
+        }
         else if (arg == "--help" || arg == "-h")
         {
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
@@ -1115,7 +1120,7 @@ int main(int argc, char* argv[])
     PlatformLogger::Log(LogLevel::kInfo, "publisher",
                         "publisher start, device=%s, control_socket=%s, data_socket=%s, "
                         "release_socket=%s, io_method=%s, data_plane=%s, auto_recovery=%s, "
-                        "degradation=%s, device_discovery_status=%s, start_failure_rebind=%s",
+                        "degradation=%s, device_discovery_status=%s, start_failure_rebind=%s, recovery_failure_rebind=%s",
                         device_path.c_str(), control_socket_path.c_str(), data_socket_path.c_str(),
                         release_socket_path.c_str(),
                         io_method == IoMethod::kDmaBuf ? "dmabuf" : "mmap",
@@ -1123,7 +1128,8 @@ int main(int argc, char* argv[])
                         enable_auto_recovery ? "enabled" : "disabled",
                         enable_degradation ? "enabled" : "disabled",
                         device_discovery_status_path.empty() ? "disabled" : "enabled",
-                        enable_device_rebind_on_start_failure ? "enabled" : "disabled");
+                        enable_device_rebind_on_start_failure ? "enabled" : "disabled",
+                        enable_device_rebind_on_recovery_failure ? "enabled" : "disabled");
 
     DataSocketServer data_server;
     DataPlaneV2SocketServer data_v2_server;
@@ -1440,6 +1446,18 @@ int main(int argc, char* argv[])
                 metrics_aggregator.RegisterProvider(stream_id, &runtime->source);
                 metrics_aggregator.RegisterProvider(stream_id, &dp_metrics_provider);
                 runtime->metrics_providers_registered = true;
+            }
+
+            if (enable_device_rebind_on_recovery_failure)
+            {
+                runtime->source.SetRecoveryFailedHook(
+                    [runtime, identity, config, &release_server]
+                    (const std::string& failed_device_path)
+                    {
+                        TryRebindRuntimeDeviceOnStartFailure(
+                            runtime, identity, config, &release_server,
+                            failed_device_path, "recovery_failed");
+                    });
             }
 
             PlatformLogger::Log(LogLevel::kInfo, "publisher",

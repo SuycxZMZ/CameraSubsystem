@@ -58,6 +58,7 @@ class CameraSource : public core::IMetricsProvider
     using FrameCallbackWithBuffer =
         std::function<void(const core::FrameHandle&, const std::shared_ptr<core::BufferGuard>&)>;
     using FramePacketCallback = std::function<void(const core::FramePacket&)>;
+    using RecoveryFailedCallback = std::function<void(const std::string& device_path)>;
 
     CameraSource();
     ~CameraSource();
@@ -90,6 +91,9 @@ class CameraSource : public core::IMetricsProvider
     SourceState GetState() const;
     uint64_t GetDisconnectionCount() const;
     uint64_t GetRecoveryAttemptCount() const;
+
+    // ---- 新增：恢复失败 hook ----
+    void SetRecoveryFailedHook(RecoveryFailedCallback callback);
 
     // ---- 新增：降级状态查询 ----
     bool IsDegraded() const;
@@ -225,6 +229,9 @@ class CameraSource : public core::IMetricsProvider
     mutable std::mutex state_mutex_;
     mutable std::mutex monitor_mutex_;
     std::condition_variable monitor_cv_;
+
+    mutable std::mutex hook_mutex_;
+    RecoveryFailedCallback recovery_failed_hook_;
 
     mutable std::mutex callback_mutex_;
     FrameCallback callback_;
