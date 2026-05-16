@@ -935,6 +935,7 @@ int main(int argc, char* argv[])
     std::string metrics_snapshot_path;
     std::string device_discovery_status_path;
     uint32_t metrics_history_interval_sec = 5;
+    bool enable_device_rebind_on_start_failure = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -1049,6 +1050,10 @@ int main(int argc, char* argv[])
             ++i;
             device_discovery_status_path = argv[i];
         }
+        else if (arg == "--enable-device-rebind-on-start-failure")
+        {
+            enable_device_rebind_on_start_failure = true;
+        }
         else if (arg == "--help" || arg == "-h")
         {
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
@@ -1061,7 +1066,8 @@ int main(int argc, char* argv[])
                                 "[--recovery-backoff-ms ms] [--recovery-backoff-max-ms ms] "
                                 "[--metrics-history-path path] [--metrics-snapshot-path path] "
                                 "[--metrics-history-interval sec] "
-                                "[--device-discovery-status-path path]",
+                                "[--device-discovery-status-path path] "
+                                "[--enable-device-rebind-on-start-failure]",
                                 argv[0]);
             return 0;
         }
@@ -1087,14 +1093,15 @@ int main(int argc, char* argv[])
     PlatformLogger::Log(LogLevel::kInfo, "publisher",
                         "publisher start, device=%s, control_socket=%s, data_socket=%s, "
                         "release_socket=%s, io_method=%s, data_plane=%s, auto_recovery=%s, "
-                        "degradation=%s, device_discovery_status=%s",
+                        "degradation=%s, device_discovery_status=%s, start_failure_rebind=%s",
                         device_path.c_str(), control_socket_path.c_str(), data_socket_path.c_str(),
                         release_socket_path.c_str(),
                         io_method == IoMethod::kDmaBuf ? "dmabuf" : "mmap",
                         data_plane_mode == DataPlaneMode::kV2DmaBuf ? "v2" : "v1",
                         enable_auto_recovery ? "enabled" : "disabled",
                         enable_degradation ? "enabled" : "disabled",
-                        device_discovery_status_path.empty() ? "disabled" : "enabled");
+                        device_discovery_status_path.empty() ? "disabled" : "enabled",
+                        enable_device_rebind_on_start_failure ? "enabled" : "disabled");
 
     DataSocketServer data_server;
     DataPlaneV2SocketServer data_v2_server;
@@ -1378,7 +1385,8 @@ int main(int argc, char* argv[])
                 PlatformLogger::Log(LogLevel::kError, "publisher",
                                     "CameraSource initialize failed, stream=%s device=%s",
                                     identity.stream_id.data(), endpoint.device_path);
-                if (!TryRebindRuntimeDeviceOnStartFailure(runtime,
+                if (!enable_device_rebind_on_start_failure ||
+                    !TryRebindRuntimeDeviceOnStartFailure(runtime,
                                                           identity,
                                                           config,
                                                           &release_server,
@@ -1393,7 +1401,8 @@ int main(int argc, char* argv[])
                 PlatformLogger::Log(LogLevel::kError, "publisher",
                                     "CameraSource start failed, stream=%s device=%s",
                                     identity.stream_id.data(), endpoint.device_path);
-                if (!TryRebindRuntimeDeviceOnStartFailure(runtime,
+                if (!enable_device_rebind_on_start_failure ||
+                    !TryRebindRuntimeDeviceOnStartFailure(runtime,
                                                           identity,
                                                           config,
                                                           &release_server,

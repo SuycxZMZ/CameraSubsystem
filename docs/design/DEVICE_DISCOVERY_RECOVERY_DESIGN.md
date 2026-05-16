@@ -1,9 +1,9 @@
 # 设备发现与重枚举恢复设计
 
-**文档版本:** v0.9<br>
+**文档版本:** v1.0<br>
 **最后更新:** 2026-05-16<br>
 **设计范围:** USB 热插拔后设备节点变化、能力变化、MIPI pipeline 缺失时的发现、恢复和状态暴露策略<br>
-**当前状态:** 脚本层扫描报告、runtime M0 身份日志、M1 状态快照与 M2a 扫描/匹配工具已接入；M2b 自动重绑定尚未编码<br>
+**当前状态:** 脚本层扫描报告、runtime M0 身份日志、M1 状态快照、M2a 扫描/匹配工具与 M2b start 失败路径受控重绑定已接入；重绑定默认关闭<br>
 **关联文档:** [../MULTI_CAMERA_ARCHITECTURE.md](../MULTI_CAMERA_ARCHITECTURE.md)、[../ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md)、[../../IMPLEMENTATION_STATUS.md](../../IMPLEMENTATION_STATUS.md)
 
 > **文档硬规范**
@@ -443,4 +443,6 @@ M2 仍缺两个前置确认：
 
 M2a 已完成：`ScanVideoDevices()` 可枚举当前 `/sys/class/video4linux/video*`，`FindUniqueVideoDeviceByPhysicalId()` 可基于原始 `physical_id` 和 capture capability 判断唯一匹配、缺失或歧义，并有单元测试覆盖唯一匹配、重复歧义、`unknown` 不匹配和同一 UVC 设备的非 capture companion node 过滤。
 
-M2b 已进入最小实现：仅在 `camera_publisher_example` 的 start callback 失败路径触发。如果旧路径 `Initialize()` 或 `Start()` 失败，且 runtime 已有可信 `stable_physical_id`，publisher 会扫描当前 video 节点并在唯一 capture 候选存在时尝试 `Stop()` -> `SetDevicePath(new_path)` -> `Initialize()` -> `Start()`。正常 `Streaming` 状态下仍不做主动切换。
+M2b 已进入最小实现：仅在 `camera_publisher_example` 的 start callback 失败路径触发，并且必须显式传入 `--enable-device-rebind-on-start-failure`。如果旧路径 `Initialize()` 或 `Start()` 失败，且 runtime 已有可信 `stable_physical_id`，publisher 会扫描当前 video 节点并在唯一 capture 候选存在时尝试 `Stop()` -> `SetDevicePath(new_path)` -> `Initialize()` -> `Start()`。正常 `Streaming` 状态下仍不做主动切换。
+
+默认关闭该能力是刻意选择：M2b 改变的是设备路径绑定行为，必须由板端验证或明确部署策略打开；普通 publisher 启动继续保持原有失败语义。
