@@ -769,12 +769,34 @@ bool TryRebindRuntimeDeviceOnStartFailure(const std::shared_ptr<CameraStreamRunt
     runtime->last_rebind_from = failed_device_path;
     runtime->last_rebind_to.clear();
 
-    const std::string physical_id = runtime->stable_physical_id;
+    std::string physical_id = runtime->stable_physical_id;
     if (!IsKnownPhysicalId(physical_id))
     {
-        runtime->discovery_state = "Missing";
-        runtime->last_rebind_error = "stable_physical_id_unavailable";
-        return false;
+        const auto all_devices = ScanVideoDevices();
+        std::vector<VideoDeviceDiscoveryInfo> usb_capture_candidates;
+        for (const auto& d : all_devices)
+        {
+            if (d.exists && d.can_capture && d.subsystem == "usb" &&
+                IsKnownPhysicalId(d.physical_id) && d.device_path != failed_device_path)
+            {
+                usb_capture_candidates.push_back(d);
+            }
+        }
+        if (usb_capture_candidates.size() == 1)
+        {
+            physical_id = usb_capture_candidates[0].physical_id;
+            PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                                "stable_physical_id inferred from single USB capture candidate: stream=%s physical_id=%s",
+                                identity.stream_id.data(), physical_id.c_str());
+        }
+        else
+        {
+            runtime->discovery_state = "Missing";
+            runtime->last_rebind_error = usb_capture_candidates.empty()
+                ? "stable_physical_id_unavailable"
+                : "stable_physical_id_unavailable_ambiguous_usb";
+            return false;
+        }
     }
 
     if (!runtime->pending_leases.empty() ||

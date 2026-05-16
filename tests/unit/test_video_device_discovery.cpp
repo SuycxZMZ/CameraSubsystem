@@ -93,6 +93,21 @@ TEST(VideoDeviceDiscoveryTest, UnknownPhysicalIdNeverMatches)
     EXPECT_EQ(result.candidate_count, 0U);
 }
 
+TEST(VideoDeviceDiscoveryTest, NoMatchingPhysicalIdProducesMissing)
+{
+    VideoDeviceDiscoveryInfo device;
+    device.device_path = "/dev/video45";
+    device.exists = true;
+    device.can_capture = true;
+    device.physical_id = "usb:32e6:9221:202509021958";
+
+    const auto result = FindUniqueVideoDeviceByPhysicalId({device}, "usb:aaaa:bbbb:nonexistent");
+
+    EXPECT_FALSE(result.has_unique_match);
+    EXPECT_EQ(result.candidate_count, 0U);
+    EXPECT_TRUE(result.device.device_path.empty());
+}
+
 TEST(VideoDeviceDiscoveryTest, NonCaptureNodeDoesNotMatch)
 {
     VideoDeviceDiscoveryInfo capture;
