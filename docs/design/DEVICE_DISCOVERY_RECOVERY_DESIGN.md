@@ -1,9 +1,9 @@
 # 设备发现与重枚举恢复设计
 
-**文档版本:** v0.6<br>
+**文档版本:** v0.8<br>
 **最后更新:** 2026-05-16<br>
 **设计范围:** USB 热插拔后设备节点变化、能力变化、MIPI pipeline 缺失时的发现、恢复和状态暴露策略<br>
-**当前状态:** 脚本层扫描报告、runtime M0 身份日志与 M1 状态快照已接入；自动化测试只保留最小可选验收入口<br>
+**当前状态:** 脚本层扫描报告、runtime M0 身份日志、M1 状态快照与 M2a 扫描/匹配工具已接入；M2b 自动重绑定尚未编码<br>
 **关联文档:** [../MULTI_CAMERA_ARCHITECTURE.md](../MULTI_CAMERA_ARCHITECTURE.md)、[../ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md)、[../../IMPLEMENTATION_STATUS.md](../../IMPLEMENTATION_STATUS.md)
 
 > **文档硬规范**
@@ -30,6 +30,7 @@
 - [10. Runtime 接入分阶段方案](#10-runtime-接入分阶段方案)
 - [11. M1 状态快照编码方案](#11-m1-状态快照编码方案)
 - [12. 自动化测试快速收口](#12-自动化测试快速收口)
+- [13. M2 受控重绑定设计](#13-m2-受控重绑定设计)
 
 ---
 
@@ -348,3 +349,98 @@ LOCAL_LOG_DIR=logs/runtime-device-discovery-status-smoke \
 3. `device_discovery_status.json` 能被拉回，并包含当前 USB 摄像头的 `physical_id`。
 
 禁止把这里扩展为新的复杂 suite。后续只有进入 M2 自动重绑定时，才允许单独设计重枚举验证脚本。
+
+## 13. M2 受控重绑定设计
+
+M2 的目标是解决 USB 摄像头重插后 `/dev/videoX` 变化的问题，但必须保持现有 session、stream_id、DataPlaneV2 release 生命周期不被破坏。
+
+### 13.1 核心约束
+
+| 约束 | 结论 |
+|------|------|
+| 控制面 session key 当前包含 `device_path` | M2 不通过新的 `CameraEndpoint` 重新订阅来重绑定，否则会生成新 session |
+| `CameraSource::SetDevicePath()` 只允许非 running 状态调用 | 重绑定必须发生在 `source.Stop()` 之后、`source.Initialize()` 之前 |
+| DataPlaneV2 可能仍有 active lease | 重绑定前必须等待或回收 release tracker，不能在 fd 被订阅端持有时切换 |
+| 当前只有单 USB 摄像头 | M2 编码先支持“缺失/唯一匹配/不匹配”三类状态，`Ambiguous` 只能由未来双摄验证 |
+| Web/Codec 非主线 | 不扩展 UI 和录制逻辑，只通过 status/log 暴露 |
+
+### 13.2 允许自动重绑定的条件
+
+只有同时满足以下条件才允许把 `current_device_path` 从旧节点切换到新节点：
+
+1. stream 已经进入 `Disconnected`、`Retrying` 或 start 失败路径，不能在正常 `Streaming` 中主动切换。
+2. 原 `physical_id` 已知且不是 `unknown`。
+3. 主动扫描当前 `/sys/class/video4linux/video*` 后，只有一个候选节点的 `physical_id` 与原值一致。
+4. 候选节点通过 `VIDIOC_QUERYCAP`，且 driver/name/bus_info 至少能被读取。
+5. 候选节点能力与当前 `CameraConfig` 兼容。第一版只检查目标 pixel format 与尺寸是否能枚举到；不能兼容则进入 `CapabilityChanged`。
+6. DataPlaneV2 pending leases 为 0，release server 没有未决帧；否则等待一个短窗口后仍未清空则进入 `Missing` 或 `RebindBlocked`。
+
+不满足任一条件时禁止自动切换。
+
+### 13.3 状态扩展
+
+M2 status JSON 在 M1 基础上增加数值与诊断字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `candidate_count` | number | 当前扫描到的匹配候选数 |
+| `rebind_count` | number | 成功自动重绑定次数 |
+| `last_rebind_from` | string | 上一次旧节点 |
+| `last_rebind_to` | string | 上一次新节点 |
+| `last_rebind_reason` | string | `missing_node/initialize_failed/recovery_failed` |
+| `last_rebind_error` | string | 最近失败原因 |
+
+`StreamMetrics` 仍不放字符串。若 M2 需要自动判定，最多增加 `device_rebind_count`、`device_rebind_failure_count` 两个数值字段，且必须先单独评审。
+
+### 13.4 时序
+
+```mermaid
+sequenceDiagram
+    participant CS as CameraSource
+    participant RT as CameraStreamRuntime
+    participant DS as DeviceScanner
+    participant DP as DataPlaneV2/Release
+
+    CS->>RT: start/recovery failed for old device_path
+    RT->>DP: check pending leases / release pending
+    alt pending frames exist
+        RT-->>CS: keep current recovery path, status=RebindBlocked
+    else no pending frames
+        RT->>DS: scan video devices by original physical_id
+        DS-->>RT: candidates
+        alt one compatible candidate
+            RT->>CS: Stop()
+            RT->>CS: SetDevicePath(new_path)
+            RT->>CS: Initialize(config)
+            RT->>CS: Start()
+            RT-->>RT: update current_device_path and rebind_count
+        else missing
+            RT-->>RT: status=Missing
+        else multiple
+            RT-->>RT: status=Ambiguous
+        else capability mismatch
+            RT-->>RT: status=CapabilityChanged
+        end
+    end
+```
+
+### 13.5 编码落点
+
+M2 仍先在 publisher 示例内实现，不下沉为库级恢复策略：
+
+1. 将 M1 的 discovery status 扩展为 `DeviceDiscoveryRuntimeState`。
+2. 新增 `ScanVideoDevices()` 工具，返回当前所有 video 节点的 `VideoDeviceDiscoveryInfo`。
+3. 在 start callback 失败或后续 recovery failed hook 可用时调用 `TryRebindRuntimeDevice()`。
+4. `TryRebindRuntimeDevice()` 只负责选择候选与更新 `CameraSource`，不创建新的 `CameraSessionManager` session。
+5. 成功后保持同一个 `stream_id` 和 `camera_id`，DataPlaneV2 socket、release socket 不变。
+
+### 13.6 当前不编码的原因
+
+M2 仍缺两个前置确认：
+
+1. 当前 `CameraSource` 的恢复失败信号没有明确 callback 给 publisher runtime。若直接轮询状态，容易引入竞态和额外线程。
+2. 当前只有一个 USB 摄像头，无法真实验证 `Ambiguous`。因此第一版 M2 只能做“原节点缺失后唯一匹配”的最小闭环。
+
+M2a 已完成：`ScanVideoDevices()` 可枚举当前 `/sys/class/video4linux/video*`，`FindUniqueVideoDeviceByPhysicalId()` 可基于原始 `physical_id` 判断唯一匹配、缺失或歧义，并有单元测试覆盖唯一匹配、重复歧义和 `unknown` 不匹配。
+
+下一步如果继续编码，只能进入 **M2b：start 失败路径的受控重绑定**；仍不接入正常 streaming 状态下的主动切换。

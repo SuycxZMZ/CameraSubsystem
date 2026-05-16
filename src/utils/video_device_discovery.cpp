@@ -6,9 +6,11 @@
 #include <unistd.h>
 
 #include <array>
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <dirent.h>
 #include <fstream>
 #include <sstream>
 
@@ -170,6 +172,70 @@ VideoDeviceDiscoveryInfo InspectVideoDevice(const std::string& device_path)
     FillQueryCapInfo(device_path, &info);
     info.physical_id = BuildPhysicalId(info);
     return info;
+}
+
+std::vector<VideoDeviceDiscoveryInfo> ScanVideoDevices()
+{
+    std::vector<std::string> device_paths;
+
+    DIR* dir = opendir("/sys/class/video4linux");
+    if (!dir)
+    {
+        return {};
+    }
+
+    while (dirent* entry = readdir(dir))
+    {
+        const std::string name = entry->d_name;
+        if (name.size() <= 5 || name.compare(0, 5, "video") != 0)
+        {
+            continue;
+        }
+        device_paths.push_back("/dev/" + name);
+    }
+    closedir(dir);
+
+    std::sort(device_paths.begin(), device_paths.end());
+
+    std::vector<VideoDeviceDiscoveryInfo> devices;
+    devices.reserve(device_paths.size());
+    for (const auto& path : device_paths)
+    {
+        devices.push_back(InspectVideoDevice(path));
+    }
+    return devices;
+}
+
+VideoDeviceMatchResult FindUniqueVideoDeviceByPhysicalId(
+    const std::vector<VideoDeviceDiscoveryInfo>& devices,
+    const std::string& physical_id)
+{
+    VideoDeviceMatchResult result;
+    if (physical_id.empty() || physical_id == "unknown")
+    {
+        return result;
+    }
+
+    for (const auto& device : devices)
+    {
+        if (!device.exists || device.physical_id != physical_id)
+        {
+            continue;
+        }
+
+        ++result.candidate_count;
+        if (result.candidate_count == 1)
+        {
+            result.device = device;
+        }
+    }
+
+    result.has_unique_match = result.candidate_count == 1;
+    if (!result.has_unique_match)
+    {
+        result.device = VideoDeviceDiscoveryInfo{};
+    }
+    return result;
 }
 
 std::string FormatVideoDeviceDiscoveryForLog(const VideoDeviceDiscoveryInfo& info)

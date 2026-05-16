@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 using camera_subsystem::utils::FormatVideoDeviceDiscoveryForLog;
+using camera_subsystem::utils::FindUniqueVideoDeviceByPhysicalId;
 using camera_subsystem::utils::InspectVideoDevice;
 using camera_subsystem::utils::VideoDeviceDiscoveryInfo;
 
@@ -35,4 +36,53 @@ TEST(VideoDeviceDiscoveryTest, FormatIncludesStableFields)
     EXPECT_NE(log.find("physical_id=usb:32e6:9221:202509021958"), std::string::npos);
     EXPECT_NE(log.find("driver=uvcvideo"), std::string::npos);
     EXPECT_NE(log.find("serial=202509021958"), std::string::npos);
+}
+
+TEST(VideoDeviceDiscoveryTest, FindUniquePhysicalIdMatch)
+{
+    VideoDeviceDiscoveryInfo first;
+    first.device_path = "/dev/video45";
+    first.exists = true;
+    first.physical_id = "usb:32e6:9221:202509021958";
+
+    VideoDeviceDiscoveryInfo second;
+    second.device_path = "/dev/video12";
+    second.exists = true;
+    second.physical_id = "usb:abcd:0001:other";
+
+    const auto result = FindUniqueVideoDeviceByPhysicalId({first, second}, first.physical_id);
+
+    EXPECT_TRUE(result.has_unique_match);
+    EXPECT_EQ(result.candidate_count, 1U);
+    EXPECT_EQ(result.device.device_path, "/dev/video45");
+}
+
+TEST(VideoDeviceDiscoveryTest, DuplicatePhysicalIdIsAmbiguous)
+{
+    VideoDeviceDiscoveryInfo first;
+    first.device_path = "/dev/video45";
+    first.exists = true;
+    first.physical_id = "usb:32e6:9221:202509021958";
+
+    VideoDeviceDiscoveryInfo second = first;
+    second.device_path = "/dev/video46";
+
+    const auto result = FindUniqueVideoDeviceByPhysicalId({first, second}, first.physical_id);
+
+    EXPECT_FALSE(result.has_unique_match);
+    EXPECT_EQ(result.candidate_count, 2U);
+    EXPECT_TRUE(result.device.device_path.empty());
+}
+
+TEST(VideoDeviceDiscoveryTest, UnknownPhysicalIdNeverMatches)
+{
+    VideoDeviceDiscoveryInfo device;
+    device.device_path = "/dev/video45";
+    device.exists = true;
+    device.physical_id = "unknown";
+
+    const auto result = FindUniqueVideoDeviceByPhysicalId({device}, "unknown");
+
+    EXPECT_FALSE(result.has_unique_match);
+    EXPECT_EQ(result.candidate_count, 0U);
 }

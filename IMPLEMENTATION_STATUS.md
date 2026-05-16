@@ -331,6 +331,7 @@ flowchart TB
    - USB 物理拔插恢复已经通过，但仍假设设备回到原路径 `/dev/video45`。
    - device discovery 设计见 [docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md](docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md)：脚本层扫描报告已接入并通过 RK3576 验证，当前 USB 摄像头可由 `vendor_id=32e6 product_id=9221 serial=202509021958` 稳定识别；已明确字符串类 discovery 字段进入 status/log，`StreamMetrics` 暂不扩展字符串字段。
    - Runtime M0/M1 已完成小步接入：新增 video device identity 解析工具，publisher 在 stream start 路径输出当前 `device_path`、driver/name、bus_info、USB vendor/product/serial、`physical_id`；`--device-discovery-status-path` 可选输出状态 JSON。RK3576 `/dev/video45` 最小 lifecycle smoke 用 `DEVICE_DISCOVERY_STATUS=1` 验收即可，不扩大 board suite；当前仍不做自动重绑定、不改变控制协议。
+   - M2 受控重绑定已完成文档级收口：自动切换只允许在断连/重试/start 失败路径中发生，必须唯一匹配原 `physical_id` 且无 pending lease；M2a 扫描工具和候选匹配单测已接入，仍不自动重绑定。下一步只允许评审并实现 M2b start 失败路径受控重绑定。
 
 ### P2：暂缓或只做轻量维护
 

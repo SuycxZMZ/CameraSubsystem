@@ -9,6 +9,7 @@
 #define CAMERA_SUBSYSTEM_UTILS_VIDEO_DEVICE_DISCOVERY_H
 
 #include <string>
+#include <vector>
 
 namespace camera_subsystem
 {
@@ -30,7 +31,20 @@ struct VideoDeviceDiscoveryInfo
     bool exists = false;
 };
 
+struct VideoDeviceMatchResult
+{
+    VideoDeviceDiscoveryInfo device;
+    size_t candidate_count = 0;
+    bool has_unique_match = false;
+};
+
 VideoDeviceDiscoveryInfo InspectVideoDevice(const std::string& device_path);
+
+std::vector<VideoDeviceDiscoveryInfo> ScanVideoDevices();
+
+VideoDeviceMatchResult FindUniqueVideoDeviceByPhysicalId(
+    const std::vector<VideoDeviceDiscoveryInfo>& devices,
+    const std::string& physical_id);
 
 std::string FormatVideoDeviceDiscoveryForLog(const VideoDeviceDiscoveryInfo& info);
 
