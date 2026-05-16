@@ -329,7 +329,7 @@ flowchart TB
 
 3. **热插拔能力发现与设备重枚举策略**
    - USB 物理拔插恢复已经通过，但仍假设设备回到原路径 `/dev/video45`。
-   - 后续需要设计 device discovery：设备节点变化、能力变化、MIPI pipeline 缺失时的状态暴露和订阅端错误收敛。
+   - device discovery 设计见 [docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md](docs/design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md)：下一步先评审 USB 物理身份匹配、节点变化重绑定、MIPI readiness failed 状态暴露，再决定是否进入脚本层扫描报告或 runtime 接入。
 
 ### P2：暂缓或只做轻量维护
 

@@ -46,6 +46,7 @@
 11. [design/BOARD_METRICS_SMOKE_DESIGN.md](design/BOARD_METRICS_SMOKE_DESIGN.md)（板端 Metrics smoke 自动判定架构设计，Phase 1 已落地）
 12. [design/MULTI_CAMERA_TOPOLOGY_METRICS_DESIGN.md](design/MULTI_CAMERA_TOPOLOGY_METRICS_DESIGN.md)（multi-camera topology metrics Phase 2 设计，编码前评审入口）
 13. [design/DMABUF_DEGRADATION_RECONFIG_VALIDATION_DESIGN.md](design/DMABUF_DEGRADATION_RECONFIG_VALIDATION_DESIGN.md)（DMA-BUF active lease 场景下降级重配置验证设计）
+14. [design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md](design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md)（USB/MIPI 设备发现、重枚举恢复和状态暴露设计）
 
 ### 做代码开发
 
@@ -86,6 +87,7 @@
 | [design/BOARD_METRICS_SMOKE_DESIGN.md](design/BOARD_METRICS_SMOKE_DESIGN.md) | 板端 Metrics smoke 自动判定架构：JSON Lines 导出、Python 阈值判定、三档指标矩阵、provider 生命周期、编码就绪检查清单 | 具体编码实现细节（由 AGENTS.md 工作流承载） |
 | [design/MULTI_CAMERA_TOPOLOGY_METRICS_DESIGN.md](design/MULTI_CAMERA_TOPOLOGY_METRICS_DESIGN.md) | `multi-camera-topology` smoke 接入 metrics 自动判定的 Phase 2 设计：USB-only 当前可验证范围、MIPI readiness/live 边界、topology report 与退出码语义 | DataPlaneV2 协议变更、真实 MIPI live 阈值、Web/Codec 功能扩展 |
 | [design/DMABUF_DEGRADATION_RECONFIG_VALIDATION_DESIGN.md](design/DMABUF_DEGRADATION_RECONFIG_VALIDATION_DESIGN.md) | DMA-BUF/DataPlaneV2 active lease 场景下 CameraSource 降帧降级重配置的验证设计和编码准入边界 | 降级算法重写、DataPlaneV2 协议变更、MIPI live 验证 |
+| [design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md](design/DEVICE_DISCOVERY_RECOVERY_DESIGN.md) | USB 热插拔后设备节点变化、能力变化、MIPI pipeline 缺失时的发现、重绑定和状态暴露策略 | 立即改写 CameraSource 恢复主循环、Web 设备管理 UI、udev daemon |
 | [DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md) | DataPlaneV2 → MPP 低拷贝录制设计：copy path / fd path 选择条件、MPP import 契约、ReleaseFrame 时序、fallback 策略 | 具体编码实现（待 MIPI sensor 到位） |
 | [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) | 开发路线图：当前阶段划分、主线优先级、暂缓项和编码准入门槛 | 各模块详细架构设计 |
 | [BOARD_WEB_DEBUG_GUIDE.md](BOARD_WEB_DEBUG_GUIDE.md) | RK3576 板端 Web Preview、录制联调、统一部署目录和 smoke / stability 调试流程 | 架构取舍、API 全量说明、长期路线图 |
