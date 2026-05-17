@@ -55,20 +55,21 @@
 
 ## 3. 优先级路线
 
-### 3.1 P0：硬件到位后立即推进
+### 3.1 P0：当前收口阶段
+
+| 顺序 | 任务 | 产出 | 验收口径 |
+|------|------|------|----------|
+| 1 | USB/RK3576 主链路封板 | 现有 board smoke 回归、已知边界文档化 | 不新增新的 smoke 维度；现有入口可稳定回归 |
+| 2 | 设备发现能力定版 | M0/M1/M2a/M2b/M3 状态同步到主文档 | 一次性 hook 边界明确，方向 B 暂不实现 |
+| 3 | 文档与计划收口 | README、实现状态、路线图统一 | 明确 USB 基线完成，MIPI/低拷贝录制后移 |
+
+### 3.2 P1：硬件到位后再开启
 
 | 顺序 | 任务 | 产出 | 验收口径 |
 |------|------|------|----------|
 | 1 | 真实 MIPI/RKISP live STREAMON | MPLANE live smoke、per-plane layout 记录、DataPlaneV2 subscriber 实帧验证 | 持续 DQBUF/QBUF、`bytesused > 0`、timestamp/sequence 单调、release 后持续采集 |
 | 2 | DataPlaneV2 -> MPP 低拷贝录制实现 | codec server fd path、MPP import、编码完成后 ReleaseFrame | `NV12 + kDmaBuf + plane_count==1` 可录制，失败可回退 copy path，`release_pending` 最终归零 |
-
-### 3.2 P1：不依赖新增摄像头的主线增强
-
-| 顺序 | 任务 | 产出 | 验收口径 |
-|------|------|------|----------|
-| 1 | 板端 Metrics smoke 自动判定 | quick/full/extended smoke 解析 metrics 快照 | 无人工 grep；阈值失败时脚本返回非零 |
-| 2 | DMA-BUF 降级重配置专项验证 | active lease 场景下的降级/恢复 smoke | 未 release fd 时跳过或延后重配置，Stop 后 fd drift=0 |
-| 3 | 热插拔 device discovery 设计 | 设备节点重枚举与能力变化设计文档 | USB 重枚举到非原路径时有明确状态与恢复策略 |
+| 3 | DMA-BUF 降级重配置专项验证 | active lease 场景下的降级/恢复专项 | 未 release fd 时跳过或延后重配置，Stop 后 fd drift=0 |
 
 ### 3.3 P2：暂缓或轻量维护
 

@@ -80,6 +80,15 @@ def print_report_line(check: CheckResult) -> None:
         print(f"  [FAIL] {check.check_id} ({check.actual} {check.op} {check.threshold}) category={check.category}")
 
 
+def max_check(check_id: str, category: str, actual: int, threshold: int) -> CheckResult:
+    if threshold < 0:
+        return CheckResult(check_id, category, "SKIP", actual, threshold, "<=", "not capped")
+    return CheckResult(
+        check_id, category,
+        "PASS" if actual <= threshold else "FAIL",
+        actual, threshold, "<=")
+
+
 def evaluate_stream_checks(tier: str, stream: dict, duration_sec: int,
                            requested_fps: int, subscriber_count: int) -> List[CheckResult]:
     results: List[CheckResult] = []
@@ -130,10 +139,8 @@ def evaluate_stream_checks(tier: str, stream: dict, duration_sec: int,
         capture, min_frames, ">="))
 
     # 采集层丢帧上限。
-    results.append(CheckResult(
-        "capture_zero_dropped", "METRICS_CAPTURE_FAIL",
-        "PASS" if dropped <= max_dropped else "FAIL",
-        dropped, max_dropped, "<="))
+    results.append(max_check(
+        "capture_zero_dropped", "METRICS_CAPTURE_FAIL", dropped, max_dropped))
 
     # DataPlaneV2 发送帧数下限。
     results.append(CheckResult(
@@ -161,10 +168,8 @@ def evaluate_stream_checks(tier: str, stream: dict, duration_sec: int,
         reason="degraded allowed" if allow_degraded else ""))
 
     # DMA-BUF lease 不应耗尽。
-    results.append(CheckResult(
-        "lease_exhausted", "METRICS_DATAPLANE_FAIL",
-        "PASS" if lease_exhausted <= max_lease_exhausted else "FAIL",
-        lease_exhausted, max_lease_exhausted, "<="))
+    results.append(max_check(
+        "lease_exhausted", "METRICS_DATAPLANE_FAIL", lease_exhausted, max_lease_exhausted))
 
     # 活跃 lease 数应在订阅者规模内收敛。
     results.append(CheckResult(
@@ -179,10 +184,8 @@ def evaluate_stream_checks(tier: str, stream: dict, duration_sec: int,
         release_pending, max_release_pending, "<="))
 
     # ReleaseFrame 不应超时回收。
-    results.append(CheckResult(
-        "release_timeout", "METRICS_DATAPLANE_FAIL",
-        "PASS" if release_timeout <= max_release_timeout else "FAIL",
-        release_timeout, max_release_timeout, "<="))
+    results.append(max_check(
+        "release_timeout", "METRICS_DATAPLANE_FAIL", release_timeout, max_release_timeout))
 
     # CameraSource 应处于 Streaming 状态。
     results.append(CheckResult(
@@ -243,10 +246,8 @@ def evaluate_global_checks(tier: str, global_data: dict, duration_sec: int,
         "PASS" if release_pending <= max_release_pending else "FAIL",
         release_pending, max_release_pending, "<="))
 
-    results.append(CheckResult(
-        "global_release_timeout", "METRICS_DATAPLANE_FAIL",
-        "PASS" if release_timeout <= max_release_timeout else "FAIL",
-        release_timeout, max_release_timeout, "<="))
+    results.append(max_check(
+        "global_release_timeout", "METRICS_DATAPLANE_FAIL", release_timeout, max_release_timeout))
 
     return results
 
@@ -327,20 +328,27 @@ def main() -> int:
             json.dump(report, f, indent=2)
         return 2
 
-    # 使用最后一条样本作为阈值判定快照。
+    # 使用最后一条样本作为 global 阈值判定快照；退出期 final snapshot 可能已经没有
+    # active stream provider，因此 stream 阈值使用最后一条非空 streams 样本。
     final_sample = samples[-1]
-    streams = final_sample.get("streams", [])
+    final_stream_sample: Optional[dict] = None
+    for sample in reversed(samples):
+        if sample.get("streams", []):
+            final_stream_sample = sample
+            break
+
+    streams = final_stream_sample.get("streams", []) if final_stream_sample else []
     global_data = final_sample.get("global", {})
 
     if not streams:
-        print("error: final sample contains no streams", file=sys.stderr)
+        print("error: no metrics sample contains streams", file=sys.stderr)
         report = {
             "tier": args.tier,
             "duration_sec": args.duration_sec,
             "device": args.device,
             "result": "ERROR",
             "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "error": "no streams in final sample",
+            "error": "no streams in metrics samples",
         }
         with open(args.output_report, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)

@@ -220,6 +220,19 @@ target_link_libraries(test_metrics_aggregator
 
 add_test(NAME test_metrics_aggregator COMMAND test_metrics_aggregator)
 
+add_executable(test_video_device_discovery
+    unit/test_video_device_discovery.cpp
+)
+
+target_link_libraries(test_video_device_discovery
+    PRIVATE
+        camera_subsystem_utils
+        ${GTEST_TARGET}
+        ${GTEST_MAIN_TARGET}
+)
+
+add_test(NAME test_video_device_discovery COMMAND test_video_device_discovery)
+
 add_executable(test_camera_source_recovery
     unit/test_camera_source_recovery.cpp
 )

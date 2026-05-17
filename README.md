@@ -13,7 +13,7 @@
 > - 每份项目文档必须在文档元信息和硬规范之后维护 `## 目录`，目录至少覆盖二级标题，并使用相对链接或页内锚点。
 > - `README.md` 是团队入口文档，开头必须维护工程结构概览、项目文档索引和常用入口链接。
 > - 评审建议、风险、ARCH-* 跟踪项只维护在 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)，其他文档只链接引用，避免重复漂移。
-> - Git 提交信息必须遵循项目既有风格：标题使用 `[类别] 简短动词短语`，正文使用 2-3 条 `- ` 列表说明主要修改范围；不要写“验证：XXX”这类独立验证段落，也不要附带外部 AI 生成标记。
+> - Git 提交信息必须遵循项目既有风格：标题使用 `[中文类别] 简短动词短语`，方括号内必须是中文；正文使用 2-3 条 `- ` 列表说明主要修改范围；不要写“验证：XXX”这类独立验证段落，也不要附带外部 AI 生成标记。
 
 ---
 
@@ -343,13 +343,17 @@ Smoke suite 档位：
 
 1. 默认数据面 IPC 仍是示例复制链路，不适合作为 4K 高帧率生产通路；跨进程 DMA-BUF 需要显式启用 `--io-method dmabuf --data-plane v2`。
 2. DMA-BUF 数据面已完成 RK3576 `/dev/video45` Phase 2 冒烟、慢消费者/双订阅者长稳、subscriber 崩溃 failover、release socket 主动断开、fd 泄漏长稳和 publisher 退出清理验证，但仍需补充真实 MIPI/RKISP 出帧验证，阶段性记录见 [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md)。
-3. CameraSource 设备断连恢复和 USB mmap/v1 降帧降级已落地；后续只保留不同硬件设备节点重枚举、DMA-BUF 重配置和 MIPI 后端差异的能力发现。
+3. CameraSource 设备断连恢复、设备发现重绑定和 USB mmap/v1 降帧降级已落地；设备发现当前保留 M3 一次性 hook + `candidate_missing` 的时序边界，后续只在真实多设备需求下再扩展。
 4. Web Preview 与 Codec Server 已满足当前调试闭环，后续只做主线 smoke、错误收敛和低拷贝输入适配，不扩展复杂 UI 或新容器能力。
 
-下一步建议按以下顺序推进，并与 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 的 P0/P1 风险项对齐：
+当前阶段按“快速收口”推进，并与 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 的 P0/P1 风险项对齐：
 
-1. **真实 MIPI/RKISP live STREAMON**：MPLANE 骨架已就绪，需 sensor 到位后验证 STREAMON、DQBUF/QBUF 帧率稳定性、per-plane `bytesused` 真实性和 DataPlaneV2 端到端路径。
+1. **USB/RK3576 主链路封板**：只保留现有 `dataplane-lifecycle`、`stream-metrics`、`multi-camera-topology` 作为回归入口，不再继续扩张 smoke 脚本和报告格式。
+2. **设备发现边界定版**：M0/M1/M2a/M2b/M3 保持当前能力，M3 一次性 hook + `candidate_missing` 时序边界作为已知限制记录，方向 B（status/control refresh）暂不实现。
+3. **文档与计划收口**：统一 README、实现状态、路线图和设计文档的当前阶段目标，明确 USB 基线完成，MIPI live 与低拷贝录制等待硬件条件。
+
+硬件到位后再重新开启后续阶段：
+
+1. **真实 MIPI/RKISP live STREAMON**：MPLANE 骨架已就绪，待 sensor 到位后验证 STREAMON、DQBUF/QBUF 帧率稳定性、per-plane `bytesused` 真实性和 DataPlaneV2 端到端路径。
 2. **DataPlaneV2 -> MPP 低拷贝录制编码**：设计文档已完成（copy path / fd path 选择、MPP import 契约、release 时序、fallback），待真实 MIPI sensor 到位后进入编码阶段。
-3. **板端可观测性增强**：基于已落地的 Metrics 接口，将 per-stream 指标快照接入板端 smoke 自动判定（如 `capture_frame_count`、`broker_dropped_count`、`release_pending_count`、`source_degradation_count` 阈值检查）。
-4. **DMA-BUF 降级重配置验证**：在 DataPlaneV2 active lease 场景下验证降级重配置的跳过、重试和回收策略，避免 STREAMOFF/STREAMON 与未 release fd 冲突。
-5. **热插拔能力发现**：针对后续不同 USB/MIPI 硬件，补设备节点重枚举、设备能力变化和订阅端提示策略。
+3. **DMA-BUF 降级重配置专项验证**：active lease 场景下的跳过、重试和回收策略留作后续专项，不再挤占当前收口周期。

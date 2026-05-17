@@ -27,6 +27,9 @@ MAX_LEASE_EXHAUSTED="${MAX_LEASE_EXHAUSTED:-0}"
 MAX_EXPORT_FAIL="${MAX_EXPORT_FAIL:-0}"
 CHECK_CLEANUP="${CHECK_CLEANUP:-1}"
 REQUESTED_FPS="${REQUESTED_FPS:-15}"
+DEVICE_DISCOVERY_STATUS="${DEVICE_DISCOVERY_STATUS:-0}"
+ENABLE_DEVICE_REBIND_ON_START_FAILURE="${ENABLE_DEVICE_REBIND_ON_START_FAILURE:-0}"
+ENABLE_DEVICE_REBIND_ON_RECOVERY_FAILURE="${ENABLE_DEVICE_REBIND_ON_RECOVERY_FAILURE:-0}"
 
 CONTROL_SOCKET="/tmp/camera_subsystem_control.sock"
 DATA_SOCKET="/tmp/camera_subsystem_data_v2.sock"
@@ -190,11 +193,24 @@ run_ssh "set -e; \
 
 run_ssh "set -e; \
     cd '${BOARD_DIR}'; \
+    device_discovery_args=''; \
+    if [ '${DEVICE_DISCOVERY_STATUS}' = '1' ]; then \
+        device_discovery_args='--device-discovery-status-path ${BOARD_DIR}/device_discovery_status.json'; \
+    fi; \
+    device_rebind_args=''; \
+    if [ '${ENABLE_DEVICE_REBIND_ON_START_FAILURE}' = '1' ]; then \
+        device_rebind_args='--enable-device-rebind-on-start-failure'; \
+    fi; \
+    device_recovery_rebind_args=''; \
+    if [ '${ENABLE_DEVICE_REBIND_ON_RECOVERY_FAILURE}' = '1' ]; then \
+        device_recovery_rebind_args='--enable-device-rebind-on-recovery-failure'; \
+    fi; \
     nohup ./camera_publisher_example '${DEVICE}' '${CONTROL_SOCKET}' '${DATA_SOCKET}' \
         --io-method dmabuf --data-plane v2 --release-socket '${RELEASE_SOCKET}' \
         --metrics-history-path '${BOARD_DIR}/metrics_history.jsonl' \
         --metrics-history-interval '${SAMPLE_INTERVAL_SEC}' \
         --metrics-snapshot-path '${BOARD_DIR}/metrics_snapshot.json' \
+        \${device_discovery_args} \${device_rebind_args} \${device_recovery_rebind_args} \
         > publisher.log 2>&1 & echo \$! > publisher.pid"
 
 sleep 2
@@ -262,6 +278,7 @@ run_scp \
 run_scp \
     "${TARGET}:${BOARD_DIR}/metrics_history.jsonl" \
     "${TARGET}:${BOARD_DIR}/metrics_snapshot.json" \
+    "${TARGET}:${BOARD_DIR}/device_discovery_status.json" \
     "${LOCAL_LOG_DIR}/" >/dev/null || true
 
 echo "Logs copied to ${LOCAL_LOG_DIR}"
@@ -319,6 +336,30 @@ else
     metrics_failures=$((metrics_failures + 1))
 fi
 failures=$((failures + metrics_failures))
+
+if [[ "${DEVICE_DISCOVERY_STATUS}" == "1" ]]; then
+    discovery_status_local="${LOCAL_LOG_DIR}/device_discovery_status.json"
+    if [[ -s "${discovery_status_local}" ]]; then
+        echo "PASS: device_discovery_status.exists"
+    else
+        echo "FAIL: device_discovery_status.exists"
+        failures=$((failures + 1))
+    fi
+
+    if grep -q '"physical_id":"usb:' "${discovery_status_local}" 2>/dev/null; then
+        echo "PASS: device_discovery_status.physical_id"
+    else
+        echo "FAIL: device_discovery_status.physical_id"
+        failures=$((failures + 1))
+    fi
+
+    if grep -q 'device discovery snapshot' "${LOCAL_LOG_DIR}/publisher.log" 2>/dev/null; then
+        echo "PASS: publisher.device_discovery_snapshot"
+    else
+        echo "FAIL: publisher.device_discovery_snapshot"
+        failures=$((failures + 1))
+    fi
+fi
 
 publisher_range="$(fd_count_range publisher "${LOCAL_LOG_DIR}/fd_samples.log")"
 if [[ -z "${publisher_range}" ]]; then

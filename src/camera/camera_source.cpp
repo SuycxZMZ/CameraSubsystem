@@ -397,6 +397,12 @@ uint64_t CameraSource::GetRecoveryAttemptCount() const
     return recovery_attempt_count_.load();
 }
 
+void CameraSource::SetRecoveryFailedHook(RecoveryFailedCallback callback)
+{
+    std::lock_guard<std::mutex> lock(hook_mutex_);
+    recovery_failed_hook_ = std::move(callback);
+}
+
 bool CameraSource::IsDegraded() const
 {
     return is_degraded_.load();
@@ -659,6 +665,24 @@ void CameraSource::MonitorLoop()
 
         if (attempt >= config_.max_recovery_attempts)
         {
+            // M3: 在进入 permanent failure 前调用 recovery failed hook
+            RecoveryFailedCallback recovery_failed_hook;
+            {
+                std::lock_guard<std::mutex> lock(hook_mutex_);
+                recovery_failed_hook = recovery_failed_hook_;
+            }
+            if (recovery_failed_hook)
+            {
+                recovery_failed_hook(device_path_);
+            }
+
+            // 兼容同步 hook：publisher 当前使用异步重绑定，通常会先进入 kPermanentFailure，
+            // 后台线程完成重绑定后再重新进入 kStreaming。
+            if (state_.load() == SourceState::kStreaming)
+            {
+                break;
+            }
+
             platform::PlatformLogger::Log(
                 core::LogLevel::kError, "camera_source",
                 "Recovery failed after %u attempts, entering permanent failure", attempt);

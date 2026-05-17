@@ -1,6 +1,6 @@
 # CameraSubsystem 实现状态
 
-**更新日期:** 2026-05-14
+**更新日期:** 2026-05-17
 
 > **文档硬规范**
 >
@@ -244,7 +244,7 @@ flowchart TB
 
 ## 测试状态
 
-**状态:** 部分完成
+**状态:** 主链路收口中
 
 **已实现测试:**
 
@@ -262,14 +262,14 @@ flowchart TB
 - ✅ H.264 文件播放兼容性：ffprobe 确认 H.264 High profile 1920x1080
 - ✅ CameraSource recovery 单元测试与 RK3576 USB 物理热插拔验证
 - ✅ CameraSource degradation 单元测试与 RK3576 USB UVC `mmap/v1` enable=1 降级/恢复验证
+- ✅ RK3576 `stream-metrics` 自动判定入口：`dataplane-lifecycle`、failover、release-disconnect 已统一到结构化 metrics 判定
+- ✅ 设备发现与重绑定当前边界：M2b start 失败重绑定、M3 recovery failed hook、USB driver unbind/bind 触发验证已完成
 
-**待添加测试:**
+**后续专项（不纳入当前 2 到 3 个对话收口目标）:**
 
-- ⏳ PlatformLayer 单元测试
-- ⏳ 集成测试
-- ⏳ 性能测试
-- ⏳ Metrics 集成测试（与真实板端 smoke 自动阈值判定联动）
-- ⏳ DMA-BUF active lease 场景下的降级重配置验证
+- ⏸️ PlatformLayer 细粒度单元测试
+- ⏸️ 独立性能基准与长时压测
+- ⏸️ DMA-BUF active lease 场景下的降级重配置专项 fault injection
 
 ## 文档状态
 
@@ -283,11 +283,10 @@ flowchart TB
 - ✅ docs/METRICS_INTERFACE_DESIGN.md - 统一 Metrics 接口设计
 - ✅ docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md - DataPlaneV2 → MPP 低拷贝录制设计
 - ✅ AGENTS.md - Agent 工作指南
-- ✅ docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md - DataPlaneV2 → MPP 低拷贝录制设计文档
-- ✅ docs/METRICS_INTERFACE_DESIGN.md - 统一 Metrics 接口设计文档
 - ✅ API_REFERENCE.md - API接口文档
 - ✅ NAMING_CONVENTION.md - 命名规范文档
 - ✅ IMPLEMENTATION_STATUS.md - 本文件
+- ✅ 已完成的板端 Metrics、设备发现恢复、DMA-BUF 降级验证阶段性设计已并入主线文档并删除独立设计稿
 
 **待添加文档:**
 
@@ -298,35 +297,36 @@ flowchart TB
 
 ## 下一步工作计划
 
-当前主线不再是 Web/Codec 功能扩展，而是把已经跑通的 USB/RK3576 链路收敛为可观测、可回归、可承接 MIPI/RKISP 的生产前基线。
+当前主线不再是继续扩张 smoke 脚本或外围功能，而是把已经跑通的 USB/RK3576 主链路在 2 到 3 个对话内收敛成可交接基线。后续只接受会影响主链路正确性、板端稳定性或文档一致性的修改。
 
-### P0：硬件到位后立即推进
+### P0：未来 2 到 3 个对话内完成的收口项
+
+1. **USB/RK3576 主链路封板**
+   - 保留现有 `dataplane-lifecycle`、`stream-metrics`、`multi-camera-topology` 作为回归入口，不再新增新的 smoke 维度、报告格式或脚本框架。
+   - 后续板端验证只做“现有入口回归 + 真实 bug 修复”，不再为脚本覆盖率追加独立任务。
+
+2. **设备发现与热插拔边界定版**
+   - M0/M1/M2a/M2b/M3 视为当前阶段完成，后续只修正确性问题，不进入方向 B（status/control refresh）持续轮询实现。
+   - 当前 M3 一次性 hook + `candidate_missing` 时序边界保留为已知限制，等待未来真实多设备需求再重开。
+
+3. **文档与计划收口**
+   - 统一 README、实现状态、路线图和设计文档的“当前阶段目标”，删除会把任务拖向脚本扩张的表述。
+   - 明确当前阶段结束标准：USB 主链路稳定、现有板端入口可回归、MIPI/低拷贝录制作为硬件阻塞项挂牌。
+
+### P1：保留为后续阶段入口，但不纳入当前收口
 
 1. **真实 MIPI/RKISP live STREAMON**
    - MPLANE live 初始化骨架已就绪，当前只缺真实 MIPI sensor 和媒体管道。
-   - sensor 到位后优先验证 STREAMON、持续 DQBUF/QBUF、per-plane `bytesused`、timestamp/sequence、release 后持续采集。
-   - 验证产物应进入 `multi-camera-topology` smoke，而不是只保留一次性手工日志。
+   - sensor 到位后再验证 STREAMON、持续 DQBUF/QBUF、per-plane `bytesused`、timestamp/sequence、release 后持续采集。
 
 2. **DataPlaneV2 -> MPP 低拷贝录制实现**
    - 以 [docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md) 为唯一设计入口。
    - 只有在真实 `NV12 + kDmaBuf + plane_count==1` live frame 可验证后，才实现 codec server fd path。
    - USB MJPEG 继续走 copy path，不为 USB 压缩帧强行套 fd import。
 
-### P1：不依赖新增摄像头的主线增强
-
-1. **Metrics smoke Phase 2 扩展**
-   - `dataplane-lifecycle` 已改为基于 `StreamMetrics` JSON Lines 自动判定，并通过 RK3576 `/dev/video45` 双订阅者 60 秒 smoke。
-   - `rk3576-board-smoke-suite.sh` 已新增显式 `stream-metrics` suite，作为团队快速入口。
-   - 下一步优先把 failover / release-disconnect smoke 的 publisher 计数判定迁移到同一 evaluator，避免重新引入日志 grep。
-
-2. **DMA-BUF 降级重配置验证**
-   - 当前 `mmap/v1` 降级/恢复已完成，DMA-BUF active lease 场景仍需单独验证。
-   - 验证重点是 active lease 未 release 时跳过重配置、后续重试、Stop 清理和 fd drift。
-   - 如果驱动在 streaming 状态下拒绝 `VIDIOC_S_PARM`，继续保持 CaptureLoop 单线程 STREAMOFF/S_PARM/QBUF/STREAMON 策略。
-
-3. **热插拔能力发现与设备重枚举策略**
-   - USB 物理拔插恢复已经通过，但仍假设设备回到原路径 `/dev/video45`。
-   - 后续需要设计 device discovery：设备节点变化、能力变化、MIPI pipeline 缺失时的状态暴露和订阅端错误收敛。
+3. **DMA-BUF 降级重配置专项 fault injection**
+   - 当前 `mmap/v1` 降级/恢复已完成；DMA-BUF slow-consumer backpressure 不误降级验证已通过。
+   - active lease 未 release 时跳过重配置、后续重试等分支保留为后续专项，不塞进本阶段普通 smoke。
 
 ### P2：暂缓或只做轻量维护
 
@@ -500,6 +500,9 @@ flowchart TB
 - [x] 设备断连恢复状态机（ARCH-007）：自动恢复默认关闭，`SourceState` / Metrics / capture-monitor 双线程已落地，RK3576 smoke 与 USB 物理拔插/重插恢复实测通过 ✅ 2026-05-13
 - [x] 降级策略（ARCH-008）：已完成；RK3576 `/dev/video45` USB UVC、`mmap/v1` 路径 enable=1 降级/恢复/Stop 清理验证通过；DMA-BUF 重配置策略待后续单独验证 ✅ 2026-05-13
 - [ ] 按 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 推进 ARCH-* 评审项
+- [x] M2b 启动失败路径设备重绑定板端实证通过 ✅ 2026-05-16
+- [x] M3 CameraSource 恢复失败重绑定 hook 已实现 ✅ 2026-05-16
+- [x] M3 热插拔验证：USB driver unbind/bind 模拟，hook 触发成功，一次性时序限制已记录 ✅ 2026-05-17
 
 ## 贡献指南
 
@@ -522,5 +525,5 @@ flowchart TB
 
 ---
 
-**最后更新:** 2026-05-14
-**文档版本:** v0.4
+**最后更新:** 2026-05-17
+**文档版本:** v0.5.1

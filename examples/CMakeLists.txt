@@ -12,6 +12,7 @@ target_link_libraries(camera_publisher_example
     PRIVATE
         camera_subsystem_ipc
         camera_subsystem_camera
+        camera_subsystem_utils
         camera_subsystem_platform
         camera_subsystem_core
 )

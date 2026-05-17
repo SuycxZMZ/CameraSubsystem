@@ -34,7 +34,7 @@
 | **Web Preview** | W1-W2 已完成（`stream_index -> stream_id` 映射） | **W3/W4 暂缓**。除必要 bugfix 不扩大前端功能 |
 | **Codec Server** | 多 `RecordingSession`、raw H.264 和最小 MP4 已完成 | **快速收敛**。除 smoke/bugfix/低拷贝输入适配外不扩展新能力 |
 | **MIPI/RKISP** | MPLANE readiness probe 和 probe-only 初始化骨架已完成 | **尚未完成真实 MIPI live STREAMON**。不要标记为已完成 |
-| **板端 smoke** | `quick/full/extended` 三档 + `multi-camera-topology` 已接入 | 平台相关变更应通过 smoke；真实 MIPI 接入后升级为联合 smoke |
+| **板端 smoke** | `quick/full/extended` 三档 + `multi-camera-topology` 已接入 | 当前阶段只保留为回归入口，不再继续扩张脚本功能面 |
 | **背压参数化** | `BackpressureConfig` / `DropPolicy` / 慢消费者检测已完成 | stress test 兼容；新增 4 个单元测试 |
 | **统一 Metrics** | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator` 已完成 | CameraSource / FrameBroker 已接入；publisher 示例已替换手动聚合；10 个单元测试 |
 | **CameraSource 恢复/降级** | USB 断连恢复、物理热插拔、`mmap/v1` enable=1 降帧降级已完成 | 降级默认关闭；DMA-BUF 重配置边界待后续独立验证，不要扩大为“全路径已完成” |
@@ -106,8 +106,9 @@
    - 手工编辑优先使用补丁方式，避免无关重写
 
 4. **Git 提交规范（硬性约束）**
-   - 提交风格必须对齐项目既有提交 `eef4dcbfe74d2dbdbc87f1e9fd104c17f2b0527b`：标题使用 `[范围] 动词短语`，正文使用多条 `- ` 列表说明修改事实、边界和影响。
-   - 标题范围必须具体，优先使用模块、阶段或 ARCH 编号，例如 `[ARCH-008] 接入 CameraSource 降帧降级策略`、`[web_preview] 修复录制停止后连接中断`、`[docs] 同步 RK3576 板端验证状态`。
+   - 提交风格必须对齐项目既有提交 `eef4dcbfe74d2dbdbc87f1e9fd104c17f2b0527b`：标题使用 `[中文类别] 动词短语`，正文使用多条 `- ` 列表说明修改事实、边界和影响。
+   - 标题方括号 `[]` 内必须是中文，不允许使用 `[docs]`、`[metrics]`、`[web_preview]`、`[chore]`、`[ARCH-008]` 这类英文、拼音或纯编号类别。
+   - 标题类别必须具体，优先使用中文模块、阶段或用途，例如 `[架构] 接入 CameraSource 降帧降级策略`、`[网页预览] 修复录制停止后连接中断`、`[文档] 同步 RK3576 板端验证状态`、`[板端验证] 增加拓扑 smoke 自动判定`。ARCH 编号可以写在标题动词短语或正文中，例如 `[架构] 收敛 ARCH-008 降帧降级状态`。
    - 正文必须写 2-5 条 `- ` 列表；每条说明一个事实性修改范围，不写空泛描述，不写营销式总结。
    - 禁止写独立的 `验证：XXX` 段落；验证结果如需记录，只能作为正文列表中的事实，例如 `- RK3576 /dev/video45 mmap/v1 enable=1 降级与恢复验证通过`。
    - 禁止附带外部 AI 生成标记，例如 `Generated with ...`、`Co-Authored-By: ...`，除非用户明确要求。
@@ -121,7 +122,7 @@
    推荐提交示例：
 
    ```text
-   [ARCH-008] 接入 CameraSource 降帧降级策略
+   [架构] 接入 CameraSource 降帧降级策略
 
    - 扩展 CameraConfig 与 StreamMetrics 降级字段，保持 CameraConfig ABI 大小不变
    - 在 CaptureLoop 成功 DQBUF 后接入滑动窗口 fps 评估与受控 STREAMOFF/S_PARM/STREAMON 重配置
@@ -187,16 +188,17 @@
 
 开发重心按以下顺序推进，**不要偏离主线去扩展外围功能**。详细分析见 [docs/DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md)。
 
-### P0：硬件到位后立即执行
+### P0：当前收口阶段
 
-1. **真实 MIPI/RKISP live STREAMON** — MPLANE 骨架已就绪，需验证 STREAMON 后 DQBUF/QBUF 帧率稳定性、per-plane `bytesused` 真实性、timestamp 正确性、per-plane fd 端到端路径。
-2. **DataPlaneV2 -> MPP 低拷贝录制实现** — 只在真实 NV12 DMA-BUF live frame 可验证后编码 fd path；USB MJPEG 继续保留 copy path。
+1. **USB/RK3576 主链路封板** — 只做现有板端入口回归与真实 bug 修复，不再新增 smoke 维度、报告格式或脚本框架。
+2. **设备发现边界定版** — M0/M1/M2a/M2b/M3 保持当前能力，方向 B（status/control refresh）暂不实现。
+3. **文档与计划收口** — README、实现状态、路线图必须统一为“USB 基线完成、MIPI/低拷贝录制因硬件阻塞后移”。
 
-### P1：不依赖新增摄像头的主线增强
+### P1：硬件到位后再开启
 
-3. **板端 Metrics smoke 自动判定** — 将 `StreamMetrics` 快照接入 smoke 阈值判断，减少日志 grep 和人工判断。
-4. **DMA-BUF 降级重配置验证** — 针对 active lease 场景验证降级重配置的跳过、重试和清理边界。
-5. **热插拔能力发现** — 针对不同 USB/MIPI 设备补 device discovery、节点重枚举和订阅端提示策略。
+4. **真实 MIPI/RKISP live STREAMON** — MPLANE 骨架已就绪，待真实 sensor 验证 live frame 与 release 闭环。
+5. **DataPlaneV2 -> MPP 低拷贝录制实现** — 只在真实 NV12 DMA-BUF live frame 可验证后编码 fd path。
+6. **DMA-BUF 降级重配置专项验证** — active lease 场景的跳过、重试和清理保留为后续专项，不挤占当前收口。
 
 **明确暂缓项：** 复杂 UI 体验、自动续录、RTSP 推流、H.265、MKV 容器、分段录制、断电恢复
 

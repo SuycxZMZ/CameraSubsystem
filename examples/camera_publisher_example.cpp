@@ -34,6 +34,7 @@
 #include "camera_subsystem/ipc/camera_data_ipc.h"
 #include "camera_subsystem/ipc/camera_data_plane_v2.h"
 #include "camera_subsystem/platform/platform_logger.h"
+#include "camera_subsystem/utils/video_device_discovery.h"
 
 #include <algorithm>
 #include <atomic>
@@ -82,6 +83,11 @@ using camera_subsystem::ipc::MakeCameraDataFrameDescriptorV2;
 using camera_subsystem::ipc::MakeCameraStreamIdentityFromEndpoint;
 using camera_subsystem::ipc::SendCameraDataFrameDescriptorV2;
 using camera_subsystem::platform::PlatformLogger;
+using camera_subsystem::utils::FindUniqueVideoDeviceByPhysicalId;
+using camera_subsystem::utils::FormatVideoDeviceDiscoveryForLog;
+using camera_subsystem::utils::InspectVideoDevice;
+using camera_subsystem::utils::ScanVideoDevices;
+using camera_subsystem::utils::VideoDeviceDiscoveryInfo;
 
 std::atomic<bool> g_running(true);
 
@@ -521,6 +527,13 @@ std::string JsonEscapeString(const std::string& raw)
     return escaped;
 }
 
+uint64_t NowNs()
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
 std::string MetricsToJsonLine(const std::vector<StreamMetrics>& streams,
                               const PublisherStats* stats,
                               CameraReleaseServer* release_server)
@@ -528,10 +541,7 @@ std::string MetricsToJsonLine(const std::vector<StreamMetrics>& streams,
     std::string result;
     result.reserve(1024);
 
-    const uint64_t ts_ns =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count();
+    const uint64_t ts_ns = NowNs();
 
     result += "{\"timestamp_ns\":" + std::to_string(ts_ns) + ",\"streams\":[";
 
@@ -596,6 +606,20 @@ bool AppendMetricsLine(const std::string& path, const std::vector<StreamMetrics>
     return ok;
 }
 
+std::string DiscoveryStateName(const VideoDeviceDiscoveryInfo& info)
+{
+    if (info.exists)
+    {
+        return "Bound";
+    }
+    return "Missing";
+}
+
+bool IsKnownPhysicalId(const std::string& physical_id)
+{
+    return !physical_id.empty() && physical_id != "unknown";
+}
+
 struct PendingLeaseKey
 {
     uint32_t stream_id = 0;
@@ -627,11 +651,231 @@ struct CameraStreamRuntime
     std::mutex mutex;
     CameraSource source;
     CameraStreamIdentity identity;
+    std::string configured_device_path;
+    std::string current_device_path;
+    std::string stable_physical_id;
+    std::string discovery_state = "Unknown";
+    size_t discovery_candidate_count = 0;
+    uint64_t device_rebind_count = 0;
+    std::string last_rebind_from;
+    std::string last_rebind_to;
+    std::string last_rebind_reason;
+    std::string last_rebind_error;
+    VideoDeviceDiscoveryInfo discovery_info;
+    uint64_t discovery_last_refresh_ns = 0;
     std::unordered_map<PendingLeaseKey, std::shared_ptr<FrameLease>, PendingLeaseKeyHash>
         pending_leases;
     bool callbacks_configured = false;
     bool metrics_providers_registered = false;
 };
+
+std::string DeviceDiscoveryStatusToJson(
+    const std::unordered_map<std::string, std::shared_ptr<CameraStreamRuntime>>& runtimes)
+{
+    std::string result;
+    result.reserve(1024);
+    result += "{\"streams\":[";
+
+    bool first = true;
+    for (const auto& item : runtimes)
+    {
+        const auto& runtime = item.second;
+        if (!runtime)
+        {
+            continue;
+        }
+
+        std::lock_guard<std::mutex> lock(runtime->mutex);
+        const auto& info = runtime->discovery_info;
+
+        if (!first)
+        {
+            result += ",";
+        }
+        first = false;
+
+        result += "{\"stream_id\":\"" + JsonEscapeString(runtime->identity.stream_id.data()) +
+                  "\",";
+        result += "\"camera_id\":" + std::to_string(runtime->identity.camera_id) + ",";
+        result += "\"configured_device_path\":\"" +
+                  JsonEscapeString(runtime->configured_device_path) + "\",";
+        result += "\"current_device_path\":\"" + JsonEscapeString(runtime->current_device_path) +
+                  "\",";
+        result += "\"discovery_state\":\"" + JsonEscapeString(runtime->discovery_state) + "\",";
+        result += "\"device_exists\":" + std::string(info.exists ? "true" : "false") + ",";
+        result += "\"can_capture\":" + std::string(info.can_capture ? "true" : "false") + ",";
+        result += "\"physical_id\":\"" + JsonEscapeString(info.physical_id) + "\",";
+        result += "\"stable_physical_id\":\"" + JsonEscapeString(runtime->stable_physical_id) +
+                  "\",";
+        result += "\"driver\":\"" + JsonEscapeString(info.driver) + "\",";
+        result += "\"name\":\"" + JsonEscapeString(info.name) + "\",";
+        result += "\"bus_info\":\"" + JsonEscapeString(info.bus_info) + "\",";
+        result += "\"subsystem\":\"" + JsonEscapeString(info.subsystem) + "\",";
+        result += "\"vendor_id\":\"" + JsonEscapeString(info.vendor_id) + "\",";
+        result += "\"product_id\":\"" + JsonEscapeString(info.product_id) + "\",";
+        result += "\"serial\":\"" + JsonEscapeString(info.serial) + "\",";
+        result += "\"candidate_count\":" +
+                  std::to_string(runtime->discovery_candidate_count) + ",";
+        result += "\"rebind_count\":" + std::to_string(runtime->device_rebind_count) + ",";
+        result += "\"last_rebind_from\":\"" + JsonEscapeString(runtime->last_rebind_from) +
+                  "\",";
+        result += "\"last_rebind_to\":\"" + JsonEscapeString(runtime->last_rebind_to) + "\",";
+        result += "\"last_rebind_reason\":\"" +
+                  JsonEscapeString(runtime->last_rebind_reason) + "\",";
+        result += "\"last_rebind_error\":\"" +
+                  JsonEscapeString(runtime->last_rebind_error) + "\",";
+        result += "\"last_refresh_ns\":" +
+                  std::to_string(runtime->discovery_last_refresh_ns) + "}";
+    }
+
+    result += "]}";
+    return result;
+}
+
+bool WriteDeviceDiscoveryStatusFile(
+    const std::string& path,
+    const std::unordered_map<std::string, std::shared_ptr<CameraStreamRuntime>>& runtimes)
+{
+    if (path.empty())
+    {
+        return true;
+    }
+
+    const std::string content = DeviceDiscoveryStatusToJson(runtimes);
+    const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+    {
+        return false;
+    }
+
+    const bool ok = WriteFull(fd, content.data(), content.size()) && WriteFull(fd, "\n", 1);
+    close(fd);
+    return ok;
+}
+
+bool TryRebindRuntimeDeviceOnStartFailure(const std::shared_ptr<CameraStreamRuntime>& runtime,
+                                          const CameraStreamIdentity& identity,
+                                          const CameraConfig& config,
+                                          CameraReleaseServer* release_server,
+                                          const std::string& failed_device_path,
+                                          const std::string& reason)
+{
+    if (!runtime)
+    {
+        return false;
+    }
+
+    runtime->last_rebind_reason = reason;
+    runtime->last_rebind_from = failed_device_path;
+    runtime->last_rebind_to.clear();
+
+    std::string physical_id = runtime->stable_physical_id;
+    if (!IsKnownPhysicalId(physical_id))
+    {
+        const auto all_devices = ScanVideoDevices();
+        std::vector<VideoDeviceDiscoveryInfo> usb_capture_candidates;
+        for (const auto& d : all_devices)
+        {
+            if (d.exists && d.can_capture && d.subsystem == "usb" &&
+                IsKnownPhysicalId(d.physical_id) && d.device_path != failed_device_path)
+            {
+                usb_capture_candidates.push_back(d);
+            }
+        }
+        if (usb_capture_candidates.size() == 1)
+        {
+            physical_id = usb_capture_candidates[0].physical_id;
+            PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                                "stable_physical_id inferred from single USB capture candidate: stream=%s physical_id=%s",
+                                identity.stream_id.data(), physical_id.c_str());
+        }
+        else
+        {
+            runtime->discovery_state = "Missing";
+            runtime->last_rebind_error = usb_capture_candidates.empty()
+                ? "stable_physical_id_unavailable"
+                : "stable_physical_id_unavailable_ambiguous_usb";
+            return false;
+        }
+    }
+
+    if (!runtime->pending_leases.empty() ||
+        (release_server && release_server->PendingFrameCount() > 0))
+    {
+        runtime->discovery_state = "RebindBlocked";
+        runtime->last_rebind_error = "pending_leases_or_releases";
+        return false;
+    }
+
+    const auto devices = ScanVideoDevices();
+    const auto match = FindUniqueVideoDeviceByPhysicalId(devices, physical_id);
+    runtime->discovery_candidate_count = match.candidate_count;
+
+    if (!match.has_unique_match)
+    {
+        runtime->discovery_state = match.candidate_count == 0 ? "Missing" : "Ambiguous";
+        runtime->last_rebind_error =
+            match.candidate_count == 0 ? "candidate_missing" : "candidate_ambiguous";
+        return false;
+    }
+
+    const std::string candidate_path = match.device.device_path;
+    if (candidate_path.empty() || candidate_path == failed_device_path)
+    {
+        runtime->discovery_state = "Missing";
+        runtime->last_rebind_error = "candidate_not_changed";
+        return false;
+    }
+
+    PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                        "trying device rebind: stream=%s physical_id=%s from=%s to=%s reason=%s",
+                        identity.stream_id.data(), physical_id.c_str(), failed_device_path.c_str(),
+                        candidate_path.c_str(), reason.c_str());
+
+    runtime->source.Stop();
+    runtime->source.SetStreamIdentity(identity);
+    runtime->source.SetDevicePath(candidate_path);
+
+    if (!runtime->source.Initialize(config))
+    {
+        runtime->source.Stop();
+        runtime->source.SetDevicePath(failed_device_path);
+        runtime->discovery_state = "CapabilityChanged";
+        runtime->last_rebind_error = "candidate_initialize_failed";
+        PlatformLogger::Log(LogLevel::kWarning, "publisher",
+                            "device rebind initialize failed: stream=%s from=%s to=%s",
+                            identity.stream_id.data(), failed_device_path.c_str(),
+                            candidate_path.c_str());
+        return false;
+    }
+
+    if (!runtime->source.Start())
+    {
+        runtime->source.Stop();
+        runtime->source.SetDevicePath(failed_device_path);
+        runtime->discovery_state = "CapabilityChanged";
+        runtime->last_rebind_error = "candidate_start_failed";
+        PlatformLogger::Log(LogLevel::kWarning, "publisher",
+                            "device rebind start failed: stream=%s from=%s to=%s",
+                            identity.stream_id.data(), failed_device_path.c_str(),
+                            candidate_path.c_str());
+        return false;
+    }
+
+    runtime->current_device_path = candidate_path;
+    runtime->discovery_info = match.device;
+    runtime->discovery_state = "Bound";
+    runtime->discovery_last_refresh_ns = NowNs();
+    runtime->last_rebind_to = candidate_path;
+    runtime->last_rebind_error.clear();
+    ++runtime->device_rebind_count;
+
+    PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                        "device rebind succeeded: stream=%s physical_id=%s from=%s to=%s",
+                        identity.stream_id.data(), physical_id.c_str(), failed_device_path.c_str(),
+                        candidate_path.c_str());
+    return true;
+}
 
 const char* SourceStateName(SourceState state)
 {
@@ -711,7 +955,10 @@ int main(int argc, char* argv[])
     uint32_t recovery_backoff_max_ms = 30000;
     std::string metrics_history_path;
     std::string metrics_snapshot_path;
+    std::string device_discovery_status_path;
     uint32_t metrics_history_interval_sec = 5;
+    bool enable_device_rebind_on_start_failure = false;
+    bool enable_device_rebind_on_recovery_failure = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -821,6 +1068,19 @@ int main(int argc, char* argv[])
                 metrics_history_interval_sec = 5;
             }
         }
+        else if (arg == "--device-discovery-status-path" && i + 1 < argc)
+        {
+            ++i;
+            device_discovery_status_path = argv[i];
+        }
+        else if (arg == "--enable-device-rebind-on-start-failure")
+        {
+            enable_device_rebind_on_start_failure = true;
+        }
+        else if (arg == "--enable-device-rebind-on-recovery-failure")
+        {
+            enable_device_rebind_on_recovery_failure = true;
+        }
         else if (arg == "--help" || arg == "-h")
         {
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
@@ -832,7 +1092,9 @@ int main(int argc, char* argv[])
                                 "[--disconnect-threshold n] [--max-recovery-attempts n] "
                                 "[--recovery-backoff-ms ms] [--recovery-backoff-max-ms ms] "
                                 "[--metrics-history-path path] [--metrics-snapshot-path path] "
-                                "[--metrics-history-interval sec]",
+                                "[--metrics-history-interval sec] "
+                                "[--device-discovery-status-path path] "
+                                "[--enable-device-rebind-on-start-failure]",
                                 argv[0]);
             return 0;
         }
@@ -858,13 +1120,16 @@ int main(int argc, char* argv[])
     PlatformLogger::Log(LogLevel::kInfo, "publisher",
                         "publisher start, device=%s, control_socket=%s, data_socket=%s, "
                         "release_socket=%s, io_method=%s, data_plane=%s, auto_recovery=%s, "
-                        "degradation=%s",
+                        "degradation=%s, device_discovery_status=%s, start_failure_rebind=%s, recovery_failure_rebind=%s",
                         device_path.c_str(), control_socket_path.c_str(), data_socket_path.c_str(),
                         release_socket_path.c_str(),
                         io_method == IoMethod::kDmaBuf ? "dmabuf" : "mmap",
                         data_plane_mode == DataPlaneMode::kV2DmaBuf ? "v2" : "v1",
                         enable_auto_recovery ? "enabled" : "disabled",
-                        enable_degradation ? "enabled" : "disabled");
+                        enable_degradation ? "enabled" : "disabled",
+                        device_discovery_status_path.empty() ? "disabled" : "enabled",
+                        enable_device_rebind_on_start_failure ? "enabled" : "disabled",
+                        enable_device_rebind_on_recovery_failure ? "enabled" : "disabled");
 
     DataSocketServer data_server;
     DataPlaneV2SocketServer data_v2_server;
@@ -1127,20 +1392,53 @@ int main(int argc, char* argv[])
             runtime->source.SetStreamIdentity(identity);
             runtime->source.SetDevicePath(endpoint.device_path);
 
+            const auto discovery_info = InspectVideoDevice(endpoint.device_path);
+            runtime->configured_device_path = endpoint.device_path;
+            runtime->current_device_path = endpoint.device_path;
+            runtime->discovery_info = discovery_info;
+            runtime->discovery_state = DiscoveryStateName(discovery_info);
+            runtime->discovery_last_refresh_ns = NowNs();
+            runtime->discovery_candidate_count = 0;
+            if (IsKnownPhysicalId(discovery_info.physical_id))
+            {
+                runtime->stable_physical_id = discovery_info.physical_id;
+            }
+            PlatformLogger::Log(LogLevel::kInfo, "publisher",
+                                "device discovery snapshot: stream=%s %s",
+                                identity.stream_id.data(),
+                                FormatVideoDeviceDiscoveryForLog(discovery_info).c_str());
+
             if (!runtime->source.Initialize(config))
             {
                 PlatformLogger::Log(LogLevel::kError, "publisher",
                                     "CameraSource initialize failed, stream=%s device=%s",
                                     identity.stream_id.data(), endpoint.device_path);
-                return false;
+                if (!enable_device_rebind_on_start_failure ||
+                    !TryRebindRuntimeDeviceOnStartFailure(runtime,
+                                                          identity,
+                                                          config,
+                                                          &release_server,
+                                                          endpoint.device_path,
+                                                          "initialize_failed"))
+                {
+                    return false;
+                }
             }
-
-            if (!runtime->source.Start())
+            else if (!runtime->source.Start())
             {
                 PlatformLogger::Log(LogLevel::kError, "publisher",
                                     "CameraSource start failed, stream=%s device=%s",
                                     identity.stream_id.data(), endpoint.device_path);
-                return false;
+                if (!enable_device_rebind_on_start_failure ||
+                    !TryRebindRuntimeDeviceOnStartFailure(runtime,
+                                                          identity,
+                                                          config,
+                                                          &release_server,
+                                                          endpoint.device_path,
+                                                          "start_failed"))
+                {
+                    return false;
+                }
             }
 
             if (!runtime->metrics_providers_registered)
@@ -1150,10 +1448,31 @@ int main(int argc, char* argv[])
                 runtime->metrics_providers_registered = true;
             }
 
+            if (enable_device_rebind_on_recovery_failure)
+            {
+                runtime->source.SetRecoveryFailedHook(
+                    [runtime, identity, config, &release_server]
+                    (const std::string& failed_device_path)
+                    {
+                        std::thread([runtime, identity, config, &release_server, failed_device_path]()
+                                    {
+                                        std::lock_guard<std::mutex> lock(runtime->mutex);
+                                        TryRebindRuntimeDeviceOnStartFailure(
+                                            runtime,
+                                            identity,
+                                            config,
+                                            &release_server,
+                                            failed_device_path,
+                                            "recovery_failed");
+                                    })
+                            .detach();
+                    });
+            }
+
             PlatformLogger::Log(LogLevel::kInfo, "publisher",
                                 "CameraSource started, stream=%s camera_id=%u device=%s",
                                 identity.stream_id.data(), identity.camera_id,
-                                endpoint.device_path);
+                                runtime->current_device_path.c_str());
             return true;
         },
         [&](const CameraEndpoint& endpoint)
@@ -1329,6 +1648,18 @@ int main(int argc, char* argv[])
                                     metrics_history_path.c_str());
             }
         }
+
+        if (!device_discovery_status_path.empty() &&
+            elapsed_sec % metrics_history_interval_sec == 0)
+        {
+            std::lock_guard<std::mutex> lock(runtimes_mutex);
+            if (!WriteDeviceDiscoveryStatusFile(device_discovery_status_path, runtimes_by_stream))
+            {
+                PlatformLogger::Log(LogLevel::kWarning, "publisher",
+                                    "failed to write device discovery status to %s",
+                                    device_discovery_status_path.c_str());
+            }
+        }
     }
 
     // Write final snapshot before stopping servers
@@ -1352,6 +1683,17 @@ int main(int argc, char* argv[])
             PlatformLogger::Log(LogLevel::kWarning, "publisher",
                                 "failed to open metrics snapshot path %s",
                                 metrics_snapshot_path.c_str());
+        }
+    }
+
+    if (!device_discovery_status_path.empty())
+    {
+        std::lock_guard<std::mutex> lock(runtimes_mutex);
+        if (!WriteDeviceDiscoveryStatusFile(device_discovery_status_path, runtimes_by_stream))
+        {
+            PlatformLogger::Log(LogLevel::kWarning, "publisher",
+                                "failed to write final device discovery status to %s",
+                                device_discovery_status_path.c_str());
         }
     }
 
