@@ -666,15 +666,18 @@ void CameraSource::MonitorLoop()
         if (attempt >= config_.max_recovery_attempts)
         {
             // M3: 在进入 permanent failure 前调用 recovery failed hook
+            RecoveryFailedCallback recovery_failed_hook;
             {
                 std::lock_guard<std::mutex> lock(hook_mutex_);
-                if (recovery_failed_hook_)
-                {
-                    recovery_failed_hook_(device_path_);
-                }
+                recovery_failed_hook = recovery_failed_hook_;
+            }
+            if (recovery_failed_hook)
+            {
+                recovery_failed_hook(device_path_);
             }
 
-            // hook 调用后检查状态：如果 hook 成功恢复了设备，state 可能已变为 kStreaming
+            // 兼容同步 hook：publisher 当前使用异步重绑定，通常会先进入 kPermanentFailure，
+            // 后台线程完成重绑定后再重新进入 kStreaming。
             if (state_.load() == SourceState::kStreaming)
             {
                 break;

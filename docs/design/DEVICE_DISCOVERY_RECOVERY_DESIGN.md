@@ -463,8 +463,9 @@ M2b 收口完成后，明确以下约束：
 M3 在 M2b 基础上新增重绑定触发路径：CameraSource 恢复失败时。
 
 - **CameraSource 新增 `SetRecoveryFailedHook` 接口**：允许外部注册回调，在 MonitorLoop 恢复尝试耗尽时通知。
-- **MonitorLoop 在进入 kPermanentFailure 前调用 hook**：给 publisher runtime 一次重绑定机会。hook 成功后 state 变为 kStreaming，不进入 kPermanentFailure。
-- **publisher 注册 hook 并调用 TryRebind**：复用 M2b 的 `TryRebindRuntimeDeviceOnStartFailure`，`last_rebind_reason` 为 `"recovery_failed"`。
+- **MonitorLoop 在进入 kPermanentFailure 前调用 hook**：给 publisher runtime 一次重绑定机会。hook 必须快速返回，不能在 monitor 线程中直接执行重绑定。
+- **publisher 注册 hook 并异步调用 TryRebind**：hook 只投递后台线程，后台线程获取 runtime mutex 后复用 M2b 的 `TryRebindRuntimeDeviceOnStartFailure`，`last_rebind_reason` 为 `"recovery_failed"`。
+- **线程边界**：禁止在 `CameraSource::MonitorLoop` 线程内同步执行 `Stop()` / `Initialize()` / `Start()`，否则会触发 monitor thread 自 join 风险。
 - **默认关闭**：`--enable-device-rebind-on-recovery-failure`，与 M2b 一致。
 - **板端验证**：RK3576 60 秒 lifecycle smoke PASS（recovery_failure_rebind=enabled），正常路径不破坏。
 - **热插拔验证（2026-05-17）**：通过 USB driver unbind/bind 模拟热插拔，验证 hook 触发机制：

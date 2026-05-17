@@ -1454,9 +1454,18 @@ int main(int argc, char* argv[])
                     [runtime, identity, config, &release_server]
                     (const std::string& failed_device_path)
                     {
-                        TryRebindRuntimeDeviceOnStartFailure(
-                            runtime, identity, config, &release_server,
-                            failed_device_path, "recovery_failed");
+                        std::thread([runtime, identity, config, &release_server, failed_device_path]()
+                                    {
+                                        std::lock_guard<std::mutex> lock(runtime->mutex);
+                                        TryRebindRuntimeDeviceOnStartFailure(
+                                            runtime,
+                                            identity,
+                                            config,
+                                            &release_server,
+                                            failed_device_path,
+                                            "recovery_failed");
+                                    })
+                            .detach();
                     });
             }
 
