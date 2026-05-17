@@ -109,6 +109,7 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 | [docs/MULTI_CAMERA_ARCHITECTURE.md](docs/MULTI_CAMERA_ARCHITECTURE.md) | 多路摄像头架构纠偏 | 查看 USB + MIPI 多路同时接入的目标架构、当前偏差和迁移顺序 |
 | [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md) | DMA-BUF 数据面记录 | 查看 RK3576 / Linux DMA-BUF 阶段性设计、验证结果和 DataPlaneV2 边界 |
 | [docs/CODEC_SERVER_ARCHITECTURE.md](docs/CODEC_SERVER_ARCHITECTURE.md) | Camera Codec Server 架构 | 查看 H.264 编码录制服务、Web 录制控制和 USB/MIPI 输入策略 |
+| [docs/TARGET_DETECTION_PIPELINE_DESIGN.md](docs/TARGET_DETECTION_PIPELINE_DESIGN.md) | Camera Target Detection Pipeline 架构 | 查看 RKNN 目标检测服务、NPU core mask 策略、结果 metadata、server 端绘框、Web console/annotated frame 和第一阶段实现顺序 |
 | [docs/METRICS_INTERFACE_DESIGN.md](docs/METRICS_INTERFACE_DESIGN.md) | 统一 Metrics 接口设计 | 查看 `core::StreamMetrics`、`IMetricsProvider` 按 `stream_id` 聚合方案和现有零散统计整合路径 |
 | [docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md) | DataPlaneV2 → MPP 低拷贝录制设计 | 查看 copy path / fd path 选择条件、MPP import 契约、ReleaseFrame 时序和 fallback 策略 |
 | [docs/DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md) | 开发路线图 | 查看当前阶段划分、主线优先级和暂缓项 |

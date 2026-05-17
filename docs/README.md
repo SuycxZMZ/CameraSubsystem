@@ -38,11 +38,12 @@
 3. [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md)
 4. [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)
 5. [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)
-6. [METRICS_INTERFACE_DESIGN.md](METRICS_INTERFACE_DESIGN.md)
-7. [DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md)
-8. [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md)
-9. [../API_REFERENCE.md](../API_REFERENCE.md)
-10. [../structure.md](../structure.md)（历史背景材料）
+6. [TARGET_DETECTION_PIPELINE_DESIGN.md](TARGET_DETECTION_PIPELINE_DESIGN.md)
+7. [METRICS_INTERFACE_DESIGN.md](METRICS_INTERFACE_DESIGN.md)
+8. [DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md)
+9. [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md)
+10. [../API_REFERENCE.md](../API_REFERENCE.md)
+11. [../structure.md](../structure.md)（历史背景材料）
 
 ### 做代码开发
 
@@ -80,6 +81,7 @@
 | [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md) | USB + MIPI 多路摄像头同时接入的目标架构、当前偏差、身份模型和迁移计划 | 单路 smoke 命令、底层 DMA-BUF fd 生命周期细节 |
 | [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md) | DMA-BUF 数据面阶段性设计与验证记录，包含 RK3576 验证、FrameLease、DataPlaneV2、RGA/MPP import 边界 | H.264 编码录制架构、当前完成度统计、接口全量参考 |
 | [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md) | H.264 编码录制服务架构，包含 `camera_codec_server`、Web 录制控制、USB 首阶段链路和 MIPI/RKISP 扩展路径 | DMA-BUF 底层协议细节、具体 C++ 实现 |
+| [TARGET_DETECTION_PIPELINE_DESIGN.md](TARGET_DETECTION_PIPELINE_DESIGN.md) | 目标检测服务架构，包含 `camera_detection_server`、RKNN NPU core mask、结果 metadata、server 端绘框、Web console/annotated frame 和第一阶段实现顺序 | RKNN host 工具链安装细节、训练流程、LLM 路线 |
 | [METRICS_INTERFACE_DESIGN.md](METRICS_INTERFACE_DESIGN.md) | 统一 Metrics 接口设计：`core::StreamMetrics`、`IMetricsProvider`、`MetricsAggregator`；按 `stream_id` 标签聚合；与现有零散统计的整合路径 | 具体性能优化方案、生产级监控后端选型 |
 | [DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md) | DataPlaneV2 → MPP 低拷贝录制设计：copy path / fd path 选择条件、MPP import 契约、ReleaseFrame 时序、fallback 策略 | 具体编码实现（待 MIPI sensor 到位） |
 | [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) | 开发路线图：当前阶段划分、主线优先级、暂缓项和编码准入门槛 | 各模块详细架构设计 |
