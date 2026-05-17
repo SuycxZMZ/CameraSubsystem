@@ -1,6 +1,6 @@
 # CameraSubsystem Agent 工作指南
 
-**最后更新:** 2026-05-14<br>
+**最后更新:** 2026-05-17<br>
 **开发路线:** [docs/DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md)<br>
 **适用范围:** 本文件面向在 `CameraSubsystem/` 目录内执行开发、评审、验证和文档维护任务的 AI Coding Agent。<br>
 **上级指南:** 仓库根目录 `../AGENTS.md` 提供全景导航、跨子项目关系和通用构建命令；本文档只补充 CameraSubsystem 特有的**当前上下文、决策树和检查清单**。
@@ -35,6 +35,7 @@
 | **Codec Server** | 多 `RecordingSession`、raw H.264 和最小 MP4 已完成 | **快速收敛**。除 smoke/bugfix/低拷贝输入适配外不扩展新能力 |
 | **MIPI/RKISP** | MPLANE readiness probe 和 probe-only 初始化骨架已完成 | **尚未完成真实 MIPI live STREAMON**。不要标记为已完成 |
 | **板端 smoke** | `quick/full/extended` 三档 + `multi-camera-topology` 已接入 | 当前阶段只保留为回归入口，不再继续扩张脚本功能面 |
+| **统一部署/启动** | 已提供 `scripts/rk3576-build-deploy-debug.sh`（开发机）+ `scripts/rk3576-board-debug-stack.sh`（板端） | 优先复用统一入口，不再新增平行启动脚本 |
 | **背压参数化** | `BackpressureConfig` / `DropPolicy` / 慢消费者检测已完成 | stress test 兼容；新增 4 个单元测试 |
 | **统一 Metrics** | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator` 已完成 | CameraSource / FrameBroker 已接入；publisher 示例已替换手动聚合；10 个单元测试 |
 | **CameraSource 恢复/降级** | USB 断连恢复、物理热插拔、`mmap/v1` enable=1 降帧降级已完成 | 降级默认关闭；DMA-BUF 重配置边界待后续独立验证，不要扩大为“全路径已完成” |
@@ -214,7 +215,7 @@
 | `docs/MULTI_CAMERA_ARCHITECTURE.md` | USB + MIPI 多路目标架构、纠偏路线、验收口径 | 其他文档只链接引用 |
 | `docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md` | DMA-BUF / DataPlaneV2 / release 生命周期、低拷贝边界 | 编码/录制文档引用，不重新定义 |
 | `docs/CODEC_SERVER_ARCHITECTURE.md` | Codec server 架构、录制状态机、MPP 输入路径 | 引用 DMA-BUF 文档的生命周期契约 |
-| `docs/BOARD_WEB_DEBUG_GUIDE.md` | RK3576 板端部署、Web 调试、录制和 smoke 方法 | 操作指南，不承载架构评审 |
+| `docs/BOARD_WEB_DEBUG_GUIDE.md` | RK3576 板端部署、统一一键入口、Web 调试、录制和 smoke 方法 | 操作指南，不承载架构评审 |
 | `API_REFERENCE.md` | 公开接口、数据结构、IPC 协议 | 只写接口与用法，不承载架构 |
 
 **更新原则：**
@@ -247,6 +248,14 @@
 | `~/CameraSubsystem/web_preview/dist/` | Web 前端静态资源 |
 | `~/CameraSubsystem/recordings/` | `.h264` / `.mp4` 录制输出 |
 | `~/CameraSubsystem/logs/` | 运行日志与 smoke 日志 |
+| `~/CameraSubsystem/scripts/rk3576-board-debug-stack.sh` | 板端本机清理并启动调试栈的统一入口 |
+
+**推荐入口：**
+
+1. 开发机一键构建、部署并重启板端调试栈：
+   `BOARD_HOST=192.168.31.9 BOARD_USER=luckfox BOARD_PASSWORD=luckfox ./scripts/rk3576-build-deploy-debug.sh`
+2. 板端本机一键清理并启动：
+   `cd /home/luckfox/CameraSubsystem && ./scripts/rk3576-board-debug-stack.sh restart`
 
 **安全提醒：**
 - 板端 smoke 会启停进程，运行前确认没有人工调试会话占用同一设备

@@ -1,6 +1,6 @@
 # 板端 Web 预览与录制调试指南
 
-**最后更新:** 2026-05-05<br>
+**最后更新:** 2026-05-17<br>
 **适用范围:** RK3576 / Luckfox Omni3576 板端 Web Preview、Camera 发布端、H.264 录制服务联调<br>
 **标准部署根目录:** `/home/luckfox/CameraSubsystem`
 
@@ -17,8 +17,8 @@
 
 - [1. 目标](#1-目标)
 - [2. 板端目录规范](#2-板端目录规范)
-- [3. 本机构建](#3-本机构建)
-- [4. 统一部署](#4-统一部署)
+- [3. 一键入口](#3-一键入口)
+- [4. 分步构建与部署](#4-分步构建与部署)
 - [5. 板端启动顺序](#5-板端启动顺序)
 - [6. 浏览器调试](#6-浏览器调试)
 - [7. 录制验证](#7-录制验证)
@@ -64,7 +64,43 @@ ssh luckfox@192.168.31.9 \
             /home/luckfox/CameraSubsystem/scripts"
 ```
 
-## 3. 本机构建
+## 3. 一键入口
+
+从 `CameraSubsystem` 工程根目录执行以下命令，即可完成交叉编译、前端构建、部署到板端并远程重启调试栈：
+
+```bash
+BOARD_HOST=192.168.31.9 \
+BOARD_USER=luckfox \
+BOARD_PASSWORD=luckfox \
+./scripts/rk3576-build-deploy-debug.sh
+```
+
+执行内容固定为：
+
+1. `./scripts/build-rk3576.sh`
+2. `./extensions/web_preview/scripts/build-gateway-rk3576.sh`
+3. `./extensions/web_preview/scripts/build-web.sh`
+4. `./scripts/deploy-rk3576-web-debug.sh`
+5. `./scripts/rk3576-run-web-stack.sh restart`
+
+完成后直接在本机浏览器访问：
+
+```text
+http://192.168.31.9:8080
+```
+
+如果本轮只想重启板端，不重新构建和部署：
+
+```bash
+BOARD_HOST=192.168.31.9 \
+BOARD_USER=luckfox \
+BOARD_PASSWORD=luckfox \
+./scripts/rk3576-run-web-stack.sh restart
+```
+
+## 4. 分步构建与部署
+
+如果需要单独排查构建问题，再使用分步命令。
 
 从 `CameraSubsystem` 工程根目录执行：
 
@@ -85,8 +121,6 @@ cd extensions/web_preview
 cd extensions/web_preview
 ./scripts/build-web.sh
 ```
-
-## 4. 统一部署
 
 推荐使用统一部署脚本：
 
@@ -124,7 +158,7 @@ cd extensions/web_preview
 BOARD_HOST=192.168.31.9 \
 BOARD_USER=luckfox \
 BOARD_PASSWORD=luckfox \
-./scripts/rk3576-run-web-stack.sh start
+./scripts/rk3576-run-web-stack.sh restart
 ```
 
 常用操作：
@@ -133,7 +167,18 @@ BOARD_PASSWORD=luckfox \
 ./scripts/rk3576-run-web-stack.sh status
 ./scripts/rk3576-run-web-stack.sh logs
 ./scripts/rk3576-run-web-stack.sh restart
+./scripts/rk3576-run-web-stack.sh clean
 ./scripts/rk3576-run-web-stack.sh stop
+```
+
+如果已经登录到开发板，统一使用板端本地脚本：
+
+```bash
+cd /home/luckfox/CameraSubsystem
+./scripts/rk3576-board-debug-stack.sh restart
+./scripts/rk3576-board-debug-stack.sh status
+./scripts/rk3576-board-debug-stack.sh logs
+./scripts/rk3576-board-debug-stack.sh clean
 ```
 
 脚本默认管理以下进程和目录：
@@ -148,7 +193,15 @@ BOARD_PASSWORD=luckfox \
 | 录制目录 | `/home/luckfox/CameraSubsystem/recordings/` |
 | Web URL | `http://192.168.31.9:8080` |
 
-手动排查时登录开发板：
+`rk3576-board-debug-stack.sh` 已统一封装：
+
+1. 杀掉旧的 publisher / codec / gateway 进程
+2. 清理 `/tmp/camera_subsystem_*.sock`
+3. 清理当前轮日志文件
+4. 按 publisher -> codec -> gateway 顺序启动
+5. 输出 pid 和最终访问地址
+
+只有在脚本本身失效时，才建议退回到手工逐个起进程。此时登录开发板：
 
 ```bash
 ssh luckfox@192.168.31.9

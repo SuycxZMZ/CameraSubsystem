@@ -1,6 +1,6 @@
 # CameraSubsystem 文档索引
 
-**最后更新:** 2026-05-14
+**最后更新:** 2026-05-17
 
 > **文档硬规范**
 >
@@ -43,7 +43,6 @@
 8. [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md)
 9. [../API_REFERENCE.md](../API_REFERENCE.md)
 10. [../structure.md](../structure.md)（历史背景材料）
-11. [design/MULTI_CAMERA_TOPOLOGY_METRICS_DESIGN.md](design/MULTI_CAMERA_TOPOLOGY_METRICS_DESIGN.md)（multi-camera topology metrics Phase 2 设计，编码前评审入口）
 
 ### 做代码开发
 
@@ -60,6 +59,7 @@
 4. [BOARD_WEB_DEBUG_GUIDE.md](BOARD_WEB_DEBUG_GUIDE.md)
 5. 参考当前已接入的 RK3576 示例：`../cmake/toolchains/rk3576.cmake`
 6. 参考当前已接入的 RK3576 示例：`../scripts/build-rk3576.sh`
+7. 统一部署与启动入口：`../scripts/rk3576-build-deploy-debug.sh`
 
 ### 做 Web 预览与录制联调
 
@@ -81,10 +81,10 @@
 | [DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md) | DMA-BUF 数据面阶段性设计与验证记录，包含 RK3576 验证、FrameLease、DataPlaneV2、RGA/MPP import 边界 | H.264 编码录制架构、当前完成度统计、接口全量参考 |
 | [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md) | H.264 编码录制服务架构，包含 `camera_codec_server`、Web 录制控制、USB 首阶段链路和 MIPI/RKISP 扩展路径 | DMA-BUF 底层协议细节、具体 C++ 实现 |
 | [METRICS_INTERFACE_DESIGN.md](METRICS_INTERFACE_DESIGN.md) | 统一 Metrics 接口设计：`core::StreamMetrics`、`IMetricsProvider`、`MetricsAggregator`；按 `stream_id` 标签聚合；与现有零散统计的整合路径 | 具体性能优化方案、生产级监控后端选型 |
-| [design/MULTI_CAMERA_TOPOLOGY_METRICS_DESIGN.md](design/MULTI_CAMERA_TOPOLOGY_METRICS_DESIGN.md) | `multi-camera-topology` smoke 接入 metrics 自动判定的 Phase 2 设计：USB-only 当前可验证范围、MIPI readiness/live 边界、topology report 与退出码语义 | DataPlaneV2 协议变更、真实 MIPI live 阈值、Web/Codec 功能扩展 |
 | [DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md) | DataPlaneV2 → MPP 低拷贝录制设计：copy path / fd path 选择条件、MPP import 契约、ReleaseFrame 时序、fallback 策略 | 具体编码实现（待 MIPI sensor 到位） |
 | [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) | 开发路线图：当前阶段划分、主线优先级、暂缓项和编码准入门槛 | 各模块详细架构设计 |
-| [BOARD_WEB_DEBUG_GUIDE.md](BOARD_WEB_DEBUG_GUIDE.md) | RK3576 板端 Web Preview、录制联调、统一部署目录和 smoke / stability 调试流程 | 架构取舍、API 全量说明、长期路线图 |
+| [BOARD_WEB_DEBUG_GUIDE.md](BOARD_WEB_DEBUG_GUIDE.md) | RK3576 板端统一部署、板端一键启动、浏览器调试和 smoke 回归入口 | 架构取舍、API 全量说明、长期路线图 |
+| [RKNN_SDK_DEMO_GUIDE.md](RKNN_SDK_DEMO_GUIDE.md) | 当前 Omni3576 SDK 的 RKNN demo 适配说明：为什么先收敛到 SDK 自带 demo、如何交叉编译、如何部署到板端运行、主机侧模型转换环境限制 | 最新模型选型、升级后的 runtime/toolkit 兼容矩阵 |
 | [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md) | 模块完成度、测试状态、下一步计划、技术债务执行状态 | 重复架构评审正文 |
 | [../API_REFERENCE.md](../API_REFERENCE.md) | 公开接口、数据结构、IPC 协议、示例调用 | 设计争议与风险讨论 |
 | [../NAMING_CONVENTION.md](../NAMING_CONVENTION.md) | 命名、目录、代码格式、跨平台约定 | 项目状态与路线图 |
@@ -101,7 +101,7 @@
 5. 构建、脚本、交叉编译入口变化必须同步 [../README.md](../README.md) 和 [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md)。
 6. 文档中的系统架构图、模块框图、部署拓扑图、数据路径框图和工程结构框图必须使用 `architecture-diagram` skill；每个 HTML 图必须同步导出同名 `.svg`，Markdown 中默认直接显示 SVG，并附完整 HTML 图表链接。目录结构说明、时序图、状态机图继续使用 Mermaid，不使用 ASCII 树。
 7. `third_party/` 下游文档不按本项目规范改写，避免污染上游来源。
-8. 已完成的阶段性设计文档如仍承载接口契约、验证边界或后续编码门槛，应保留并标注状态；只有内容已经完整收敛到 README、IMPLEMENTATION_STATUS、AGENTS 或专题权威文档且不再提供独立价值时才删除。
+8. 已完成阶段的临时设计文档应优先并回 README、IMPLEMENTATION_STATUS、DEVELOPMENT_ROADMAP 或对应专题权威文档，避免长期滞留在 `docs/design/` 下。
 
 ---
 

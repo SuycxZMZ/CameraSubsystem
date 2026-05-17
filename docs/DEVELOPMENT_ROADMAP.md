@@ -1,6 +1,6 @@
 # CameraSubsystem 下一阶段开发路线图
 
-**最后更新:** 2026-05-14<br>
+**最后更新:** 2026-05-17<br>
 **适用范围:** 当前 CameraSubsystem 主线开发，面向 RK3576 / Debian 板端验证与后续 USB + MIPI 多路摄像头演进<br>
 **关联文档:** [AGENTS.md](../AGENTS.md)、[ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)、[MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md)、[DMA_BUF_ZERO_COPY_ARCHITECTURE.md](DMA_BUF_ZERO_COPY_ARCHITECTURE.md)、[CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)、[DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md)
 
@@ -40,7 +40,7 @@
 | Codec Server | 多 `RecordingSession`、raw H.264、最小 MP4、Web 录制闭环已完成 | DataPlaneV2 -> MPP fd path 待真实 NV12 DMA-BUF |
 | CameraSource 恢复 | 自动恢复默认关闭；RK3576 USB 物理拔插/重插恢复已验证 | 设备节点重枚举仍待 device discovery 策略 |
 | CameraSource 降级 | `mmap/v1` enable=1 降级/恢复/Stop 清理已验证 | DMA-BUF active lease 重配置仍需专项验证 |
-| Metrics | `StreamMetrics`、`IMetricsProvider`、`MetricsAggregator` 已完成 | 下一步接入 smoke 自动阈值判定 |
+| Metrics | `StreamMetrics`、`IMetricsProvider`、`MetricsAggregator` 已完成；USB lifecycle / topology 已接入结构化判定 | 不再单独维护 topology metrics 阶段文档，后续直接在主文档演进 |
 | MPLANE | readiness probe 和初始化骨架已完成 | 无真实 MIPI sensor，不能标记 live 完成 |
 
 当前硬件事实：板端只有 USB 摄像头 `/dev/video45`，没有真实 MIPI sensor。RKISP/RKVpss 节点的 `REQBUFS + QUERYBUF + EXPBUF` readiness 已验证，但这不能替代 STREAMON 后真实出帧验证。
@@ -61,7 +61,7 @@
 |------|------|------|----------|
 | 1 | USB/RK3576 主链路封板 | 现有 board smoke 回归、已知边界文档化 | 不新增新的 smoke 维度；现有入口可稳定回归 |
 | 2 | 设备发现能力定版 | M0/M1/M2a/M2b/M3 状态同步到主文档 | 一次性 hook 边界明确，方向 B 暂不实现 |
-| 3 | 文档与计划收口 | README、实现状态、路线图统一 | 明确 USB 基线完成，MIPI/低拷贝录制后移 |
+| 3 | 文档与计划收口 | README、实现状态、路线图统一 | 明确 USB 基线完成，MIPI/低拷贝录制后移；阶段性设计文档并回主线 |
 
 ### 3.2 P1：硬件到位后再开启
 
@@ -90,6 +90,7 @@
 4. 多路对象具备 `stream_id` 归因。
 5. 涉及 DataPlaneV2/DMA-BUF 时，必须说明 lease 生命周期和 ReleaseFrame 时序。
 6. 涉及板端行为时，必须说明是否能在现有 `/dev/video45` 上验证；不能验证的部分必须标注硬件阻塞。
+7. 新增脚本前必须先判断能否并入 `rk3576-build-deploy-debug.sh`、`rk3576-board-debug-stack.sh` 或现有 smoke 入口，禁止继续扩散平行启动脚本。
 
 ## 5. 阶段验收口径
 

@@ -264,6 +264,8 @@ flowchart TB
 - ✅ CameraSource degradation 单元测试与 RK3576 USB UVC `mmap/v1` enable=1 降级/恢复验证
 - ✅ RK3576 `stream-metrics` 自动判定入口：`dataplane-lifecycle`、failover、release-disconnect 已统一到结构化 metrics 判定
 - ✅ 设备发现与重绑定当前边界：M2b start 失败重绑定、M3 recovery failed hook、USB driver unbind/bind 触发验证已完成
+- ✅ RK3576 统一部署/启动入口：`scripts/rk3576-build-deploy-debug.sh`（开发机）+ `scripts/rk3576-board-debug-stack.sh`（板端）已落地
+- ✅ RK3576 RKNN demo 基线：复用 `Omni3576-sdk` 自带 `rknn_yolov5_demo` 完成交叉编译、板端部署与推理；板端日志显示 `librknnrt 2.0.0b0`、`bus/person` 检测结果和 `out.jpg` 输出已成功生成
 
 **后续专项（不纳入当前 2 到 3 个对话收口目标）:**
 
@@ -282,11 +284,12 @@ flowchart TB
 - ✅ docs/DEVELOPMENT_ROADMAP.md - 开发路线图
 - ✅ docs/METRICS_INTERFACE_DESIGN.md - 统一 Metrics 接口设计
 - ✅ docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md - DataPlaneV2 → MPP 低拷贝录制设计
+- ✅ docs/RKNN_SDK_DEMO_GUIDE.md - 当前 Omni3576 SDK 的 RKNN demo 适配与板端运行指南
 - ✅ AGENTS.md - Agent 工作指南
 - ✅ API_REFERENCE.md - API接口文档
 - ✅ NAMING_CONVENTION.md - 命名规范文档
 - ✅ IMPLEMENTATION_STATUS.md - 本文件
-- ✅ 已完成的板端 Metrics、设备发现恢复、DMA-BUF 降级验证阶段性设计已并入主线文档并删除独立设计稿
+- ✅ 已完成的板端 Metrics、设备发现恢复、DMA-BUF 降级验证、topology metrics 阶段性设计已并入主线文档并删除独立设计稿
 
 **待添加文档:**
 
@@ -299,19 +302,19 @@ flowchart TB
 
 当前主线不再是继续扩张 smoke 脚本或外围功能，而是把已经跑通的 USB/RK3576 主链路在 2 到 3 个对话内收敛成可交接基线。后续只接受会影响主链路正确性、板端稳定性或文档一致性的修改。
 
-### P0：未来 2 到 3 个对话内完成的收口项
+### P0：当前阶段已收口，后续只保留回归与文档维护
 
-1. **USB/RK3576 主链路封板**
+1. **USB/RK3576 主链路回归**
    - 保留现有 `dataplane-lifecycle`、`stream-metrics`、`multi-camera-topology` 作为回归入口，不再新增新的 smoke 维度、报告格式或脚本框架。
-   - 后续板端验证只做“现有入口回归 + 真实 bug 修复”，不再为脚本覆盖率追加独立任务。
+   - 板端日常联调统一走 `scripts/rk3576-build-deploy-debug.sh`；登录板端后的人工排障统一走 `scripts/rk3576-board-debug-stack.sh`。
 
 2. **设备发现与热插拔边界定版**
    - M0/M1/M2a/M2b/M3 视为当前阶段完成，后续只修正确性问题，不进入方向 B（status/control refresh）持续轮询实现。
    - 当前 M3 一次性 hook + `candidate_missing` 时序边界保留为已知限制，等待未来真实多设备需求再重开。
 
-3. **文档与计划收口**
-   - 统一 README、实现状态、路线图和设计文档的“当前阶段目标”，删除会把任务拖向脚本扩张的表述。
-   - 明确当前阶段结束标准：USB 主链路稳定、现有板端入口可回归、MIPI/低拷贝录制作为硬件阻塞项挂牌。
+3. **文档与计划维护**
+   - README、实现状态、路线图和板端调试指南保持同一套入口说明，不再保留重复的临时设计稿或平行启动方式。
+   - 新增脚本前必须先判断能否并入统一入口，而不是继续扩散新命令。
 
 ### P1：保留为后续阶段入口，但不纳入当前收口
 

@@ -4,6 +4,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BOARD_HOST="${BOARD_HOST:-192.168.31.9}"
 BOARD_USER="${BOARD_USER:-luckfox}"
+BOARD_PASSWORD="${BOARD_PASSWORD:-luckfox}"
 REMOTE_ROOT="${REMOTE_ROOT:-/home/luckfox/CameraSubsystem}"
 
 BIN_DIR="${PROJECT_ROOT}/bin/rk3576"
@@ -18,11 +19,67 @@ remote_run="${REMOTE_ROOT}/run"
 remote_tmp="${REMOTE_ROOT}/tmp"
 remote_recordings="${REMOTE_ROOT}/recordings"
 
+TARGET="${BOARD_USER}@${BOARD_HOST}"
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+
+run_ssh()
+{
+    local command="$1"
+    if command -v sshpass >/dev/null 2>&1; then
+        sshpass -p "${BOARD_PASSWORD}" ssh "${SSH_OPTS[@]}" "${TARGET}" "${command}"
+    elif command -v expect >/dev/null 2>&1; then
+        EXPECT_TARGET="${TARGET}" EXPECT_PASSWORD="${BOARD_PASSWORD}" EXPECT_COMMAND="${command}" \
+        expect -c '
+            set timeout -1
+            set target $env(EXPECT_TARGET)
+            set password $env(EXPECT_PASSWORD)
+            set command $env(EXPECT_COMMAND)
+            spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $target $command
+            expect {
+                -re "(?i)password:" {
+                    send "$password\r"
+                    exp_continue
+                }
+                eof
+            }
+            catch wait result
+            exit [lindex $result 3]
+        '
+    else
+        ssh "${SSH_OPTS[@]}" "${TARGET}" "${command}"
+    fi
+}
+
+run_scp()
+{
+    if command -v sshpass >/dev/null 2>&1; then
+        sshpass -p "${BOARD_PASSWORD}" scp "${SSH_OPTS[@]}" "$@"
+    elif command -v expect >/dev/null 2>&1; then
+        EXPECT_PASSWORD="${BOARD_PASSWORD}" EXPECT_ARGS="$*" \
+        expect -c '
+            set timeout -1
+            set password $env(EXPECT_PASSWORD)
+            eval spawn scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $env(EXPECT_ARGS)
+            expect {
+                -re "(?i)password:" {
+                    send "$password\r"
+                    exp_continue
+                }
+                eof
+            }
+            catch wait result
+            exit [lindex $result 3]
+        '
+    else
+        scp "${SSH_OPTS[@]}" "$@"
+    fi
+}
+
 echo "Deploying CameraSubsystem web debug stack to ${BOARD_USER}@${BOARD_HOST}:${REMOTE_ROOT}"
 
-ssh "${BOARD_USER}@${BOARD_HOST}" \
+run_ssh \
     "mkdir -p '${remote_bin}' '${remote_web}' '${remote_scripts}' '${remote_logs}' '${remote_run}' '${remote_tmp}' '${remote_recordings}'"
-ssh "${BOARD_USER}@${BOARD_HOST}" "rm -rf '${remote_web}'/*"
+run_ssh "rm -rf '${remote_web}'/*"
 
 required_bins=(
     "${BIN_DIR}/camera_publisher_example"
@@ -49,11 +106,11 @@ if [[ ! -d "${WEB_DIST}" ]]; then
     exit 1
 fi
 
-scp \
+run_scp \
     "${BIN_DIR}/camera_publisher_example" \
     "${BIN_DIR}/camera_codec_server" \
     "${GATEWAY_BIN}" \
-    "${BOARD_USER}@${BOARD_HOST}:${remote_bin}/"
+    "${TARGET}:${remote_bin}/"
 
 optional_bins=(
     "${BIN_DIR}/mplane_dmabuf_probe"
@@ -62,11 +119,11 @@ optional_bins=(
 
 for bin in "${optional_bins[@]}"; do
     if [[ -f "${bin}" ]]; then
-        scp "${bin}" "${BOARD_USER}@${BOARD_HOST}:${remote_bin}/"
+        run_scp "${bin}" "${TARGET}:${remote_bin}/"
     fi
 done
 
-scp \
+run_scp \
     "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-v1-smoke-rk3576.sh" \
     "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-multi-session-control-smoke-rk3576.sh" \
     "${PROJECT_ROOT}/extensions/codec_server/scripts/codec-stability-test-rk3576.sh" \
@@ -79,12 +136,13 @@ scp \
     "${PROJECT_ROOT}/scripts/rk3576-board-smoke-suite.sh" \
     "${PROJECT_ROOT}/scripts/rk3576-mplane-readiness-probe.sh" \
     "${PROJECT_ROOT}/scripts/rk3576-multi-camera-topology-smoke.sh" \
+    "${PROJECT_ROOT}/scripts/rk3576-board-debug-stack.sh" \
     "${PROJECT_ROOT}/scripts/rk3576-run-web-stack.sh" \
-    "${BOARD_USER}@${BOARD_HOST}:${remote_scripts}/"
+    "${TARGET}:${remote_scripts}/"
 
-scp -r "${WEB_DIST}/"* "${BOARD_USER}@${BOARD_HOST}:${remote_web}/"
+run_scp -r "${WEB_DIST}/"* "${TARGET}:${remote_web}/"
 
-ssh "${BOARD_USER}@${BOARD_HOST}" \
+run_ssh \
     "chmod +x '${remote_bin}/camera_publisher_example' '${remote_bin}/camera_codec_server' '${remote_bin}/web_preview_gateway' '${remote_scripts}'/*.sh; [ ! -f '${remote_bin}/mplane_dmabuf_probe' ] || chmod +x '${remote_bin}/mplane_dmabuf_probe'"
 
 echo "Deploy complete."
