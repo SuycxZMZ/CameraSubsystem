@@ -820,10 +820,11 @@ DMA-BUF 数据面剩余开发顺序如下：
 1. **多路 release key 纠偏**：✅ 已按 [MULTI_CAMERA_ARCHITECTURE.md](MULTI_CAMERA_ARCHITECTURE.md) 完成 DataPlaneV2 descriptor、publisher pending lease、ReleaseFrame tracker 的多字段 key 语义；pending lease 使用 stream/frame/buffer key，tracker 使用 stream/frame/buffer 隔离 pending frame，并用 consumer set 跟踪每个订阅端 release，避免 USB + MIPI 同时出帧时跨流碰撞。
 2. **DataPlaneV2 异常验证**：subscriber 崩溃、release socket 断开、release 超时、fd 泄漏检查和 publisher 退出清理已经形成本机单测与 RK3576 smoke 闭环。后续只做回归维护，不再作为短期阻塞项。
 3. **慢消费者与多订阅者验证**：在 1 个慢消费者、1 个正常消费者和多消费者组合下观察 `lease_in_flight_max`、pending release、QBUF 时序、帧率和丢帧策略。当前已新增 `camera_subscriber_example --process-delay-ms N --release-delay-ms N`，其中 `--release-delay-ms` 用于 DataPlaneV2 场景下延迟发送 `ReleaseFrame`，模拟消费者长时间持有帧。RK3576 `/dev/video45` 已完成双订阅者验证：`SLOW_RELEASE_DELAY_MS=200` 时两个订阅者均 `release_fail=0`，publisher `release_timeout=0`；`SLOW_RELEASE_DELAY_MS=700` 时会触发 `release_timeout` 和 `lease_exhausted`，用于压力观察。
-4. **板端 smoke 脚本固化**：把当前手工 RK3576 验证流程整理成脚本，自动完成上传、启动、停止、日志采集和 counters 校验。当前已新增 `scripts/rk3576-dataplane-v2-slow-consumer-smoke.sh`，默认使用 `luckfox` 用户，支持 `BOARD_PASSWORD` 自动密码输入（优先 `sshpass`，否则使用 `expect`），启动 1 个正常 subscriber 和 1 个慢 release subscriber，日志回收至 `logs/rk3576-dataplane-v2-smoke/`。脚本已修复 `pkill -f` 误匹配远端 shell 的问题，并增加 counters 自动 PASS/FAIL 判定。
+4. **板端回归入口收口**：当前阶段不再继续扩张脚本功能面，只保留 `dataplane-lifecycle`、`stream-metrics`、`rk3576-dataplane-v2-slow-consumer-smoke.sh` 等现有入口作为 RK3576 回归基线。结构化 metrics 判定已接入主入口，后续只做回归维护和真实 bug 修复。
 5. **MIPI/RKISP 多平面验证**：接入 MPLANE capture 节点，验证 per-plane fd / offset / stride 和后续 RGA/NPU/编码器 import 可行性。当前已新增 `mplane_dmabuf_probe`，可在不改 CameraSource 主链路的前提下验证 RKISP/RKVpss 节点的 MPLANE DMA-BUF export 能力；真实 STREAMON 出帧仍需 sensor/media pipeline 完整配置。
 6. **RGA import 验证**：已完成最小验证。当前 `rga_dmabuf_import_probe` 只证明 `VIDIOC_EXPBUF` fd 能被 `librga` 的 `importbuffer_fd` 接收并释放，真实 RGA copy / resize / color convert 等待 live frame 后继续。
 7. **MPP buffer import 验证**：已完成最小验证。当前 `mpp_dmabuf_import_probe` 只证明 `MPP_BUFFER_TYPE_EXT_DMA + mpp_buffer_import_with_tag` 的最小可行性，完整 MPP encoder session 设计转入 [CODEC_SERVER_ARCHITECTURE.md](CODEC_SERVER_ARCHITECTURE.md)。
+8. **DMA-BUF 降级重配置专项**：USB `mmap/v1` 降级/恢复已验证完成；DMA-BUF active lease 场景下的跳过、重试和清理保留为后续专项 fault injection，不纳入当前 USB/RK3576 收口周期。
 
 慢消费者与多订阅者板端验证建议命令：
 

@@ -4,7 +4,7 @@
 **最后更新:** 2026-05-16<br>
 **设计范围:** `rk3576-multi-camera-topology-smoke.sh` 接入 `StreamMetrics` 自动判定的 Phase 2 架构设计<br>
 **当前状态:** T1/T2 脚本接入与 RK3576 USB-only topology smoke 已完成；仅改板端 smoke 编排，不改 C++ 主链路<br>
-**关联文档:** [../MULTI_CAMERA_ARCHITECTURE.md](../MULTI_CAMERA_ARCHITECTURE.md)、[BOARD_METRICS_SMOKE_DESIGN.md](BOARD_METRICS_SMOKE_DESIGN.md)、[../METRICS_INTERFACE_DESIGN.md](../METRICS_INTERFACE_DESIGN.md)、[../../IMPLEMENTATION_STATUS.md](../../IMPLEMENTATION_STATUS.md)
+**关联文档:** [../MULTI_CAMERA_ARCHITECTURE.md](../MULTI_CAMERA_ARCHITECTURE.md)、[../METRICS_INTERFACE_DESIGN.md](../METRICS_INTERFACE_DESIGN.md)、[../../IMPLEMENTATION_STATUS.md](../../IMPLEMENTATION_STATUS.md)、[../../AGENTS.md](../../AGENTS.md)
 
 > **文档硬规范**
 >
