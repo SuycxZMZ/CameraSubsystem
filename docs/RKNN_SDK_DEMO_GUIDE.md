@@ -2,7 +2,7 @@
 
 **最后更新:** 2026-05-17  
 **适用范围:** 基于当前 `Omni3576-sdk` 自带 `rknpu2 / rknn-toolkit2` 版本，在 RK3576 Debian 12 板端完成一条最小可运行的 RKNN 目标检测 demo 闭环  
-**当前结论:** 当前 SDK 自带版本适合先跑通 `rknn_yolov5_demo`；`yolov8 / yolov10` 不作为这一阶段的强目标
+**当前结论:** 当前 SDK 自带版本适合先跑通 `rknn_yolov5_demo`；更现代模型和较新 runtime/toolkit 已转入 [RKNN_OFFICIAL_STACK_GUIDE.md](RKNN_OFFICIAL_STACK_GUIDE.md) 的并行新栈路线
 
 > **文档硬规范**
 >
@@ -15,11 +15,12 @@
 
 - [1. 目标](#1-目标)
 - [2. 为什么当前阶段不强追 yolov8/yolov10](#2-为什么当前阶段不强追-yolov8yolov10)
-- [3. 当前 SDK 可用链路](#3-当前-sdk-可用链路)
-- [4. 一键脚本](#4-一键脚本)
-- [5. 主机侧模型转换环境](#5-主机侧模型转换环境)
-- [6. 板端运行产物](#6-板端运行产物)
-- [7. 后续升级条件](#7-后续升级条件)
+- [3. 官方新栈升级入口](#3-官方新栈升级入口)
+- [4. 当前 SDK 可用链路](#4-当前-sdk-可用链路)
+- [5. 一键脚本](#5-一键脚本)
+- [6. 主机侧模型转换环境](#6-主机侧模型转换环境)
+- [7. 板端运行产物](#7-板端运行产物)
+- [8. 后续升级条件](#8-后续升级条件)
 
 ## 1. 目标
 
@@ -42,7 +43,15 @@
 - **先以 SDK 自带 `rknn_yolov5_demo` 跑通 RK3576 板端推理**
 - 后续如果要切到 `yolov8 / yolov10`，再升级 host toolkit + board runtime，并重新验证模型转换与后处理兼容性
 
-## 3. 当前 SDK 可用链路
+## 3. 官方新栈升级入口
+
+如果目标已经从“证明当前 SDK 可用”升级到“接入官方较新的 runtime/toolkit 和更现代模型”，不要继续在本页路径上打补丁，直接转到：
+
+- [RKNN_OFFICIAL_STACK_GUIDE.md](RKNN_OFFICIAL_STACK_GUIDE.md)
+
+本页只保留旧 SDK `2.0.0b0` 基线的可运行闭环。
+
+## 4. 当前 SDK 可用链路
 
 当前可直接复用的 SDK 资源：
 
@@ -66,11 +75,11 @@ flowchart LR
     Run --> Result["run.log + out.jpg"]
 ```
 
-## 4. 一键脚本
+## 5. 一键脚本
 
 当前项目内新增两个相关脚本：
 
-### 4.1 主机侧轻量 RKNN Toolkit 环境
+### 5.1 主机侧轻量 RKNN Toolkit 环境
 
 ```bash
 ./scripts/setup-rknn-host-env.sh
@@ -82,7 +91,7 @@ flowchart LR
 2. 当前只支持 `python3.10` 或 `python3.11`。
 3. 如果机器上只有 `python3.12`，脚本会明确失败并提示安装兼容 Python。
 
-### 4.2 RK3576 demo 构建 / 部署 / 运行
+### 5.2 RK3576 demo 构建 / 部署 / 运行
 
 ```bash
 ./scripts/rk3576-rknn-demo.sh all
@@ -108,7 +117,7 @@ export LD_LIBRARY_PATH=./lib
 ./rknn_yolov5_demo model/RK3576/yolov5s-640-640.rknn model/bus.jpg letterbox out.jpg
 ```
 
-## 5. 主机侧模型转换环境
+## 6. 主机侧模型转换环境
 
 当前开发机如果要承担“权重转 `.rknn`”的工作，建议按以下原则执行：
 
@@ -126,7 +135,7 @@ export LD_LIBRARY_PATH=./lib
 
 如果只是为了验证“模型转换能力存在”，本阶段做到 host venv 脚手架就足够；真正切模型版本应等 runtime/toolkit 同步升级后再做。
 
-## 6. 板端运行产物
+## 7. 板端运行产物
 
 `./scripts/rk3576-rknn-demo.sh run` 执行后，默认会把以下结果拉回本机：
 
@@ -135,7 +144,7 @@ export LD_LIBRARY_PATH=./lib
 | `logs/rknn_demo/run.log` | 板端标准输出日志 |
 | `logs/rknn_demo/out.jpg` | 板端推理结果图 |
 
-## 7. 后续升级条件
+## 8. 后续升级条件
 
 只有满足下面条件后，才建议把当前链路从 `yolov5 demo` 升级到 `yolov8 / yolov10`：
 
