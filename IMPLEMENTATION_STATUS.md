@@ -266,6 +266,7 @@ flowchart TB
 - ✅ 设备发现与重绑定当前边界：M2b start 失败重绑定、M3 recovery failed hook、USB driver unbind/bind 触发验证已完成
 - ✅ RK3576 统一部署/启动入口：`scripts/rk3576-build-deploy-debug.sh`（开发机）+ `scripts/rk3576-board-debug-stack.sh`（板端）已落地
 - ✅ RK3576 RKNN demo 基线：复用 `Omni3576-sdk` 自带 `rknn_yolov5_demo` 完成交叉编译、板端部署与推理；板端日志显示 `librknnrt 2.0.0b0`、`bus/person` 检测结果和 `out.jpg` 输出已成功生成
+- ✅ RKNN 官方新栈并行接入：`sync-rknn-official-stack.sh`、`setup-rknn-official-host-env.sh` 和 `rk3576-rknn-official-demo.sh` 已落地；已完成 `rknn-toolkit2 v2.3.2` / `rknn_model_zoo v2.3.2` 主机同步、`yolo11` 模型转换、RK3576 交叉编译、板端离线运行与 `out.png` 结果回收；`rknn-llm` 不纳入当前主线
 
 **后续专项（不纳入当前 2 到 3 个对话收口目标）:**
 
@@ -285,6 +286,7 @@ flowchart TB
 - ✅ docs/METRICS_INTERFACE_DESIGN.md - 统一 Metrics 接口设计
 - ✅ docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md - DataPlaneV2 → MPP 低拷贝录制设计
 - ✅ docs/RKNN_SDK_DEMO_GUIDE.md - 当前 Omni3576 SDK 的 RKNN demo 适配与板端运行指南
+- ✅ docs/RKNN_OFFICIAL_STACK_GUIDE.md - 官方最新 RKNN 工具链并行接入、host 同步与 RK3576 离线部署指南
 - ✅ AGENTS.md - Agent 工作指南
 - ✅ API_REFERENCE.md - API接口文档
 - ✅ NAMING_CONVENTION.md - 命名规范文档
@@ -315,6 +317,10 @@ flowchart TB
 3. **文档与计划维护**
    - README、实现状态、路线图和板端调试指南保持同一套入口说明，不再保留重复的临时设计稿或平行启动方式。
    - 新增脚本前必须先判断能否并入统一入口，而不是继续扩散新命令。
+4. **RKNN 新旧双基线**
+   - 旧 `2.0.0b0` SDK demo 继续作为板端回退路径保留。
+   - 官方最新 `toolkit2/model_zoo` 走并行目录与独立脚本，不直接覆盖 `Omni3576-sdk`。
+   - `rknn-llm` 只作为未来可选扩展记录，不进入当前图像主线和默认计划。
 
 ### P1：保留为后续阶段入口，但不纳入当前收口
 

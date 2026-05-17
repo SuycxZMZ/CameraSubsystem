@@ -67,6 +67,7 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 | H.264 录制编码 | 已打通 Web 控制闭环 | 独立 `camera_codec_server` 订阅原始流并使用 Rockchip MPP 编码；状态回传包含录制时长、文件统计、有效编码 profile 和错误信息；已支持 `container=mp4` 主链路并完成 RK3576 live 验证 |
 | 板端运行验证 | 阶段完成 | 已在 RK3576 Debian 12 上完成 publisher/subscriber copy、DataPlaneV2 smoke、Web 录制 start/stop smoke |
 | RKNN Demo 基线 | 已跑通当前 SDK 目标检测 demo | 当前先收敛到 `Omni3576-sdk` 自带 `rknn_yolov5_demo`；RK3576 板端实测 `librknnrt 2.0.0b0` 下推理成功，`bus.jpg` 输出检测结果与 `out.jpg` |
+| RKNN 官方新栈 | 已跑通 host + board 闭环 | 已新增官方 `rknn-toolkit2` / `rknn_model_zoo` 同步、host venv 和 RK3576 离线部署脚本；默认验证入口切到 `yolo11`，并已完成主机同步、模型转换、交叉编译、板端离线运行，不覆盖旧 SDK 基线；`rknn-llm` 仅保留为未来可选扩展 |
 | 统一 Metrics 接口 | 已完成 | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`；CameraSource/FrameBroker 已接入；publisher 示例已替换手动聚合 |
 | FrameBroker 背压参数化 | 已完成 | `BackpressureConfig` / `DropPolicy` / 慢消费者检测；4 个单元测试通过；stress test 兼容 |
 | CameraSource 断连恢复 | 已完成 | `SourceState`、断连/恢复 Metrics、capture/monitor 双线程已落地；自动恢复默认关闭；RK3576 quick、DataPlaneV2 lifecycle、multi-camera-topology smoke 和 USB 物理拔插/重插恢复实测已通过 |
@@ -113,6 +114,7 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 | [docs/DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md) | 开发路线图 | 查看当前阶段划分、主线优先级和暂缓项 |
 | [docs/BOARD_WEB_DEBUG_GUIDE.md](docs/BOARD_WEB_DEBUG_GUIDE.md) | 板端 Web 调试指南 | 查看 RK3576 板端 Web Preview、录制联调、统一部署目录和 smoke 方法 |
 | [docs/RKNN_SDK_DEMO_GUIDE.md](docs/RKNN_SDK_DEMO_GUIDE.md) | RKNN SDK 适配指南 | 查看当前 Omni3576 SDK 下的 RKNN 交叉编译、板端 demo 和主机侧转换环境边界 |
+| [docs/RKNN_OFFICIAL_STACK_GUIDE.md](docs/RKNN_OFFICIAL_STACK_GUIDE.md) | RKNN 官方新栈指南 | 查看官方最新 toolkit/model zoo 并行接入、host 同步、模型转换和 RK3576 离线部署流程；`rknn-llm` 仅作为未来可选扩展记录 |
 | [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | 实现状态 | 查看模块完成度、测试状态、技术债务和下一步计划 |
 | [API_REFERENCE.md](API_REFERENCE.md) | API 参考 | 查询公开数据结构、类接口、IPC 协议和示例用法 |
 | [NAMING_CONVENTION.md](NAMING_CONVENTION.md) | 工程规范 | 查询命名、目录、代码格式和跨平台约定 |
@@ -202,6 +204,14 @@ OMNI3576_SDK_ROOT=/path/to/Omni3576-sdk ./scripts/build-rk3576.sh
 
 ```text
 bin/rk3576/
+```
+
+官方最新 RKNN 新栈主机同步与 RK3576 离线部署入口：
+
+```bash
+./scripts/sync-rknn-official-stack.sh
+./scripts/setup-rknn-official-host-env.sh
+./scripts/rk3576-rknn-official-demo.sh all
 ```
 
 一键构建、部署并重启板端调试栈：

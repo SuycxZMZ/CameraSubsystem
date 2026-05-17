@@ -85,6 +85,7 @@
 | [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) | 开发路线图：当前阶段划分、主线优先级、暂缓项和编码准入门槛 | 各模块详细架构设计 |
 | [BOARD_WEB_DEBUG_GUIDE.md](BOARD_WEB_DEBUG_GUIDE.md) | RK3576 板端统一部署、板端一键启动、浏览器调试和 smoke 回归入口 | 架构取舍、API 全量说明、长期路线图 |
 | [RKNN_SDK_DEMO_GUIDE.md](RKNN_SDK_DEMO_GUIDE.md) | 当前 Omni3576 SDK 的 RKNN demo 适配说明：为什么先收敛到 SDK 自带 demo、如何交叉编译、如何部署到板端运行、主机侧模型转换环境限制 | 最新模型选型、升级后的 runtime/toolkit 兼容矩阵 |
+| [RKNN_OFFICIAL_STACK_GUIDE.md](RKNN_OFFICIAL_STACK_GUIDE.md) | 官方最新 RKNN 工具链并行接入说明：host 侧同步 `rknn-toolkit2` / `rknn_model_zoo`、默认 `yolo11` 转换与 RK3576 离线部署链路；当前已完成 host + board 闭环，`rknn-llm` 仅作为未来可选扩展记录 | 旧 SDK `2.0.0b0` 基线细节 |
 | [../IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md) | 模块完成度、测试状态、下一步计划、技术债务执行状态 | 重复架构评审正文 |
 | [../API_REFERENCE.md](../API_REFERENCE.md) | 公开接口、数据结构、IPC 协议、示例调用 | 设计争议与风险讨论 |
 | [../NAMING_CONVENTION.md](../NAMING_CONVENTION.md) | 命名、目录、代码格式、跨平台约定 | 项目状态与路线图 |

@@ -36,6 +36,7 @@
 | **MIPI/RKISP** | MPLANE readiness probe 和 probe-only 初始化骨架已完成 | **尚未完成真实 MIPI live STREAMON**。不要标记为已完成 |
 | **板端 smoke** | `quick/full/extended` 三档 + `multi-camera-topology` 已接入 | 当前阶段只保留为回归入口，不再继续扩张脚本功能面 |
 | **统一部署/启动** | 已提供 `scripts/rk3576-build-deploy-debug.sh`（开发机）+ `scripts/rk3576-board-debug-stack.sh`（板端） | 优先复用统一入口，不再新增平行启动脚本 |
+| **RKNN 基线** | 已跑通 `Omni3576-sdk` 自带 `rknn_yolov5_demo`；官方最新 `rknn-toolkit2/model_zoo` 已完成并行闭环 | **旧 SDK 基线保留为回退路径；新栈必须走 host 联网、板端离线部署，不允许板端直接访问 GitHub；`rknn-llm` 只保留为未来可选扩展，不是当前主线** |
 | **背压参数化** | `BackpressureConfig` / `DropPolicy` / 慢消费者检测已完成 | stress test 兼容；新增 4 个单元测试 |
 | **统一 Metrics** | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator` 已完成 | CameraSource / FrameBroker 已接入；publisher 示例已替换手动聚合；10 个单元测试 |
 | **CameraSource 恢复/降级** | USB 断连恢复、物理热插拔、`mmap/v1` enable=1 降帧降级已完成 | 降级默认关闭；DMA-BUF 重配置边界待后续独立验证，不要扩大为“全路径已完成” |
