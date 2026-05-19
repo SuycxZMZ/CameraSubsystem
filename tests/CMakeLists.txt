@@ -299,4 +299,40 @@ if (TARGET camera_detection_server_core)
     )
 
     add_test(NAME test_performance_profile_manager COMMAND test_performance_profile_manager)
+
+    add_executable(test_rknn_model_session
+        unit/test_rknn_model_session.cpp
+    )
+
+    target_include_directories(test_rknn_model_session
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/extensions/detection_server/include"
+    )
+
+    target_link_libraries(test_rknn_model_session
+        PRIVATE
+            camera_detection_server_core
+            ${GTEST_TARGET}
+            ${GTEST_MAIN_TARGET}
+    )
+
+    add_test(NAME test_rknn_model_session COMMAND test_rknn_model_session)
+
+    add_executable(test_detection_session_state
+        unit/test_detection_session_state.cpp
+    )
+
+    target_include_directories(test_detection_session_state
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/extensions/detection_server/include"
+    )
+
+    target_link_libraries(test_detection_session_state
+        PRIVATE
+            camera_detection_server_core
+            ${GTEST_TARGET}
+            ${GTEST_MAIN_TARGET}
+    )
+
+    add_test(NAME test_detection_session_state COMMAND test_detection_session_state)
 endif ()

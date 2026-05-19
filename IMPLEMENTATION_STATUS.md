@@ -268,6 +268,7 @@ flowchart TB
 - ✅ RK3576 RKNN demo 基线：复用 `Omni3576-sdk` 自带 `rknn_yolov5_demo` 完成交叉编译、板端部署与推理；板端日志显示 `librknnrt 2.0.0b0`、`bus/person` 检测结果和 `out.jpg` 输出已成功生成
 - ✅ RKNN 官方新栈并行接入：`sync-rknn-official-stack.sh`、`setup-rknn-official-host-env.sh` 和 `rk3576-rknn-official-demo.sh` 已落地；已完成 `rknn-toolkit2 v2.3.2` / `rknn_model_zoo v2.3.2` 主机同步、`yolo11` 模型转换、RK3576 交叉编译、板端离线运行与 `out.png` 结果回收；`rknn-llm` 不纳入当前主线
 - ✅ 目标检测链路设计：已新增并完善 `docs/TARGET_DETECTION_PIPELINE_DESIGN.md`，完成 `yolo11n` NPU core mask 性能对比、`camera_detection_server` 独立订阅端方案、server 端绘框、metadata/annotated frame 输出契约、控制协议、状态机、背压策略、metrics、性能档失败策略、文件级落地蓝图、默认配置、构建部署入口、测试矩阵和第一阶段验收标准；默认 governor 下 core0 为 `26.49 FPS`，已验证 `npu-cpu` performance profile 下 core0 为 `58.56 FPS`，后续 detection server 默认启动时进入该性能档
+- ✅ 目标检测代码骨架：`extensions/detection_server/` 已接入 `DetectionServerConfig`、`PerformanceProfileManager`、`RknnModelSession` 和 `DetectionSession` 最小生命周期；本机构建 20/20 测试通过，RK3576 交叉编译已产出 `camera_detection_server`，当前尚未接入原始帧订阅、真实推理循环和 Web 控制面
 
 **后续专项（不纳入当前 2 到 3 个对话收口目标）:**
 

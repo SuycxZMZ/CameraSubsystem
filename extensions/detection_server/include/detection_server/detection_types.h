@@ -28,6 +28,7 @@ enum class DetectionErrorCode : uint32_t
     kFrameDecodeFailed = 6,
     kInferenceFailed = 7,
     kPublishFailed = 8,
+    kInvalidState = 9,
 };
 
 enum class PerformanceProfile : uint32_t
@@ -103,6 +104,15 @@ struct PerformanceProfileSnapshot
     std::string message;
 };
 
+struct RknnRuntimeInfo
+{
+    std::string model_name;
+    std::string runtime_version;
+    std::string driver_version;
+    uint32_t npu_core_mask = 0;
+    bool using_stub_backend = false;
+};
+
 struct DetectionMetricsSnapshot
 {
     DetectionState state = DetectionState::kIdle;
@@ -121,6 +131,15 @@ struct DetectionMetricsSnapshot
     uint64_t npu_cur_freq_hz = 0;
     bool performance_profile_applied = false;
     std::string last_error;
+};
+
+struct DetectionSessionSnapshot
+{
+    DetectionState state = DetectionState::kIdle;
+    DetectionErrorCode error_code = DetectionErrorCode::kOk;
+    std::string error_message;
+    PerformanceProfileSnapshot performance_profile;
+    RknnRuntimeInfo runtime_info;
 };
 
 const char* DetectionStateToString(DetectionState state);

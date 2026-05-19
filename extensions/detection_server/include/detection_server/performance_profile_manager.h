@@ -7,13 +7,24 @@
 
 namespace camera_subsystem::extensions::detection_server {
 
-class PerformanceProfileManager
+class IPerformanceProfileManager
+{
+  public:
+    virtual ~IPerformanceProfileManager() = default;
+
+    virtual PerformanceProfileSnapshot ReadSnapshot() const = 0;
+    virtual bool ApplyProfile(PerformanceProfile profile,
+                              PerformanceProfileSnapshot* snapshot) const = 0;
+};
+
+class PerformanceProfileManager : public IPerformanceProfileManager
 {
   public:
     explicit PerformanceProfileManager(std::string sysfs_root = std::string());
 
-    PerformanceProfileSnapshot ReadSnapshot() const;
-    bool ApplyProfile(PerformanceProfile profile, PerformanceProfileSnapshot* snapshot) const;
+    PerformanceProfileSnapshot ReadSnapshot() const override;
+    bool ApplyProfile(PerformanceProfile profile,
+                      PerformanceProfileSnapshot* snapshot) const override;
 
   private:
     std::string sysfs_root_;

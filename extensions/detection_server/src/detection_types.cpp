@@ -47,6 +47,8 @@ const char* DetectionErrorCodeToString(DetectionErrorCode error_code)
         return "INFERENCE_FAILED";
     case DetectionErrorCode::kPublishFailed:
         return "PUBLISH_FAILED";
+    case DetectionErrorCode::kInvalidState:
+        return "INVALID_STATE";
     }
 
     return "UNKNOWN_ERROR";
