@@ -32,6 +32,34 @@ target_link_libraries(camera_subscriber_example
         camera_subsystem_core
 )
 
+add_executable(camera_detection_result_client_example
+    camera_detection_result_client_example.cpp
+)
+
+set_target_properties(camera_detection_result_client_example PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
+)
+
+target_link_libraries(camera_detection_result_client_example
+    PRIVATE
+        camera_subsystem_platform
+        camera_subsystem_core
+)
+
+add_executable(camera_detection_control_client_example
+    camera_detection_control_client_example.cpp
+)
+
+set_target_properties(camera_detection_control_client_example PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_SUBSYSTEM_RUNTIME_OUTPUT_DIR}"
+)
+
+target_link_libraries(camera_detection_control_client_example
+    PRIVATE
+        camera_subsystem_platform
+        camera_subsystem_core
+)
+
 add_executable(dmabuf_smoke_test
     dmabuf_smoke_test.cpp
 )

@@ -274,6 +274,9 @@ flowchart TB
 - ✅ 目标检测可插拔预处理骨架：已新增 `IFramePreprocessor` 抽象与 `MjpegFramePreprocessor` 首个实现，当前 USB/MJPEG 路径通过 `JpegDecodeStage -> NV12 -> letterbox RGB tensor` 进入 RKNN；主循环只依赖预处理接口，后续接入 MIPI/NV12/RGA 路径时不需要重写 detection app 编排层
 - ✅ 目标检测板端真实推理闭环：RK3576 `/dev/video45` 已验证 `camera_publisher_example + camera_detection_server` 可稳定完成 `订阅 -> MJPEG 解码 -> letterbox RGB tensor -> rknn_run -> yolo11 后处理 -> DetectionResult 发布`；当前场景下 `input_frames` 与 `inferred` 持续增长，`pre_fail/infer_fail/post_fail=0`
 - ✅ 板端 socket 启动竞态已收敛：`pkill` 旧 publisher 后若未等待其完全退出就重启，新旧进程会竞争同名 UDS path，旧进程在 `Stop()` 中的 `unlink()` 会把新 publisher 的 socket pathname 删除，表现为“进程仍在 LISTEN，但 subscriber connect(path) 返回 ENOENT”；现已为 detection subscriber 增加失败阶段日志，并在 `rk3576-board-debug-stack.sh` 中增加显式等待进程退出后再复用 socket path
+- ✅ 目标检测结果消费端：已新增 `camera_detection_result_client_example`，通过 UDS 订阅 `DetectionResult` JSON Line 并按秒输出 `frames/fps/parse_fail/objects/infer_ms/total_ms` 摘要；RK3576 板端已验证与 `camera_detection_server` 联动运行，`parse_fail=0`、结果帧率稳定在 15-16fps
+- ✅ 目标检测控制面最小闭环：已新增 detection control UDS server 与 `camera_detection_control_client_example`，当前支持 `get_detection_status`、`set_detection_config`、`stop_detection`、`start_detection` 四个 JSON line 命令；RK3576 板端已验证运行期修改 `infer_every_n_frames/score_threshold/nms_threshold`、停止检测进入 `idle`、重新启动后回到 `running`；`stop -> start` 后 detection runtime counters 已按新 session 正确清零，避免 Web status 混入旧统计值
+- ✅ Web Preview Gateway 检测控制面接入：已新增 `DetectionControlClient` 类，Gateway 可通过 UDS 与 `camera_detection_server` 通信；Web status JSON 已包含 `detection` 字段（available/state/config/metrics）；前端 `DetectionStatus` 组件可显示检测状态摘要；`StreamActions` 检测按钮已启用，支持开启/关闭检测；前端已通过 `/status` 每秒轮询稳定刷新 detection 状态与摘要；RK3576 板端已验证 Gateway WebSocket 命令可成功转发 `stop/start/set_detection_config` 到 detection server；Detection Server 不可用时 Gateway 正常降级运行
 
 **后续专项（不纳入当前 2 到 3 个对话收口目标）:**
 

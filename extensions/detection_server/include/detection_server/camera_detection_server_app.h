@@ -2,6 +2,7 @@
 #define CAMERA_SUBSYSTEM_EXTENSIONS_DETECTION_SERVER_CAMERA_DETECTION_SERVER_APP_H
 
 #include "detection_server/camera_frame_subscriber.h"
+#include "detection_server/detection_control_server.h"
 #include "detection_server/detection_publisher.h"
 #include "detection_server/detection_config.h"
 #include "detection_server/detection_postprocessor.h"
@@ -22,18 +23,34 @@ class CameraDetectionServerApp
     int Run();
 
   private:
+    bool HandleStartDetection(std::string* error_code, std::string* error_message);
+    bool HandleStopDetection(std::string* error_code, std::string* error_message);
+    bool HandleSetDetectionConfig(const std::string& request_json,
+                                  std::string* error_code,
+                                  std::string* error_message);
+    std::string HandleControlRequest(const std::string& request_json);
+    std::string BuildStatusResponseJson(const std::string& request_id) const;
     bool StartComponents();
     void StopComponents();
+    void ResetRuntimeStats();
     void OnFrame(const camera_subsystem::ipc::CameraDataFrameHeader& header,
                  const std::vector<uint8_t>& payload);
     void LogPeriodicSummary() const;
 
     DetectionServerConfig config_;
     DetectionSession session_;
+    DetectionControlServer control_server_;
     CameraFrameSubscriber subscriber_;
     DetectionPublisher publisher_;
     DetectionPostprocessor postprocessor_;
     std::unique_ptr<IFramePreprocessor> frame_preprocessor_;
+    std::atomic<bool> components_running_{false};
+    std::atomic<uint32_t> runtime_infer_every_n_frames_{1};
+    std::atomic<bool> runtime_draw_boxes_{true};
+    std::atomic<double> runtime_score_threshold_{0.25};
+    std::atomic<double> runtime_nms_threshold_{0.45};
+    std::atomic<DetectionOutputMode> runtime_output_mode_{DetectionOutputMode::kMetadataAndAnnotatedFrame};
+    mutable std::mutex components_mutex_;
 
     std::atomic<uint64_t> callback_frames_{0};
     std::atomic<uint64_t> callback_bytes_{0};

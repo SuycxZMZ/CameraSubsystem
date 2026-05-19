@@ -54,6 +54,7 @@ void PrintUsage(const char* program_name)
         << "  --control-socket <path>   Camera control socket path\n"
         << "  --data-socket <path>      Camera data socket path\n"
         << "  --codec-socket <path>     Codec server control socket path\n"
+        << "  --detection-socket <path> Detection server control socket path\n"
         << "  --device <path>           Camera device path requested via control IPC\n"
         << "  --stream-id <id>          Camera stream id requested via control IPC, default 0\n"
         << "  --static-root <path>      Frontend dist directory\n"
@@ -123,6 +124,13 @@ bool ParseGatewayConfig(int argc, char* argv[], GatewayConfig* config)
         else if (arg == "--codec-socket")
         {
             if (!require_value(&config->codec_socket))
+            {
+                return false;
+            }
+        }
+        else if (arg == "--detection-socket")
+        {
+            if (!require_value(&config->detection_socket))
             {
                 return false;
             }

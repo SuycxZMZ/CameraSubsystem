@@ -46,6 +46,23 @@ export function StreamActions({
           ? `开始录制，上次失败：${formatRecordError(recordError)}`
           : '开始录制';
 
+  // Detection state
+  const detection = stream?.detection ?? { available: false };
+  const isDetectionPending = Boolean(stream?.detectionPending);
+  const isDetectionRunning = detection.state === 'running';
+  const detectButtonClass = isDetectionRunning
+    ? 'h-8 w-8 border-green-500 bg-green-950 text-green-200 hover:bg-green-900'
+    : 'h-8 w-8';
+  const detectTooltip = !isConnected
+    ? '连接断开'
+    : !detection.available
+      ? '检测服务不可用'
+      : isDetectionPending
+        ? '检测状态切换中'
+        : isDetectionRunning
+          ? '停止检测'
+          : '开始检测';
+
   const handleSubscribe = () => {
     sendCommand({ type: 'subscribe_stream', stream_id: streamId });
   };
@@ -64,7 +81,7 @@ export function StreamActions({
   };
 
   const handleDetect = () => {
-    sendCommand({ type: 'set_detect_enabled', stream_id: streamId, enabled: true });
+    sendCommand({ type: 'set_detect_enabled', stream_id: streamId, enabled: !isDetectionRunning });
   };
 
   const handleSnapshot = () => {
@@ -168,14 +185,18 @@ export function StreamActions({
             <Button
               variant="outline"
               size="icon"
-              className="h-8 w-8"
-              disabled
+              className={detectButtonClass}
+              disabled={!isConnected || !detection.available || isDetectionPending}
               onClick={handleDetect}
             >
-              <ScanSearch className="h-4 w-4" />
+              {isDetectionRunning ? (
+                <Square className="h-4 w-4" />
+              ) : (
+                <ScanSearch className="h-4 w-4" />
+              )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>检测功能暂未实现</TooltipContent>
+          <TooltipContent>{detectTooltip}</TooltipContent>
         </Tooltip>
 
         {/* Snapshot */}

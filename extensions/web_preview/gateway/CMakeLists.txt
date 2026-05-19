@@ -12,6 +12,7 @@ set(CAMERA_SUBSYSTEM_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." CACHE PATH
 add_executable(web_preview_gateway
     src/base64.cpp
     src/camera_subscriber_client.cpp
+    src/detection_control_client.cpp
     src/frame_pipeline.cpp
     src/gateway_config.cpp
     src/main.cpp

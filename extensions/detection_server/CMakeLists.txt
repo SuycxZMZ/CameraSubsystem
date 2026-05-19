@@ -25,6 +25,7 @@ add_library(camera_detection_server_core STATIC
     src/rknn_model_session.cpp
     src/detection_postprocessor.cpp
     src/detection_session.cpp
+    src/detection_control_server.cpp
     src/camera_frame_subscriber.cpp
     src/frame_preprocessor.cpp
     src/detection_publisher.cpp

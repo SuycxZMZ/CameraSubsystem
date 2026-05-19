@@ -4,7 +4,7 @@ import { StreamGrid } from '@/components/StreamGrid';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useFrameReceiver } from '@/hooks/useFrameReceiver';
 import { useStreamStore } from '@/stores/useStreamStore';
-import type { CommandResult, GatewayStatus, RecordStatus } from '@/types/gateway-command';
+import type { CommandResult, GatewayStatus, RecordStatus, DetectionResponse } from '@/types/gateway-command';
 
 function App() {
   const { onBinaryMessage } = useFrameReceiver();
@@ -20,6 +20,8 @@ function App() {
         useStreamStore.getState().handleGatewayStatus(json as GatewayStatus);
       } else if (json.type === 'record_status') {
         useStreamStore.getState().handleRecordStatus(json as RecordStatus);
+      } else if (json.type === 'detection_response') {
+        useStreamStore.getState().handleDetectionResponse(json as DetectionResponse);
       } else if (json.type === 'command_result') {
         useStreamStore.getState().handleCommandResult(json as CommandResult);
       } else {
@@ -41,6 +43,38 @@ function App() {
     useStreamStore.getState().setConnectionState(connectionState);
     useStreamStore.getState().setSendTextFn(sendText);
   }, [connectionState, sendText]);
+
+  useEffect(() => {
+    if (connectionState !== 'connected') {
+      return;
+    }
+
+    let cancelled = false;
+    const fetchStatus = async () => {
+      try {
+        const response = await fetch('/status', { cache: 'no-store' });
+        if (!response.ok) {
+          return;
+        }
+        const json = (await response.json()) as GatewayStatus;
+        if (!cancelled && json.type === 'status') {
+          useStreamStore.getState().handleGatewayStatus(json);
+        }
+      } catch {
+        // Ignore polling failures and let the next interval retry.
+      }
+    };
+
+    void fetchStatus();
+    const timer = window.setInterval(() => {
+      void fetchStatus();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [connectionState]);
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-950 text-zinc-50">

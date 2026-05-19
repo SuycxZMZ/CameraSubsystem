@@ -6,6 +6,7 @@ import type {
   GatewayStatus,
   RecordStatus,
   ConnectionState,
+  DetectionResponse,
 } from '@/types/gateway-command';
 import {
   WebPixelFormat,
@@ -30,6 +31,7 @@ interface StreamStore {
   handleCommandResult: (result: CommandResult) => void;
   handleGatewayStatus: (status: GatewayStatus) => void;
   handleRecordStatus: (status: RecordStatus) => void;
+  handleDetectionResponse: (response: DetectionResponse) => void;
   resolveStreamId: (streamIndex: number) => string;
   setSendTextFn: (fn: ((data: string) => void) | null) => void;
 }
@@ -89,6 +91,8 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
         recordProfile: {},
         recordContainer: 'raw_h264',
         recordError: '',
+        detection: { available: false },
+        detectionPending: false,
       };
       return {
         streams: { ...state.streams, [streamId]: newStream },
@@ -132,6 +136,26 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
       });
     }
 
+    if (command.type === 'set_detect_enabled') {
+      const state = get();
+      if (!state.streams[command.stream_id]) {
+        state.addStream(command.stream_id);
+      }
+      state.updateStream(command.stream_id, {
+        detectionPending: true,
+      });
+    }
+
+    if (command.type === 'set_detection_config') {
+      const state = get();
+      if (!state.streams[command.stream_id]) {
+        state.addStream(command.stream_id);
+      }
+      state.updateStream(command.stream_id, {
+        detectionPending: true,
+      });
+    }
+
     if (sendTextFn) {
       sendTextFn(JSON.stringify(command));
     } else {
@@ -139,6 +163,12 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
         get().updateStream(command.stream_id, {
           recordPending: false,
           recordError: 'websocket_not_connected',
+        });
+      }
+      if (command.type === 'set_detect_enabled' || command.type === 'set_detection_config') {
+        get().updateStream(command.stream_id, {
+          detectionPending: false,
+          detection: { available: false, error: 'websocket_not_connected' },
         });
       }
       console.warn('[stream-store] Cannot send command: WebSocket not connected');
@@ -249,6 +279,26 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
       pixelFormatName: pixelFormatToName(pixelFormat),
       isFormatSupported: isFormatSupported(pixelFormat),
       dropCount: status.dropped_frames,
+      ...(status.detection ? {
+        detection: {
+          available: status.detection.available,
+          error: status.detection.error,
+          state: status.detection.state as 'idle' | 'running' | 'error' | undefined,
+          modelName: status.detection.model_name,
+          npuCoreMask: status.detection.npu_core_mask,
+          config: status.detection.config ? {
+            inferEveryNFrames: status.detection.config.infer_every_n_frames,
+            scoreThreshold: status.detection.config.score_threshold,
+            nmsThreshold: status.detection.config.nms_threshold,
+          } : undefined,
+          metrics: status.detection.metrics ? {
+            inputFrames: status.detection.metrics.input_frames,
+            inferredFrames: status.detection.metrics.inferred_frames,
+            lastObjectCount: status.detection.metrics.last_object_count,
+          } : undefined,
+          lastError: status.detection.last_error,
+        },
+      } : {}),
     });
   },
 
@@ -281,6 +331,27 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
       recordContainer: status.container ?? store.streams[streamId]?.recordContainer ?? 'raw_h264',
       recordError: status.error ?? '',
       dropCount: status.dropped_frames ?? store.streams[streamId]?.dropCount ?? 0,
+    });
+  },
+
+  handleDetectionResponse: (response) => {
+    const streamId = response.stream_id || '0';
+    const store = get();
+
+    if (!store.streams[streamId]) {
+      store.addStream(streamId);
+    }
+
+    const currentDetection = store.streams[streamId]?.detection ?? { available: false };
+
+    store.updateStream(streamId, {
+      detectionPending: false,
+      detection: {
+        ...currentDetection,
+        available: response.error_code === 'connect_failed' ? false : true,
+        state: response.state as 'idle' | 'running' | 'error' | undefined,
+        error: response.ok ? undefined : (response.message ?? response.error_code),
+      },
     });
   },
 

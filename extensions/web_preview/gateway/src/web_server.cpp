@@ -136,6 +136,52 @@ bool ReadFile(const std::string& path, std::string* content)
     return true;
 }
 
+std::string JsonEscape(const std::string& value)
+{
+    std::string escaped;
+    escaped.reserve(value.size() + 8);
+    for (unsigned char ch : value)
+    {
+        switch (ch)
+        {
+            case '"':
+                escaped += "\\\"";
+                break;
+            case '\\':
+                escaped += "\\\\";
+                break;
+            case '\b':
+                escaped += "\\b";
+                break;
+            case '\f':
+                escaped += "\\f";
+                break;
+            case '\n':
+                escaped += "\\n";
+                break;
+            case '\r':
+                escaped += "\\r";
+                break;
+            case '\t':
+                escaped += "\\t";
+                break;
+            default:
+                if (ch < 0x20U)
+                {
+                    char buffer[7];
+                    std::snprintf(buffer, sizeof(buffer), "\\u%04x", ch);
+                    escaped += buffer;
+                }
+                else
+                {
+                    escaped.push_back(static_cast<char>(ch));
+                }
+                break;
+        }
+    }
+    return escaped;
+}
+
 std::string PixelFormatToString(WebPixelFormat format)
 {
     switch (format)
@@ -159,8 +205,8 @@ std::string PixelFormatToString(WebPixelFormat format)
 
 std::string BuildRecordErrorJson(const std::string& stream_id, const std::string& error)
 {
-    return "{\"type\":\"record_status\",\"stream_id\":\"" + stream_id +
-           "\",\"recording\":false,\"error\":\"" + error + "\"}";
+    return "{\"type\":\"record_status\",\"stream_id\":\"" + JsonEscape(stream_id) +
+           "\",\"recording\":false,\"error\":\"" + JsonEscape(error) + "\"}";
 }
 
 bool IsSupportedRecordContainer(const std::string& container)
@@ -189,6 +235,10 @@ bool WebServer::Start(const GatewayConfig& config)
     }
 
     config_ = config;
+
+    // Initialize detection control client
+    detection_client_ = std::make_unique<DetectionControlClient>(config_.detection_socket);
+
     server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd_ < 0)
     {
@@ -436,6 +486,207 @@ std::string WebServer::HandleRecordCommand(const std::string& payload)
     }
 
     return SendCodecCommand(codec_cmd, stream_id);
+}
+
+// ---------------------------------------------------------------------------
+// Detection server control
+// ---------------------------------------------------------------------------
+
+std::string WebServer::HandleDetectionCommand(const std::string& payload)
+{
+    // Parse JSON payload to extract command type and parameters
+    auto find_string = [&](const std::string& key) -> std::string
+    {
+        std::string search = "\"" + key + "\"";
+        size_t pos = payload.find(search);
+        if (pos == std::string::npos)
+        {
+            return "";
+        }
+        pos = payload.find(':', pos);
+        if (pos == std::string::npos)
+        {
+            return "";
+        }
+        // Skip whitespace
+        while (pos < payload.size() && (payload[pos] == ':' || payload[pos] == ' ' ||
+               payload[pos] == '\t'))
+        {
+            ++pos;
+        }
+        if (pos >= payload.size())
+        {
+            return "";
+        }
+        if (payload[pos] == '"')
+        {
+            ++pos;
+            size_t end = payload.find('"', pos);
+            if (end == std::string::npos)
+            {
+                return "";
+            }
+            return payload.substr(pos, end - pos);
+        }
+        // Boolean or number
+        size_t end = pos;
+        while (end < payload.size() && payload[end] != ',' && payload[end] != '}' &&
+               payload[end] != ' ' && payload[end] != '\t')
+        {
+            ++end;
+        }
+        return payload.substr(pos, end - pos);
+    };
+
+    std::string type = find_string("type");
+    std::string stream_id = find_string("stream_id");
+
+    if (stream_id.empty())
+    {
+        stream_id = config_.stream_id;
+    }
+
+    std::ostringstream response;
+
+    if (type == "set_detect_enabled")
+    {
+        std::string enabled_str = find_string("enabled");
+        bool enabled = (enabled_str == "true" || enabled_str == "1");
+
+        std::lock_guard<std::mutex> lock(detection_mutex_);
+        DetectionControlResult result;
+        if (enabled)
+        {
+            result = detection_client_->StartDetection();
+        }
+        else
+        {
+            result = detection_client_->StopDetection();
+        }
+
+        response << "{\"type\":\"detection_response\",\"stream_id\":\"" << JsonEscape(stream_id)
+                 << "\",\"ok\":" << (result.ok ? "true" : "false");
+        if (!result.state.empty())
+        {
+            response << ",\"state\":\"" << JsonEscape(result.state) << "\"";
+        }
+        if (!result.error_code.empty())
+        {
+            response << ",\"error_code\":\"" << JsonEscape(result.error_code) << "\"";
+        }
+        if (!result.message.empty())
+        {
+            response << ",\"message\":\"" << JsonEscape(result.message) << "\"";
+        }
+        response << "}";
+
+        // After control command, query and return latest status
+        return response.str();
+    }
+
+    if (type == "set_detection_config")
+    {
+        const std::string infer_str = find_string("infer_every_n_frames");
+        const std::string score_str = find_string("score_threshold");
+        const std::string nms_str = find_string("nms_threshold");
+
+        std::optional<uint32_t> infer_every_n_frames;
+        std::optional<double> score_threshold;
+        std::optional<double> nms_threshold;
+        if (!infer_str.empty())
+        {
+            const uint32_t parsed = static_cast<uint32_t>(std::strtoul(infer_str.c_str(), nullptr, 10));
+            if (parsed > 0)
+            {
+                infer_every_n_frames = parsed;
+            }
+        }
+        if (!score_str.empty())
+        {
+            score_threshold = std::strtod(score_str.c_str(), nullptr);
+        }
+        if (!nms_str.empty())
+        {
+            nms_threshold = std::strtod(nms_str.c_str(), nullptr);
+        }
+
+        std::lock_guard<std::mutex> lock(detection_mutex_);
+        DetectionControlResult result =
+            detection_client_->SetDetectionConfig(infer_every_n_frames, score_threshold, nms_threshold);
+
+        response << "{\"type\":\"detection_response\",\"stream_id\":\"" << JsonEscape(stream_id)
+                 << "\",\"ok\":" << (result.ok ? "true" : "false");
+        if (!result.state.empty())
+        {
+            response << ",\"state\":\"" << JsonEscape(result.state) << "\"";
+        }
+        if (!result.error_code.empty())
+        {
+            response << ",\"error_code\":\"" << JsonEscape(result.error_code) << "\"";
+        }
+        if (!result.message.empty())
+        {
+            response << ",\"message\":\"" << JsonEscape(result.message) << "\"";
+        }
+        response << "}";
+
+        return response.str();
+    }
+
+    return "{\"type\":\"detection_response\",\"ok\":false,\"error_code\":\"unknown_command\"}";
+}
+
+std::string WebServer::BuildDetectionStatusJson() const
+{
+    std::lock_guard<std::mutex> lock(detection_mutex_);
+
+    if (!detection_client_)
+    {
+        return "\"detection\":{\"available\":false,\"error\":\"not_initialized\"}";
+    }
+
+    DetectionStatusResult status = detection_client_->GetDetectionStatus();
+
+    std::ostringstream ss;
+    ss << "\"detection\":{";
+    ss << "\"available\":" << (status.available ? "true" : "false");
+
+    if (!status.available)
+    {
+        ss << ",\"error\":\"" << JsonEscape(status.error) << "\"";
+    }
+    else
+    {
+        if (!status.state.empty())
+        {
+            ss << ",\"state\":\"" << JsonEscape(status.state) << "\"";
+        }
+        if (!status.model_name.empty())
+        {
+            ss << ",\"model_name\":\"" << JsonEscape(status.model_name) << "\"";
+        }
+        if (status.npu_core_mask > 0)
+        {
+            ss << ",\"npu_core_mask\":" << status.npu_core_mask;
+        }
+        ss << ",\"config\":{"
+           << "\"infer_every_n_frames\":" << status.config.infer_every_n_frames
+           << ",\"score_threshold\":" << status.config.score_threshold
+           << ",\"nms_threshold\":" << status.config.nms_threshold
+           << "}";
+        ss << ",\"metrics\":{"
+           << "\"input_frames\":" << status.metrics.input_frames
+           << ",\"inferred_frames\":" << status.metrics.inferred_frames
+           << ",\"last_object_count\":" << status.metrics.last_object_count
+           << "}";
+        if (!status.error.empty())
+        {
+            ss << ",\"last_error\":\"" << JsonEscape(status.error) << "\"";
+        }
+    }
+    ss << "}";
+
+    return ss.str();
 }
 
 void WebServer::BroadcastBinary(const std::vector<uint8_t>& packet)
@@ -724,6 +975,14 @@ void WebServer::ClientReadLoop(std::shared_ptr<Client> client)
             {
                 result = HandleRecordCommand(text_payload);
             }
+            // Check for detection commands
+            else if (text_payload.find("\"type\":\"set_detect_enabled\"") != std::string::npos ||
+                     text_payload.find("\"type\": \"set_detect_enabled\"") != std::string::npos ||
+                     text_payload.find("\"type\":\"set_detection_config\"") != std::string::npos ||
+                     text_payload.find("\"type\": \"set_detection_config\"") != std::string::npos)
+            {
+                result = HandleDetectionCommand(text_payload);
+            }
             else
             {
                 result = "{\"type\":\"command_result\",\"status\":\"not_supported\"}";
@@ -821,16 +1080,17 @@ std::string WebServer::BuildStatusJson() const
     }
 
     std::ostringstream ss;
-    ss << "{\"type\":\"status\",\"stream_id\":\"" << config_.stream_id << "\","
+    ss << "{\"type\":\"status\",\"stream_id\":\"" << JsonEscape(config_.stream_id) << "\","
        << "\"stream_index\":0,"
-       << "\"status\":\"" << stats.status << "\","
+       << "\"status\":\"" << JsonEscape(stats.status) << "\","
        << "\"width\":" << stats.width << ","
        << "\"height\":" << stats.height << ","
-       << "\"format\":\"" << PixelFormatToString(stats.pixel_format) << "\","
+       << "\"format\":\"" << JsonEscape(PixelFormatToString(stats.pixel_format)) << "\","
        << "\"input_frames\":" << stats.input_frames << ","
        << "\"published_frames\":" << stats.published_frames << ","
        << "\"dropped_frames\":" << stats.dropped_frames << ","
-       << "\"unsupported_frames\":" << stats.unsupported_frames << "}";
+       << "\"unsupported_frames\":" << stats.unsupported_frames << ","
+       << BuildDetectionStatusJson() << "}";
     return ss.str();
 }
 

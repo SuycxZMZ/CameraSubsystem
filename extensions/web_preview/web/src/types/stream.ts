@@ -8,6 +8,25 @@ export type StreamStatus =
   | 'unsupported_format'
   | 'error'
 
+export interface DetectionState {
+  available: boolean;
+  error?: string;
+  state?: 'idle' | 'running' | 'error';
+  modelName?: string;
+  npuCoreMask?: number;
+  config?: {
+    inferEveryNFrames: number;
+    scoreThreshold: number;
+    nmsThreshold: number;
+  };
+  metrics?: {
+    inputFrames: number;
+    inferredFrames: number;
+    lastObjectCount: number;
+  };
+  lastError?: string;
+}
+
 export interface StreamState {
   streamId: string;
   streamIndex?: number;
@@ -46,4 +65,6 @@ export interface StreamState {
   };
   recordContainer: string;
   recordError: string;
+  detection: DetectionState;
+  detectionPending: boolean;
 }

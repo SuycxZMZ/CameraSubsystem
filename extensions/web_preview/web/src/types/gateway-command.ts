@@ -3,7 +3,8 @@ export type GatewayCommand =
   | { type: 'unsubscribe_stream'; stream_id: string }
   | { type: 'set_stream_enabled'; stream_id: string; enabled: boolean }
   | { type: 'set_record_enabled'; stream_id: string; enabled: boolean; container?: 'raw_h264' | 'mp4' }
-  | { type: 'set_detect_enabled'; stream_id: string; enabled: boolean };
+  | { type: 'set_detect_enabled'; stream_id: string; enabled: boolean }
+  | { type: 'set_detection_config'; stream_id: string; infer_every_n_frames?: number; score_threshold?: number; nms_threshold?: number };
 
 export interface CommandResult {
   type: 'command_result';
@@ -39,6 +40,36 @@ export interface RecordStatus {
   };
 }
 
+export interface DetectionStatus {
+  type: 'detection_status';
+  stream_id: string;
+  available: boolean;
+  error?: string;
+  state?: string;
+  model_name?: string;
+  npu_core_mask?: number;
+  config?: {
+    infer_every_n_frames: number;
+    score_threshold: number;
+    nms_threshold: number;
+  };
+  metrics?: {
+    input_frames: number;
+    inferred_frames: number;
+    last_object_count: number;
+  };
+  last_error?: string;
+}
+
+export interface DetectionResponse {
+  type: 'detection_response';
+  stream_id: string;
+  ok: boolean;
+  state?: string;
+  error_code?: string;
+  message?: string;
+}
+
 export interface GatewayStatus {
   type: 'status';
   stream_id: string;
@@ -51,6 +82,24 @@ export interface GatewayStatus {
   published_frames: number;
   dropped_frames: number;
   unsupported_frames: number;
+  detection?: {
+    available: boolean;
+    error?: string;
+    state?: string;
+    model_name?: string;
+    npu_core_mask?: number;
+    config?: {
+      infer_every_n_frames: number;
+      score_threshold: number;
+      nms_threshold: number;
+    };
+    metrics?: {
+      input_frames: number;
+      inferred_frames: number;
+      last_object_count: number;
+    };
+    last_error?: string;
+  };
 }
 
 export type ConnectionState =
