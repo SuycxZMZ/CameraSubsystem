@@ -77,6 +77,45 @@ class FakeModelSession final : public IRknnModelSession
         return true;
     }
 
+    bool Run(const DetectionInputTensor& input,
+             std::vector<DetectionOutputTensor>* outputs,
+             std::string* error_message) override
+    {
+        if (!initialized_)
+        {
+            last_error_code_ = DetectionErrorCode::kInvalidState;
+            last_error_message_ = "session not initialized";
+            if (error_message)
+            {
+                *error_message = last_error_message_;
+            }
+            return false;
+        }
+        if (!should_succeed_)
+        {
+            last_error_code_ = DetectionErrorCode::kInferenceFailed;
+            last_error_message_ = "inference failed";
+            if (error_message)
+            {
+                *error_message = last_error_message_;
+            }
+            return false;
+        }
+
+        if (outputs)
+        {
+            outputs->clear();
+        }
+        last_error_code_ = DetectionErrorCode::kOk;
+        last_error_message_.clear();
+        if (error_message)
+        {
+            error_message->clear();
+        }
+        (void)input;
+        return true;
+    }
+
     void Shutdown() override
     {
         initialized_ = false;
@@ -184,6 +223,21 @@ TEST(DetectionSessionStateTest, StopReturnsToIdle)
 
     const DetectionSessionSnapshot snapshot = session.GetSnapshot();
     EXPECT_EQ(snapshot.state, DetectionState::kIdle);
+}
+
+TEST(DetectionSessionStateTest, RunInferenceRequiresRunningState)
+{
+    DetectionServerConfig config;
+    auto model_session = std::make_unique<FakeModelSession>(true);
+    auto profile_manager = std::make_shared<FakeProfileManager>(true);
+
+    DetectionSession session(std::move(config), std::move(model_session), profile_manager);
+    DetectionInputTensor input;
+    std::vector<DetectionOutputTensor> outputs;
+    std::string error_message;
+
+    EXPECT_FALSE(session.RunInference(input, &outputs, &error_message));
+    EXPECT_NE(error_message.find("not running"), std::string::npos);
 }
 
 int main(int argc, char** argv)

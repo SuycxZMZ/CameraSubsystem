@@ -19,6 +19,9 @@ class DetectionSession
 
     bool Start();
     bool Stop();
+    bool RunInference(const DetectionInputTensor& input,
+                      std::vector<DetectionOutputTensor>* outputs,
+                      std::string* error_message);
 
     DetectionState GetState() const;
     DetectionSessionSnapshot GetSnapshot() const;

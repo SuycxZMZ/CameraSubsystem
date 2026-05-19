@@ -1,6 +1,6 @@
 # CameraSubsystem 实现状态
 
-**更新日期:** 2026-05-17
+**更新日期:** 2026-05-19
 
 > **文档硬规范**
 >
@@ -268,7 +268,12 @@ flowchart TB
 - ✅ RK3576 RKNN demo 基线：复用 `Omni3576-sdk` 自带 `rknn_yolov5_demo` 完成交叉编译、板端部署与推理；板端日志显示 `librknnrt 2.0.0b0`、`bus/person` 检测结果和 `out.jpg` 输出已成功生成
 - ✅ RKNN 官方新栈并行接入：`sync-rknn-official-stack.sh`、`setup-rknn-official-host-env.sh` 和 `rk3576-rknn-official-demo.sh` 已落地；已完成 `rknn-toolkit2 v2.3.2` / `rknn_model_zoo v2.3.2` 主机同步、`yolo11` 模型转换、RK3576 交叉编译、板端离线运行与 `out.png` 结果回收；`rknn-llm` 不纳入当前主线
 - ✅ 目标检测链路设计：已新增并完善 `docs/TARGET_DETECTION_PIPELINE_DESIGN.md`，完成 `yolo11n` NPU core mask 性能对比、`camera_detection_server` 独立订阅端方案、server 端绘框、metadata/annotated frame 输出契约、控制协议、状态机、背压策略、metrics、性能档失败策略、文件级落地蓝图、默认配置、构建部署入口、测试矩阵和第一阶段验收标准；默认 governor 下 core0 为 `26.49 FPS`，已验证 `npu-cpu` performance profile 下 core0 为 `58.56 FPS`，后续 detection server 默认启动时进入该性能档
-- ✅ 目标检测代码骨架：`extensions/detection_server/` 已接入 `DetectionServerConfig`、`PerformanceProfileManager`、`RknnModelSession` 和 `DetectionSession` 最小生命周期；本机构建 20/20 测试通过，RK3576 交叉编译已产出 `camera_detection_server`，当前尚未接入原始帧订阅、真实推理循环和 Web 控制面
+- ✅ 目标检测代码骨架：`extensions/detection_server/` 已接入 `DetectionServerConfig`、`PerformanceProfileManager`、`RknnModelSession` 和 `DetectionSession` 最小生命周期；本机构建 20/20 测试通过，RK3576 交叉编译已产出 `camera_detection_server`
+- ✅ 目标检测最小数据闭环：已新增 `CameraFrameSubscriber` 和 `DetectionPublisher`，`camera_detection_server` 当前可订阅原始视频流、输出占位 `DetectionResult` JSON Line、按秒打印 session/subscriber/publisher 摘要；本机构建 21/21 测试通过，RK3576 交叉编译通过，板端已验证 `camera_publisher_example + camera_detection_server` 双进程闭环可稳定收帧并持续发布占位结果，真实推理与 Web 控制面仍待接入
+- ✅ 目标检测模型输出契约：`RknnModelSession` 已补齐 `Run()` 接口与模型输入/输出 tensor 元数据，新增 `DetectionPostprocessor` 用于把 `yolo11` raw outputs 转为 `DetectionBox`；本机 detection 相关单测通过，RK3576 交叉编译通过，下一步只差输入预处理即可接入真实流式推理
+- ✅ 目标检测可插拔预处理骨架：已新增 `IFramePreprocessor` 抽象与 `MjpegFramePreprocessor` 首个实现，当前 USB/MJPEG 路径通过 `JpegDecodeStage -> NV12 -> letterbox RGB tensor` 进入 RKNN；主循环只依赖预处理接口，后续接入 MIPI/NV12/RGA 路径时不需要重写 detection app 编排层
+- ✅ 目标检测板端真实推理闭环：RK3576 `/dev/video45` 已验证 `camera_publisher_example + camera_detection_server` 可稳定完成 `订阅 -> MJPEG 解码 -> letterbox RGB tensor -> rknn_run -> yolo11 后处理 -> DetectionResult 发布`；当前场景下 `input_frames` 与 `inferred` 持续增长，`pre_fail/infer_fail/post_fail=0`
+- ✅ 板端 socket 启动竞态已收敛：`pkill` 旧 publisher 后若未等待其完全退出就重启，新旧进程会竞争同名 UDS path，旧进程在 `Stop()` 中的 `unlink()` 会把新 publisher 的 socket pathname 删除，表现为“进程仍在 LISTEN，但 subscriber connect(path) 返回 ENOENT”；现已为 detection subscriber 增加失败阶段日志，并在 `rk3576-board-debug-stack.sh` 中增加显式等待进程退出后再复用 socket path
 
 **后续专项（不纳入当前 2 到 3 个对话收口目标）:**
 

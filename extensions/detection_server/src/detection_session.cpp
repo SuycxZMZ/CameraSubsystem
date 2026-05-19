@@ -79,6 +79,30 @@ bool DetectionSession::Stop()
     return true;
 }
 
+bool DetectionSession::RunInference(const DetectionInputTensor& input,
+                                    std::vector<DetectionOutputTensor>* outputs,
+                                    std::string* error_message)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (snapshot_.state != DetectionState::kRunning)
+    {
+        SetErrorLocked(DetectionErrorCode::kInvalidState, "session is not running");
+        if (error_message)
+        {
+            *error_message = snapshot_.error_message;
+        }
+        return false;
+    }
+
+    if (!model_session_->Run(input, outputs, error_message))
+    {
+        SetErrorLocked(model_session_->GetLastErrorCode(), model_session_->GetLastErrorMessage());
+        snapshot_.state = DetectionState::kError;
+        return false;
+    }
+    return true;
+}
+
 DetectionState DetectionSession::GetState() const
 {
     std::lock_guard<std::mutex> lock(mutex_);

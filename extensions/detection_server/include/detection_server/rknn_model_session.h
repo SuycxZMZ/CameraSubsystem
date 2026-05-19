@@ -14,6 +14,9 @@ class IRknnModelSession
 
     virtual bool Initialize(const std::string& model_path, uint32_t core_mask,
                             std::string* error_message) = 0;
+    virtual bool Run(const DetectionInputTensor& input,
+                     std::vector<DetectionOutputTensor>* outputs,
+                     std::string* error_message) = 0;
     virtual void Shutdown() = 0;
     virtual bool IsInitialized() const = 0;
     virtual DetectionErrorCode GetLastErrorCode() const = 0;
@@ -29,6 +32,9 @@ class RknnModelSession final : public IRknnModelSession
 
     bool Initialize(const std::string& model_path, uint32_t core_mask,
                     std::string* error_message) override;
+    bool Run(const DetectionInputTensor& input,
+             std::vector<DetectionOutputTensor>* outputs,
+             std::string* error_message) override;
     void Shutdown() override;
     bool IsInitialized() const override;
     DetectionErrorCode GetLastErrorCode() const override;
@@ -40,6 +46,7 @@ class RknnModelSession final : public IRknnModelSession
     DetectionErrorCode last_error_code_ = DetectionErrorCode::kOk;
     std::string last_error_message_;
     RknnRuntimeInfo runtime_info_;
+    std::string model_path_;
 
 #if defined(DETECTION_SERVER_ENABLE_RKNN_RUNTIME)
     unsigned long long context_storage_ = 0;

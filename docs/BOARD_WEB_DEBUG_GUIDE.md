@@ -211,10 +211,29 @@ cd /home/luckfox/CameraSubsystem
 启动前清理旧 socket：
 
 ```bash
+pkill -f camera_publisher_example || true
+pkill -f camera_codec_server || true
+pkill -f web_preview_gateway || true
+for _ in $(seq 1 50); do
+  if ! pgrep -f camera_publisher_example >/dev/null 2>&1 \
+     && ! pgrep -f camera_codec_server >/dev/null 2>&1 \
+     && ! pgrep -f web_preview_gateway >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.2
+done
 rm -f /tmp/camera_subsystem_control.sock \
       /tmp/camera_subsystem_data.sock \
       /tmp/camera_subsystem_codec.sock
 ```
+
+这里必须先等待旧进程完全退出，再删除并复用同名 socket path。否则旧 `camera_publisher_example`
+在退出收尾阶段仍会执行 `unlink()`，把新进程刚创建的
+`/tmp/camera_subsystem_control.sock` 和 `/tmp/camera_subsystem_data.sock` 删除掉，表现为：
+
+- `publisher` 进程仍在
+- `ss -xl` 还能看到 LISTEN
+- 新 subscriber / gateway / detection server 按路径 `connect()` 却返回 `ENOENT`
 
 按顺序启动三个进程：
 

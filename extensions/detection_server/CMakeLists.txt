@@ -23,8 +23,13 @@ add_library(camera_detection_server_core STATIC
     src/detection_config.cpp
     src/performance_profile_manager.cpp
     src/rknn_model_session.cpp
+    src/detection_postprocessor.cpp
     src/detection_session.cpp
+    src/camera_frame_subscriber.cpp
+    src/frame_preprocessor.cpp
+    src/detection_publisher.cpp
     src/camera_detection_server_app.cpp
+    "${CAMERA_SUBSYSTEM_ROOT}/extensions/codec_server/src/jpeg_decode_stage.cpp"
 )
 
 set_target_properties(camera_detection_server_core PROPERTIES
@@ -35,6 +40,7 @@ target_include_directories(camera_detection_server_core
     PUBLIC
         include
         "${CAMERA_SUBSYSTEM_ROOT}/include"
+        "${CAMERA_SUBSYSTEM_ROOT}/extensions/codec_server/include"
 )
 
 target_compile_options(camera_detection_server_core
@@ -48,11 +54,23 @@ target_link_libraries(camera_detection_server_core
     PUBLIC
         camera_subsystem_platform
         camera_subsystem_core
+        camera_subsystem_ipc
+        camera_subsystem_utils
 )
 
 set(_DETECTION_SERVER_OFFICIAL_AI_ROOT
     "${CAMERA_SUBSYSTEM_ROOT}/../official-ai-latest"
 )
+set(_DETECTION_SERVER_MPP_INCLUDE_DIR
+    "${CAMERA_SUBSYSTEM_ROOT}/../Omni3576-sdk/external/mpp/inc"
+)
+set(_DETECTION_SERVER_MPP_LIBRARY
+    "${CAMERA_SUBSYSTEM_ROOT}/../Omni3576-sdk/external/rknpu2/examples/3rdparty/mpp/Linux/aarch64/librockchip_mpp.so"
+)
+if (DEFINED OMNI3576_SDK_ROOT)
+    set(_DETECTION_SERVER_MPP_INCLUDE_DIR "${OMNI3576_SDK_ROOT}/external/mpp/inc")
+    set(_DETECTION_SERVER_MPP_LIBRARY "${OMNI3576_SDK_ROOT}/external/rknpu2/examples/3rdparty/mpp/Linux/aarch64/librockchip_mpp.so")
+endif ()
 set(_DETECTION_SERVER_RKNN_INCLUDE_CANDIDATES
     "${_DETECTION_SERVER_OFFICIAL_AI_ROOT}/rknn-toolkit2/rknpu2/runtime/Linux/librknn_api/include"
     "${_DETECTION_SERVER_OFFICIAL_AI_ROOT}/rknn_model_zoo/3rdparty/rknpu2/include"
@@ -71,6 +89,14 @@ foreach(candidate ${_DETECTION_SERVER_RKNN_INCLUDE_CANDIDATES})
         break()
     endif ()
 endforeach ()
+
+if (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"
+    AND EXISTS "${_DETECTION_SERVER_MPP_INCLUDE_DIR}/mpp_buffer.h"
+    AND EXISTS "${_DETECTION_SERVER_MPP_LIBRARY}")
+    target_compile_definitions(camera_detection_server_core PRIVATE CODEC_SERVER_ENABLE_MPP_JPEG_DECODE=1)
+    target_include_directories(camera_detection_server_core PRIVATE "${_DETECTION_SERVER_MPP_INCLUDE_DIR}")
+    target_link_libraries(camera_detection_server_core PUBLIC "${_DETECTION_SERVER_MPP_LIBRARY}")
+endif ()
 
 set(DETECTION_SERVER_RKNN_LIBRARY "")
 foreach(candidate ${_DETECTION_SERVER_RKNN_LIBRARY_CANDIDATES})

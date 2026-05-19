@@ -37,6 +37,21 @@ Environment:
 EOF
 }
 
+wait_process_exit()
+{
+    local pattern="$1"
+    local timeout_sec="${2:-10}"
+    local retries=$((timeout_sec * 5))
+    local i
+    for ((i = 0; i < retries; ++i)); do
+        if ! pgrep -f "${pattern}" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    return 1
+}
+
 stop_stack()
 {
     set +e
@@ -52,6 +67,9 @@ stop_stack()
     pkill -f '[w]eb_preview_gateway' 2>/dev/null || true
     pkill -f '[c]amera_codec_server' 2>/dev/null || true
     pkill -f '[c]amera_publisher_example' 2>/dev/null || true
+    wait_process_exit '[w]eb_preview_gateway' 10 || echo "warning=web_preview_gateway_exit_timeout" >&2
+    wait_process_exit '[c]amera_codec_server' 10 || echo "warning=camera_codec_server_exit_timeout" >&2
+    wait_process_exit '[c]amera_publisher_example' 10 || echo "warning=camera_publisher_example_exit_timeout" >&2
     rm -f \
         "${RUN_DIR}/gateway.pid" \
         "${RUN_DIR}/codec.pid" \

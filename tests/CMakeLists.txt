@@ -335,4 +335,40 @@ if (TARGET camera_detection_server_core)
     )
 
     add_test(NAME test_detection_session_state COMMAND test_detection_session_state)
+
+    add_executable(test_detection_publisher
+        unit/test_detection_publisher.cpp
+    )
+
+    target_include_directories(test_detection_publisher
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/extensions/detection_server/include"
+    )
+
+    target_link_libraries(test_detection_publisher
+        PRIVATE
+            camera_detection_server_core
+            ${GTEST_TARGET}
+            ${GTEST_MAIN_TARGET}
+    )
+
+    add_test(NAME test_detection_publisher COMMAND test_detection_publisher)
+
+    add_executable(test_detection_postprocessor
+        unit/test_detection_postprocessor.cpp
+    )
+
+    target_include_directories(test_detection_postprocessor
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/extensions/detection_server/include"
+    )
+
+    target_link_libraries(test_detection_postprocessor
+        PRIVATE
+            camera_detection_server_core
+            ${GTEST_TARGET}
+            ${GTEST_MAIN_TARGET}
+    )
+
+    add_test(NAME test_detection_postprocessor COMMAND test_detection_postprocessor)
 endif ()

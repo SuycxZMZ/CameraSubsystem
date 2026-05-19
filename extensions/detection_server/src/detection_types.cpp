@@ -84,6 +84,23 @@ const char* DetectionOutputModeToString(DetectionOutputMode mode)
     return "unknown";
 }
 
+const char* DetectionTensorDataTypeToString(DetectionTensorDataType type)
+{
+    switch (type)
+    {
+    case DetectionTensorDataType::kUnknown:
+        return "unknown";
+    case DetectionTensorDataType::kFloat32:
+        return "float32";
+    case DetectionTensorDataType::kInt8:
+        return "int8";
+    case DetectionTensorDataType::kUint8:
+        return "uint8";
+    }
+
+    return "unknown";
+}
+
 bool ParsePerformanceProfile(const std::string& value, PerformanceProfile* profile)
 {
     if (!profile)

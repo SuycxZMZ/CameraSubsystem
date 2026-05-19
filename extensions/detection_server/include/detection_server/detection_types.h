@@ -45,6 +45,14 @@ enum class DetectionOutputMode : uint32_t
     kMetadataAndAnnotatedFrame = 1,
 };
 
+enum class DetectionTensorDataType : uint32_t
+{
+    kUnknown = 0,
+    kFloat32 = 1,
+    kInt8 = 2,
+    kUint8 = 3,
+};
+
 struct DetectionBox
 {
     uint32_t class_id = 0;
@@ -80,6 +88,40 @@ struct DetectionResult
     std::vector<DetectionBox> objects;
 };
 
+struct DetectionTensorAttr
+{
+    std::string name;
+    DetectionTensorDataType type = DetectionTensorDataType::kUnknown;
+    std::vector<uint32_t> dims;
+    int32_t zero_point = 0;
+    float scale = 1.0f;
+};
+
+struct DetectionOutputTensor
+{
+    DetectionTensorAttr attr;
+    std::vector<uint8_t> bytes;
+};
+
+struct DetectionInputTensor
+{
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t channels = 0;
+    std::vector<uint8_t> bytes;
+};
+
+struct DetectionLetterboxInfo
+{
+    uint32_t source_width = 0;
+    uint32_t source_height = 0;
+    uint32_t model_input_width = 0;
+    uint32_t model_input_height = 0;
+    float scale = 1.0f;
+    float x_pad = 0.0f;
+    float y_pad = 0.0f;
+};
+
 struct AnnotatedFrame
 {
     std::string stream_id;
@@ -110,6 +152,11 @@ struct RknnRuntimeInfo
     std::string runtime_version;
     std::string driver_version;
     uint32_t npu_core_mask = 0;
+    uint32_t model_input_width = 0;
+    uint32_t model_input_height = 0;
+    uint32_t model_input_channels = 0;
+    bool model_input_nchw = false;
+    std::vector<DetectionTensorAttr> output_tensor_attrs;
     bool using_stub_backend = false;
 };
 
@@ -146,6 +193,7 @@ const char* DetectionStateToString(DetectionState state);
 const char* DetectionErrorCodeToString(DetectionErrorCode error_code);
 const char* PerformanceProfileToString(PerformanceProfile profile);
 const char* DetectionOutputModeToString(DetectionOutputMode mode);
+const char* DetectionTensorDataTypeToString(DetectionTensorDataType type);
 
 bool ParsePerformanceProfile(const std::string& value, PerformanceProfile* profile);
 bool ParseDetectionOutputMode(const std::string& value, DetectionOutputMode* mode);

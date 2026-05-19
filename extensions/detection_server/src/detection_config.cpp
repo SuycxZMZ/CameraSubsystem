@@ -134,7 +134,12 @@ void PrintDetectionServerUsage(const char* program_name)
         << "\nOptions:\n"
         << "  --control-socket <path>   Detection control socket path\n"
         << "  --result-socket <path>    Detection result socket path\n"
+        << "  --camera-control-socket <path> Camera publisher control socket path\n"
+        << "  --camera-data-socket <path> Camera publisher data socket path\n"
         << "  --stream-id <id>          Camera stream id, default usb0\n"
+        << "  --device <path>           Camera device path, default /dev/video45\n"
+        << "  --client-id <id>          Detection subscriber client id\n"
+        << "  --camera-id <id>          Camera endpoint numeric id\n"
         << "  --model-path <path>       RKNN model path\n"
         << "  --labels-path <path>      Labels path\n"
         << "  --npu-core-mask <mask>    1|2|3|4|7, default 1\n"
@@ -144,6 +149,7 @@ void PrintDetectionServerUsage(const char* program_name)
         << "  --infer-every-n-frames <n>  >=1, default 1\n"
         << "  --draw-boxes <0|1>        default 1\n"
         << "  --max-queue-depth <n>     1..4, default 2\n"
+        << "  --max-frame-size <bytes>  default 67108864\n"
         << "  --performance-profile <profile> none|npu|npu-cpu, default npu-cpu\n"
         << "  --allow-performance-profile-failure <0|1>  default 0\n"
         << "  --metrics-interval-ms <n> default 1000\n"
@@ -191,11 +197,48 @@ ParseResult ParseDetectionServerConfig(int argc, char* argv[], DetectionServerCo
                 return ParseResult::kError;
             }
         }
+        else if (arg == "--camera-control-socket")
+        {
+            if (!require_value(&config->camera_control_socket))
+            {
+                return ParseResult::kError;
+            }
+        }
+        else if (arg == "--camera-data-socket")
+        {
+            if (!require_value(&config->camera_data_socket))
+            {
+                return ParseResult::kError;
+            }
+        }
         else if (arg == "--stream-id")
         {
             if (!require_value(&config->stream_id) || config->stream_id.empty())
             {
                 std::cerr << "invalid --stream-id value\n";
+                return ParseResult::kError;
+            }
+        }
+        else if (arg == "--device")
+        {
+            if (!require_value(&config->device_path))
+            {
+                return ParseResult::kError;
+            }
+        }
+        else if (arg == "--client-id")
+        {
+            if (!require_value(&config->client_id) || config->client_id.empty())
+            {
+                std::cerr << "invalid --client-id value\n";
+                return ParseResult::kError;
+            }
+        }
+        else if (arg == "--camera-id")
+        {
+            if (!require_value(&value) || !ParseUint32(value, &config->camera_id))
+            {
+                std::cerr << "invalid --camera-id value\n";
                 return ParseResult::kError;
             }
         }
@@ -266,6 +309,15 @@ ParseResult ParseDetectionServerConfig(int argc, char* argv[], DetectionServerCo
             if (!require_value(&value) || !ParseUint32(value, &config->max_queue_depth))
             {
                 std::cerr << "invalid --max-queue-depth value\n";
+                return ParseResult::kError;
+            }
+        }
+        else if (arg == "--max-frame-size")
+        {
+            if (!require_value(&value) || !ParseUint32(value, &config->max_frame_size) ||
+                config->max_frame_size == 0)
+            {
+                std::cerr << "invalid --max-frame-size value\n";
                 return ParseResult::kError;
             }
         }
