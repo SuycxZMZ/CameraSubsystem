@@ -267,7 +267,7 @@ flowchart TB
 - ✅ RK3576 统一部署/启动入口：`scripts/rk3576-build-deploy-debug.sh`（开发机）+ `scripts/rk3576-board-debug-stack.sh`（板端）已落地
 - ✅ RK3576 RKNN demo 基线：复用 `Omni3576-sdk` 自带 `rknn_yolov5_demo` 完成交叉编译、板端部署与推理；板端日志显示 `librknnrt 2.0.0b0`、`bus/person` 检测结果和 `out.jpg` 输出已成功生成
 - ✅ RKNN 官方新栈并行接入：`sync-rknn-official-stack.sh`、`setup-rknn-official-host-env.sh` 和 `rk3576-rknn-official-demo.sh` 已落地；已完成 `rknn-toolkit2 v2.3.2` / `rknn_model_zoo v2.3.2` 主机同步、`yolo11` 模型转换、RK3576 交叉编译、板端离线运行与 `out.png` 结果回收；`rknn-llm` 不纳入当前主线
-- ✅ 目标检测链路设计：已新增 `docs/TARGET_DETECTION_PIPELINE_DESIGN.md`，完成 `yolo11n` NPU core mask 性能对比、`camera_detection_server` 独立订阅端方案、server 端绘框、metadata/annotated frame 输出契约和第一阶段编码顺序；默认 governor 下 core0 为 `26.49 FPS`，已验证 `npu-cpu` performance profile 下 core0 为 `58.56 FPS`，后续 detection server 默认启动时进入该性能档
+- ✅ 目标检测链路设计：已新增并完善 `docs/TARGET_DETECTION_PIPELINE_DESIGN.md`，完成 `yolo11n` NPU core mask 性能对比、`camera_detection_server` 独立订阅端方案、server 端绘框、metadata/annotated frame 输出契约、控制协议、状态机、背压策略、metrics、性能档失败策略、文件级落地蓝图、默认配置、构建部署入口、测试矩阵和第一阶段验收标准；默认 governor 下 core0 为 `26.49 FPS`，已验证 `npu-cpu` performance profile 下 core0 为 `58.56 FPS`，后续 detection server 默认启动时进入该性能档
 
 **后续专项（不纳入当前 2 到 3 个对话收口目标）:**
 
@@ -326,10 +326,11 @@ flowchart TB
 
 5. **目标检测链路**
    - 以 [docs/TARGET_DETECTION_PIPELINE_DESIGN.md](docs/TARGET_DETECTION_PIPELINE_DESIGN.md) 为设计入口。
-   - 第一阶段建议新增独立 `camera_detection_server`，订阅原始视频流后执行 RKNN 推理并发布 DetectionResult metadata。
+   - 第一阶段新增独立 `camera_detection_server`，订阅原始视频流后执行 RKNN 推理并发布 DetectionResult metadata 和可选 annotated frame。
    - 默认仅使用 `core0`，目标检测默认关闭，用户开启后每帧推理。
    - `camera_detection_server` 默认启用 `npu-cpu` performance profile，只设置 NPU/CPU governor，启动失败时必须暴露明确错误。
    - Web 前端不做重型绘框；目标框绘制放在 `camera_detection_server` 端，前端只展示 annotated frame 和每秒 console 摘要。
+   - 编码入口从 `extensions/detection_server/` CMake 骨架、配置类型、`PerformanceProfileManager` 和空 `camera_detection_server` 进程开始；首个提交不接 RKNN 推理、不接 Web、不扩展多模型、多路调度或复杂测试框架。
 
 ### P1：保留为后续阶段入口，但不纳入当前收口
 

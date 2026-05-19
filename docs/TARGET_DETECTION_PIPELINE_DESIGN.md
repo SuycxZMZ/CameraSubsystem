@@ -1,6 +1,6 @@
 # Camera Target Detection Pipeline 架构设计
 
-**最后更新:** 2026-05-17<br>
+**最后更新:** 2026-05-19<br>
 **阶段定位:** RK3576 官方 RKNN 新栈已完成 `yolo11` host 转换、交叉编译和板端离线运行；下一阶段准备把目标检测作为独立订阅端接入 CameraSubsystem 原始视频流<br>
 **当前目标:** 文档先行，先明确目标检测服务、NPU core 约束、结果发布格式、Web overlay/console 行为和编码准入条件；本文不包含 C++ / TypeScript 实现代码
 
@@ -26,9 +26,16 @@
 - [8. NPU core 使用策略](#8-npu-core-使用策略)
 - [9. 背压、丢帧与时序策略](#9-背压丢帧与时序策略)
 - [10. Metrics 与日志](#10-metrics-与日志)
-- [11. 第一阶段实现顺序](#11-第一阶段实现顺序)
-- [12. 风险与缓解](#12-风险与缓解)
-- [13. 需要拍板的决策](#13-需要拍板的决策)
+- [11. 状态机与错误处理](#11-状态机与错误处理)
+- [12. 第一阶段实现顺序](#12-第一阶段实现顺序)
+- [13. 验收标准](#13-验收标准)
+- [14. 风险与缓解](#14-风险与缓解)
+- [15. 已确认决策与待实现细节](#15-已确认决策与待实现细节)
+- [16. 代码落地蓝图](#16-代码落地蓝图)
+- [17. 配置默认值](#17-配置默认值)
+- [18. 构建、部署与运行入口](#18-构建部署与运行入口)
+- [19. 测试矩阵](#19-测试矩阵)
+- [20. 编码准入结论](#20-编码准入结论)
 
 ---
 
@@ -222,6 +229,53 @@ flowchart LR
 4. 浏览器可选择只看 detection console，也可切换到 detection server 输出的 annotated frame。
 5. 第一阶段新增检测后帧作为可选输出，但绘制工作在 detection server 侧完成。
 
+### 3.1 detection server 内部模块
+
+`camera_detection_server` 第一阶段按以下模块拆分。这里的拆分是代码实现边界，不要求每个模块都独立成库；但接口职责必须保持清晰，避免后续把 RKNN、Web、绘制和订阅逻辑揉在一个主循环里。
+
+| 模块 | 职责 | 关键输入 | 关键输出 | 第一阶段边界 |
+|------|------|----------|----------|--------------|
+| `DetectionConfigLoader` | 解析 CLI / 环境变量，生成不可变启动配置 | CLI、默认值、模型路径 | `DetectionServerConfig` | 不读取远端配置中心 |
+| `PerformanceProfileManager` | 设置并校验 NPU/CPU governor，采样频率状态 | `performance_profile`、sysfs | profile 状态、错误信息 | 默认 `npu-cpu`，不默认改 GPU/DMC |
+| `RknnModelSession` | 加载 `yolo11n.rknn`，设置 core mask，执行 `rknn_run` | 模型、core mask、预处理 tensor | raw output、runtime 信息 | 单模型单 session |
+| `FrameSubscriber` | 订阅 CameraSubsystem 原始帧，维护小队列 | `stream_id`、subscriber socket | 最新帧、丢帧计数 | copy path，先不接 MIPI DMA-BUF |
+| `FramePreprocessor` | 解码、resize、letterbox、格式转换 | 原始帧 payload | RKNN input tensor、letterbox metadata | USB JPEG/MJPEG 优先 |
+| `DetectionPostprocessor` | 解析 YOLO 输出，做阈值过滤与 NMS | raw output、阈值 | object list | 固定 yolo11n 输出适配 |
+| `BoxRenderer` | 在 server 侧绘制目标框，生成 annotated frame | 原始/解码帧、object list | annotated frame | 第一阶段可用 CPU 绘制，后续再接 RGA/NEON |
+| `DetectionPublisher` | 发布 DetectionResult JSON 与 annotated frame | 结果、帧、metrics | JSON line、可选图像帧 | 不直接提供 HTTP |
+| `DetectionControlServer` | 接收 start/stop/config/status 控制命令 | Gateway 控制消息 | response、状态切换 | JSON line，沿用 codec server 风格 |
+| `DetectionMetricsProvider` | 维护 metrics 快照，供 Gateway/日志读取 | 计数器、耗时、状态 | metrics snapshot | 每秒聚合，不逐帧刷屏 |
+
+模块依赖方向：
+
+```mermaid
+flowchart TB
+    Config["DetectionConfigLoader"] --> Perf["PerformanceProfileManager"]
+    Config --> RKNN["RknnModelSession"]
+    Config --> Sub["FrameSubscriber"]
+    Perf --> RKNN
+    Sub --> Pre["FramePreprocessor"]
+    Pre --> RKNN
+    RKNN --> Post["DetectionPostprocessor"]
+    Post --> Draw["BoxRenderer"]
+    Post --> Pub["DetectionPublisher"]
+    Draw --> Pub
+    Control["DetectionControlServer"] --> Sub
+    Control --> Pub
+    Control --> Metrics["DetectionMetricsProvider"]
+    Sub --> Metrics
+    RKNN --> Metrics
+    Pub --> Metrics
+```
+
+实现约束：
+
+1. `RknnModelSession` 不能依赖 Web/Gateway 类型。
+2. `FrameSubscriber` 不知道模型、类别、NMS 等推理细节。
+3. `BoxRenderer` 只接收后处理后的 bbox，不直接解析 RKNN raw output。
+4. `DetectionPublisher` 负责协议封装，但不负责推理策略。
+5. `PerformanceProfileManager` 必须可单独测试 sysfs 路径缺失、权限不足和读取失败。
+
 ## 4. 进程与职责边界
 
 | 进程 | 职责 | 明确不做 |
@@ -278,6 +332,135 @@ sequenceDiagram
 
 控制协议建议沿用 codec server 的 JSON line 风格，减少新协议复杂度。
 
+### 5.3 控制协议字段
+
+控制面第一阶段使用 Unix Domain Socket + JSON line，避免引入 HTTP server 或 protobuf。每条请求必须包含 `request_id`，响应必须原样带回。
+
+#### start_detection
+
+```json
+{
+  "type": "start_detection",
+  "request_id": "req-001",
+  "stream_id": "usb0",
+  "config": {
+    "model_path": "/home/luckfox/CameraSubsystem/models/yolo11n.rknn",
+    "labels_path": "/home/luckfox/CameraSubsystem/models/coco_80_labels.txt",
+    "npu_core_mask": 1,
+    "score_threshold": 0.25,
+    "nms_threshold": 0.45,
+    "output_mode": "metadata_and_annotated_frame",
+    "infer_every_n_frames": 1,
+    "draw_boxes": true,
+    "performance_profile": "npu-cpu"
+  }
+}
+```
+
+成功响应：
+
+```json
+{
+  "type": "detection_response",
+  "request_id": "req-001",
+  "ok": true,
+  "stream_id": "usb0",
+  "state": "running"
+}
+```
+
+失败响应：
+
+```json
+{
+  "type": "detection_response",
+  "request_id": "req-001",
+  "ok": false,
+  "stream_id": "usb0",
+  "error_code": "PERFORMANCE_PROFILE_FAILED",
+  "message": "failed to set /sys/class/devfreq/27700000.npu/governor to performance"
+}
+```
+
+#### stop_detection
+
+`stop_detection` 只停止指定 `stream_id` 的检测 session，不影响 `camera_publisher` 和原始 Web 预览。
+
+```json
+{
+  "type": "stop_detection",
+  "request_id": "req-002",
+  "stream_id": "usb0"
+}
+```
+
+停止成功后应释放 subscriber、RKNN input/output tensor、annotated frame buffer 和控制面 session 状态。第一阶段不要求恢复 governor。
+
+#### set_detection_config
+
+运行期可修改的字段限制在不会破坏 RKNN session 的轻量项：
+
+| 字段 | 运行期是否允许 | 处理方式 |
+|------|----------------|----------|
+| `score_threshold` | 是 | 下一帧生效 |
+| `nms_threshold` | 是 | 下一帧生效 |
+| `output_mode` | 是 | 下一次发布生效 |
+| `draw_boxes` | 是 | 下一帧生效 |
+| `infer_every_n_frames` | 是 | 下一帧调度生效 |
+| `npu_core_mask` | 否 | 返回 `CONFIG_RESTART_REQUIRED` |
+| `model_path` | 否 | 返回 `CONFIG_RESTART_REQUIRED` |
+| `performance_profile` | 否 | 返回 `CONFIG_RESTART_REQUIRED` |
+
+不允许运行期热切换 `npu_core_mask`，原因是它会改变 RKNN runtime 调度语义，也容易掩盖多任务 NPU 资源分配问题。需要切换 core 时必须 stop 再 start。
+
+#### get_detection_status
+
+状态响应必须同时包含业务状态、性能档状态、模型状态和最近 metrics：
+
+```json
+{
+  "type": "detection_status",
+  "request_id": "req-003",
+  "stream_id": "usb0",
+  "state": "running",
+  "model_name": "yolo11n",
+  "npu_core_mask": 1,
+  "performance_profile": {
+    "name": "npu-cpu",
+    "applied": true,
+    "npu_governor": "performance",
+    "npu_cur_freq_hz": 950000000,
+    "npu_max_freq_hz": 950000000,
+    "cpu_policy0_governor": "performance",
+    "cpu_policy4_governor": "performance"
+  },
+  "metrics": {
+    "input_fps": 15.4,
+    "infer_fps": 15.2,
+    "dropped_frames": 0,
+    "latency_ms_avg": 23.6,
+    "latency_ms_p95": 31.4,
+    "object_count": 2
+  },
+  "last_error": ""
+}
+```
+
+### 5.4 错误码
+
+第一阶段错误码固定为以下集合，避免每个模块自由拼字符串：
+
+| 错误码 | 含义 | 典型处理 |
+|--------|------|----------|
+| `INVALID_CONFIG` | 配置字段非法 | 拒绝 start/config |
+| `PERFORMANCE_PROFILE_FAILED` | governor 设置或验证失败 | 默认拒绝启动 |
+| `MODEL_LOAD_FAILED` | RKNN 模型加载失败 | 拒绝启动 |
+| `CORE_MASK_FAILED` | `rknn_set_core_mask` 失败 | 拒绝启动 |
+| `SUBSCRIBE_FAILED` | 订阅原始帧失败 | session 进入 Error |
+| `FRAME_DECODE_FAILED` | 解码或输入格式不支持 | 计数并丢帧，连续失败进入 Degraded |
+| `INFERENCE_FAILED` | `rknn_run` 或 output 读取失败 | session 进入 Error |
+| `PUBLISH_FAILED` | 结果发布失败 | 计数并继续，连续失败进入 Degraded |
+
 ## 6. 输出模式与 Web 行为
 
 ### 6.1 输出模式
@@ -303,7 +486,17 @@ annotated_frame=true when user selects drawn boxes
 3. Web 前端不承担逐帧框绘制，避免多路摄像头场景下拖慢浏览器。
 4. annotated frame 第一阶段可以复用 JPEG/RGB 绘制路径；后续再评估 RGA/NEON 优化。
 
-### 6.2 Web console 行为
+### 6.2 annotated frame 同步规则
+
+annotated frame 不是新的 Camera 源，它是 detection server 对某个原始 `frame_id` 的派生结果。同步规则如下：
+
+1. annotated frame 必须携带原始 `stream_id`、`frame_id`、`timestamp_ns`。
+2. Gateway 收到 annotated frame 后，只能替换同一 `stream_id` 的检测视图，不能覆盖原始预览流。
+3. Web 只显示每个 `stream_id` 最新 annotated frame；如果新到的 annotated frame 的 `frame_id` 小于当前显示帧，必须丢弃。
+4. metadata 和 annotated frame 可以分开到达；Web console 以 metadata 为准，画面以 annotated frame 为准。
+5. stop detection 后，Web 必须清空该 stream 的 detection overlay/console，但原始预览继续显示。
+
+### 6.3 Web console 行为
 
 Web console 每秒刷新一次摘要，不逐帧刷屏。
 
@@ -321,6 +514,14 @@ Web console 每秒刷新一次摘要，不逐帧刷屏。
 | `latency_ms_p95` | p95 检测耗时 |
 | `object_count` | 最近一秒目标数 |
 | `last_error` | 最近错误 |
+
+console 交互规则：
+
+1. 每个 stream card 增加一个检测开关，默认关闭。
+2. 开启后 Web 发送 `start_detection`，按钮进入 pending 状态，直到收到 `running` 或错误响应。
+3. 关闭后 Web 发送 `stop_detection`，立即停止展示 detection console 的持续刷新。
+4. console 每秒最多追加一行摘要，最多保留最近 60 行。
+5. 错误状态必须显示 `error_code` 和简短 message，不显示原始堆栈。
 
 ## 7. 结果数据契约
 
@@ -370,6 +571,41 @@ DetectionResult 建议使用 JSON line 作为第一阶段结果协议：
 4. `core_mask` 必须进入结果和状态，便于确认任务没有默认吃满全部 NPU。
 5. 结果协议第一阶段使用 JSON line；后续高频或多模型场景再考虑二进制协议。
 
+### 7.1 输入帧契约
+
+第一阶段输入只承诺当前 USB 主链路可验证路径：
+
+| 输入项 | 第一阶段约束 |
+|--------|--------------|
+| `stream_id` | 必须由 publisher/control 面贯通，不能写死为 `default` |
+| `frame_id` | 必须来自原始帧描述，不允许 detection server 自增替代 |
+| `timestamp_ns` | 使用原始帧 timestamp；缺失时才由接收时间补齐并打 warning |
+| pixel format | 优先支持当前 USB JPEG/MJPEG 路径 |
+| memory type | 第一阶段 copy path；DMA-BUF/RGA 低拷贝输入暂缓 |
+| frame ownership | subscriber 处理完成后必须及时 release，不因推理阻塞 release |
+
+不在第一阶段处理：
+
+1. MIPI/RKISP 多平面 NV12 live path。
+2. RKNN 直接 import DMA-BUF。
+3. RGA 零拷贝 resize/letterbox。
+4. 多 stream 同时检测的 NPU core 自动调度。
+
+### 7.2 输出帧契约
+
+annotated frame 第一阶段建议复用 Web preview 已有可显示封装，优先输出 JPEG/RGB 后再由 Gateway 转发。为了避免把格式选择卡死，设计上要求输出层保留以下抽象字段：
+
+| 字段 | 说明 |
+|------|------|
+| `stream_id` | 原始流 |
+| `frame_id` | 对应原始帧 |
+| `timestamp_ns` | 对应原始时间戳 |
+| `encoding` | `jpeg`、`rgb` 或后续扩展 |
+| `width` / `height` | annotated frame 尺寸 |
+| `payload_size` | 输出 payload 字节数 |
+
+第一阶段更推荐 `jpeg`，因为现有 Web preview 链路已经围绕浏览器可显示帧工作；RGA/MPP/硬件 JPEG 优化后移。
+
 ## 8. NPU core 使用策略
 
 ### 8.1 默认策略
@@ -398,6 +634,49 @@ npu_core_mask=1
 3. 如果 `rknn_set_core_mask` 失败，服务必须进入 `Degraded` 或 `Error` 状态，并把失败原因写入 status，不静默 fallback 到 all core。
 4. 多模型并行时，必须由上层配置分配 core，例如 detection=1、另一个任务=2、第三个任务=4。
 
+### 8.3 PerformanceProfileManager 策略
+
+profile 枚举：
+
+| profile | NPU | CPU policy0/4 | GPU/DMC | 默认 |
+|---------|-----|---------------|---------|------|
+| `none` | 不修改 | 不修改 | 不修改 | 否 |
+| `npu` | `performance` | 不修改 | 不修改 | 否 |
+| `npu-cpu` | `performance` | `performance` | 不修改 | 是 |
+| `full` | 暂缓 | 暂缓 | 暂缓 | 否 |
+
+`full` 第一阶段不实现，只保留枚举占位。原因是 GPU/DMC 属于全局资源，目标检测链路当前没有证据证明必须改它们。
+
+启动顺序：
+
+```mermaid
+sequenceDiagram
+    participant Main as camera_detection_server
+    participant Perf as PerformanceProfileManager
+    participant RKNN as RknnModelSession
+    participant Sub as FrameSubscriber
+
+    Main->>Perf: Read current governors/freq
+    Main->>Perf: Apply profile npu-cpu
+    Perf-->>Main: Applied or error
+    alt profile applied
+        Main->>RKNN: Load model and set core mask
+        RKNN-->>Main: Runtime ready
+        Main->>Sub: Subscribe stream
+        Sub-->>Main: Frames ready
+    else profile failed and failure not allowed
+        Main->>Main: Enter Error and reject start
+    end
+```
+
+失败策略：
+
+1. 默认 `allow_performance_profile_failure=false`。
+2. sysfs 节点不存在、写入失败、写入后回读不匹配都视为失败。
+3. 失败时不初始化 RKNN runtime，直接返回 `PERFORMANCE_PROFILE_FAILED`。
+4. 用户显式允许失败时，服务可以继续启动，但 status 必须标记 `performance_profile.applied=false`，Web console 必须显示 warning。
+5. 服务退出不自动恢复 governor，避免多个 AI 服务并发时互相覆盖；恢复由统一 debug stack、systemd unit 或用户命令完成。
+
 ## 9. 背压、丢帧与时序策略
 
 目标检测不是录制，第一阶段不追求逐帧必达。推荐策略：
@@ -407,6 +686,33 @@ npu_core_mask=1
 3. 目标检测默认关闭；用户开启后默认 `infer_every_n_frames=1`，即每帧都进入检测链路。
 4. 如果推理耗时超过输入帧周期，仍采用小队列 + 丢旧保新，不让延迟无限增长。
 5. annotated frame 必须携带 `stream_id + frame_id + timestamp_ns`，Web 端只显示最新帧。
+
+推荐线程模型：
+
+| 线程 | 职责 | 阻塞边界 |
+|------|------|----------|
+| control thread | 处理 start/stop/status/config | 不执行推理 |
+| subscriber thread | 接收原始帧并放入小队列 | 不等待 RKNN |
+| inference thread | 取最新帧、预处理、推理、后处理、绘框、发布 | 可阻塞在 RKNN |
+| metrics thread | 每秒聚合日志和 status snapshot | 不访问长耗时路径 |
+
+队列策略：
+
+1. `max_queue_depth=2`。
+2. 队列满时丢弃最旧帧，保留最新帧。
+3. 被丢弃的帧如果持有 DataPlaneV2 lease，必须先 release。
+4. `infer_every_n_frames=1` 表示每个进入 inference thread 的最新帧都推理，不表示队列必须保留每一帧。
+5. 当输入 15 FPS、单核 performance 下推理 58 FPS 时，理论上不应出现持续丢帧；如果出现，优先检查 decode/resize/draw/publish，而不是 NPU。
+
+延迟预算第一阶段参考值：
+
+| 阶段 | 目标 | 说明 |
+|------|------|------|
+| decode + preprocess | `< 15 ms` | USB JPEG/MJPEG 可能成为主要 CPU 开销 |
+| RKNN inference | `< 25 ms` | performance + core0 实测 benchmark `17.08 ms` |
+| postprocess + draw | `< 10 ms` | yolo11n object 数量有限 |
+| publish + gateway | `< 10 ms` | metadata 很小，annotated frame 取决于编码 |
+| end-to-end p95 | `< 80 ms` | 单路 USB 调试目标，不作为生产 SLA |
 
 ## 10. Metrics 与日志
 
@@ -428,6 +734,10 @@ Detection server 需要提供自己的 metrics provider，后续接入 `MetricsA
 | `detection_npu_core_mask` | 当前 core mask |
 | `detection_npu_cur_freq_hz` | 采样到的 NPU 当前频率 |
 | `detection_npu_governor` | 当前 NPU governor |
+| `detection_performance_profile_applied` | 性能档是否已生效 |
+| `detection_profile_failure_count` | 性能档设置失败次数 |
+| `detection_decode_failure_count` | 解码失败次数 |
+| `detection_publish_failure_count` | 发布失败次数 |
 
 日志规则：
 
@@ -435,7 +745,73 @@ Detection server 需要提供自己的 metrics provider，后续接入 `MetricsA
 2. Web console 每秒聚合一次，最多显示最近 N 条。
 3. 关键错误必须包含 `stream_id`、`frame_id`、`core_mask`、`model_path`。
 
-## 11. 第一阶段实现顺序
+建议每秒摘要日志格式：
+
+```text
+detection_summary stream=usb0 state=running model=yolo11n core_mask=1 profile=npu-cpu profile_applied=1 input_fps=15.4 infer_fps=15.2 dropped=0 latency_avg_ms=23.6 latency_p95_ms=31.4 objects=2 npu_freq=950000000
+```
+
+启动关键日志必须包含：
+
+```text
+detection_profile before npu_governor=rknpu_ondemand npu_cur=300000000 npu_max=950000000 cpu0=ondemand cpu4=ondemand
+detection_profile after npu_governor=performance npu_cur=950000000 npu_max=950000000 cpu0=performance cpu4=performance
+detection_runtime model=yolo11n runtime=rknnrt runtime_version=2.3.2 driver_version=0.9.7 core_mask=1
+```
+
+禁止日志行为：
+
+1. 禁止逐帧打印完整 JSON result。
+2. 禁止把 bbox 列表直接刷到主日志；bbox 只进入 metadata 输出。
+3. 禁止在 Web console 中一帧一行刷新。
+
+## 11. 状态机与错误处理
+
+目标检测 session 状态机：
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Starting: start_detection
+    Starting --> Running: profile + model + subscribe ok
+    Starting --> Error: startup failure
+    Running --> Degraded: recoverable repeated failure
+    Degraded --> Running: errors cleared
+    Running --> Stopping: stop_detection
+    Degraded --> Stopping: stop_detection
+    Error --> Stopping: stop_detection
+    Stopping --> Idle: resources released
+```
+
+状态定义：
+
+| 状态 | 含义 | Web 行为 |
+|------|------|----------|
+| `Idle` | 未开启检测 | 按钮可开启，console 清空 |
+| `Starting` | 正在设置性能档、加载模型、订阅帧 | 按钮 pending |
+| `Running` | 正常推理和发布 | 显示 console/annotated frame |
+| `Degraded` | 可恢复异常，例如连续 decode/publish 失败 | 显示 warning，原始预览不受影响 |
+| `Error` | 不可继续，例如 profile/model/core mask 失败 | 显示错误，停止检测输出 |
+| `Stopping` | 正在释放资源 | 按钮 pending |
+
+资源释放顺序：
+
+1. 停止接收新的控制启动请求。
+2. 停止 subscriber 接收，release 未处理帧。
+3. 停止 inference thread，释放 RKNN input/output 资源。
+4. flush 或关闭 DetectionPublisher。
+5. 更新 metrics/status 为 `Idle` 或 `Error`。
+6. 不自动恢复 governor。
+
+错误处理原则：
+
+1. 启动前置条件失败必须 fail fast，不能带病运行。
+2. 运行时单帧 decode 失败只计数和丢帧，不立即停止 session。
+3. 连续 decode/publish 失败超过阈值进入 `Degraded`。
+4. RKNN runtime 运行失败进入 `Error`，需要 stop/start 恢复。
+5. detection server 崩溃时 Gateway 只标记 detection unavailable，原始 preview 继续。
+
+## 12. 第一阶段实现顺序
 
 ### D1：服务骨架与配置
 
@@ -454,7 +830,8 @@ Detection server 需要提供自己的 metrics provider，后续接入 `MetricsA
    - `--draw-boxes`
    - `--performance-profile`，默认 `npu-cpu`
    - `--allow-performance-profile-failure`
-4. 启动后只初始化配置和 RKNN runtime，不接入 Web。
+4. 实现 `PerformanceProfileManager`，先完成 sysfs 读写、回读校验和错误码。
+5. 启动后只初始化配置、性能档和 RKNN runtime，不接入 Web。
 
 ### D2：订阅原始帧并输出 metadata
 
@@ -482,7 +859,44 @@ Detection server 需要提供自己的 metrics provider，后续接入 `MetricsA
    - annotated frame 模式可看到目标框
    - detection server 不占用 mask 以外的 NPU 配置
 
-## 12. 风险与缓解
+### D5：快速收口边界
+
+以下事项不进入第一阶段，避免目标检测链路扩张失控：
+
+1. 不做多模型并发调度器。
+2. 不做 MIPI/RKISP NV12 DMA-BUF 低拷贝输入。
+3. 不做 Web 前端 overlay 绘框。
+4. 不做训练、模型下载、模型管理平台。
+5. 不做 LLM 接入。
+6. 不做复杂 benchmark dashboard；只保留必要板端 smoke 和每秒摘要。
+
+## 13. 验收标准
+
+第一阶段编码完成后必须满足以下验收项，未满足不得标记为完成：
+
+| 类别 | 验收项 | 判定方式 |
+|------|--------|----------|
+| 启动 | `camera_detection_server` 可独立启动 | 进程启动并进入 `Idle` 或 `Running` |
+| 性能档 | 默认 `npu-cpu` 生效 | NPU governor `performance`，`cur_freq=max_freq=950000000`，CPU policy0/4 `performance` |
+| core mask | 默认只用 core0 | status/result 中 `npu_core_mask=1`，`rknn_set_core_mask` 成功 |
+| 模型 | 固定 `yolo11n.rknn` 可加载 | 日志输出 runtime/model/core mask |
+| 数据输入 | 可订阅当前 USB 原始视频流 | `detection_input_frames` 持续增长 |
+| 推理 | 开启检测后每帧进入推理队列 | `infer_every_n_frames=1`，`detection_inferred_frames` 持续增长 |
+| metadata | DetectionResult JSON 可被 Gateway/Web 消费 | JSON line 字段完整且带 `stream_id/frame_id` |
+| 绘框 | annotated frame 可显示目标框 | Web 切换到 annotated frame 后可见框 |
+| console | 每秒输出摘要 | Web console 不刷屏，字段包含 fps/latency/object_count |
+| 背压 | 推理慢时不累积无限延迟 | 队列深度不超过 2，丢旧保新计数正确 |
+| 隔离 | detection 崩溃不影响原始预览 | 停止 detection server 后 Web 原始预览仍出帧 |
+| 关闭 | stop 后资源释放 | subscriber 断开，session 回到 `Idle` |
+
+建议最小板端验证命令后续收敛为一个脚本，但脚本只做编排，不扩展成复杂测试框架：
+
+```bash
+BOARD_HOST=192.168.31.9 BOARD_USER=luckfox BOARD_PASSWORD=luckfox \
+  ./scripts/rk3576-detection-server-smoke.sh
+```
+
+## 14. 风险与缓解
 
 | 风险 | 级别 | 缓解 |
 |------|------|------|
@@ -495,8 +909,12 @@ Detection server 需要提供自己的 metrics provider，后续接入 `MetricsA
 | JSON 结果过大或频率过高 | P2 | metadata-only 每帧结果可控；console 每秒聚合；后续再考虑二进制协议 |
 | 默认 governor 导致 FPS 低于预期 | P1 | detection server 默认进入 `npu-cpu` performance profile；启动时校验 NPU/CPU governor 与频率，失败进入 Error 或显式降级 |
 | 服务直接改 governor 带来全局副作用 | P1 | 默认只改 NPU/CPU，不改 GPU/DMC；退出不自动恢复；生产环境后续收敛到统一启动脚本或 systemd unit |
+| performance profile 需要 sudo 权限 | P1 | 开发板 debug 环境允许 sudo；生产环境用 systemd unit 或启动脚本预授权；失败必须可观测 |
+| annotated frame 编码增加 CPU 开销 | P2 | 先测量 CPU 绘制路径；必要时只开 metadata_only；RGA/NEON 优化后移 |
+| metadata 与 annotated frame 乱序 | P2 | 使用 `stream_id/frame_id/timestamp_ns` 去重，只显示最新帧 |
+| 过早接入多路/多模型导致主线失焦 | P1 | 第一阶段只做单 USB 单模型单 core；多路调度等 MIPI/多摄像头真实输入到位后再开 |
 
-## 13. 需要拍板的决策
+## 15. 已确认决策与待实现细节
 
 以下决策已经确认，可以作为第一阶段编码输入：
 
@@ -505,8 +923,300 @@ Detection server 需要提供自己的 metrics provider，后续接入 `MetricsA
 3. **结果协议：** 第一阶段接受 JSON line，不引入 protobuf 或复杂二进制协议。
 4. **推理节流：** 目标检测默认关闭；用户开启后默认每帧推理，即 `infer_every_n_frames=1`。
 5. **模型选择：** 第一阶段固定 `yolo11n.rknn`，链路稳定后再评估替换模型。
+6. **性能档：** `camera_detection_server` 默认启用 `npu-cpu` performance profile，失败默认拒绝启动。
+7. **第一阶段输入路径：** 仅承诺 USB copy path；MIPI/RKISP/DMA-BUF/RGA 低拷贝后移。
+8. **annotated frame 格式：** 第一阶段使用 JPEG 输出，复用 Web preview 当前浏览器友好的图像显示路径。
+9. **绘框实现：** 第一阶段参考/复用 RKNN model zoo `image_drawing` 的 CPU 绘制思路，并封装为 `BoxRenderer`，不把 model zoo 示例代码散落在业务主循环里。
 
-仍需实现阶段进一步确认的细节：
+当前无阻塞编码的未决策事项。以下内容只作为后续优化方向，不阻塞第一阶段开工：
 
-1. annotated frame 第一阶段使用 JPEG 输出还是沿用 Gateway 当前帧封装格式。
-2. C++ 绘框优先用现有 model zoo `image_drawing`，还是统一封装到 CameraSubsystem 自有绘制工具。
+1. RGA/NEON 绘框加速。
+2. MIPI/RKISP NV12 DMA-BUF 低拷贝输入。
+3. 多模型、多 stream 的 NPU core 分配器。
+
+## 16. 代码落地蓝图
+
+本节是第一阶段编码的文件级蓝图。实现时应按这里拆分提交，避免一次性把 RKNN、控制面、Web、绘框和脚本全部塞进同一个改动。
+
+### 16.1 目录与文件清单
+
+新增目录：
+
+```text
+extensions/detection_server/
+```
+
+第一阶段新增文件：
+
+| 文件 | 类型 | 责任 |
+|------|------|------|
+| `extensions/detection_server/CMakeLists.txt` | 构建 | 定义 `camera_detection_server` 和可测试的内部静态库 |
+| `extensions/detection_server/include/detection_server/detection_config.h` | 头文件 | 配置结构、默认值、枚举 |
+| `extensions/detection_server/include/detection_server/detection_types.h` | 头文件 | DetectionResult、bbox、metrics、状态枚举 |
+| `extensions/detection_server/include/detection_server/performance_profile_manager.h` | 头文件 | sysfs governor 管理接口 |
+| `extensions/detection_server/include/detection_server/rknn_model_session.h` | 头文件 | RKNN runtime 封装接口 |
+| `extensions/detection_server/include/detection_server/frame_preprocessor.h` | 头文件 | 解码、resize、letterbox 接口 |
+| `extensions/detection_server/include/detection_server/detection_postprocessor.h` | 头文件 | YOLO 输出解析与 NMS 接口 |
+| `extensions/detection_server/include/detection_server/box_renderer.h` | 头文件 | CPU 绘框与 JPEG 输出接口 |
+| `extensions/detection_server/include/detection_server/detection_publisher.h` | 头文件 | JSON metadata 与 annotated frame 发布接口 |
+| `extensions/detection_server/include/detection_server/detection_session.h` | 头文件 | session 状态机、线程生命周期 |
+| `extensions/detection_server/src/*.cpp` | 实现 | 对应头文件实现 |
+| `extensions/detection_server/src/camera_detection_server_app.cpp` | 入口 | CLI、启动、信号处理 |
+| `extensions/detection_server/tests/*.cpp` | 单测 | 配置、profile、序列化、状态机、NMS |
+| `scripts/rk3576-detection-server-smoke.sh` | 板端 smoke | 编排 publisher/detection/web 的最小验证 |
+
+修改文件：
+
+| 文件 | 修改内容 |
+|------|----------|
+| `CMakeLists.txt` | 增加 `extensions/detection_server` 子目录，可用选项控制是否构建 |
+| `scripts/build-rk3576.sh` | 确认 detection server 跟随 RK3576 交叉编译 |
+| `scripts/rk3576-build-deploy-debug.sh` | 部署 detection server、模型、labels 和 smoke 脚本 |
+| `scripts/rk3576-board-debug-stack.sh` | 增加可选 detection 启动/停止入口 |
+| `extensions/web_preview/` | 只做 detection control/status proxy 和 UI 开关，不做前端绘框 |
+
+第一阶段不修改：
+
+| 路径 | 原因 |
+|------|------|
+| `src/camera/` | detection 是订阅端，不改变采集主链路 |
+| `src/ipc/camera_data_plane_v2.*` | 第一阶段 copy path，不改 fd 协议 |
+| `extensions/codec_server/` | detection 与 codec 平行，不复用 codec session manager |
+| `Omni3576-sdk/` | 不覆盖官方 SDK 文件 |
+
+### 16.2 构建目标
+
+建议 CMake 目标：
+
+| target | 类型 | 说明 |
+|--------|------|------|
+| `camera_detection_server_core` | static library | 配置、profile、RKNN wrapper、postprocess、renderer、publisher、session |
+| `camera_detection_server` | executable | 进程入口 |
+| `test_detection_config` | unit test | CLI/default/is-valid |
+| `test_performance_profile_manager` | unit test | 用临时目录 mock sysfs |
+| `test_detection_result_json` | unit test | JSON 字段完整性和转义 |
+| `test_detection_postprocessor` | unit test | bbox decode/NMS 边界 |
+| `test_detection_session_state` | unit test | 状态机 start/stop/error |
+
+RKNN 依赖接入策略：
+
+1. RK3576 交叉编译时链接官方新栈 `rknnrt 2.3.2`。
+2. 本机 x86_64 单测默认不链接 RKNN runtime，`RknnModelSession` 用接口抽象或编译选项隔离。
+3. 如果本机缺 RKNN runtime，仍必须能编译和运行非 RKNN 单测。
+4. RKNN 真实推理只在 RK3576 smoke 中验证。
+
+### 16.3 数据结构字段
+
+核心数据结构字段必须先落到 `detection_types.h`，再由各模块引用。字段命名保持 snake_case，JSON 字段与结构字段一致。
+
+| 结构 | 必需字段 |
+|------|----------|
+| `DetectionBox` | `class_id`、`label`、`score`、`x1`、`y1`、`x2`、`y2`、`nx1`、`ny1`、`nx2`、`ny2` |
+| `DetectionResult` | `stream_id`、`frame_id`、`timestamp_ns`、`model_name`、`runtime_version`、`driver_version`、`npu_core_mask`、`image_width`、`image_height`、`letterbox_width`、`letterbox_height`、`preprocess_ms`、`inference_ms`、`postprocess_ms`、`total_ms`、`objects` |
+| `AnnotatedFrame` | `stream_id`、`frame_id`、`timestamp_ns`、`encoding`、`width`、`height`、`payload` |
+| `DetectionMetricsSnapshot` | `state`、`input_frames`、`inferred_frames`、`dropped_frames`、`decode_failures`、`publish_failures`、`input_fps`、`infer_fps`、`latency_avg_ms`、`latency_p95_ms`、`last_object_count`、`npu_core_mask`、`npu_governor`、`npu_cur_freq_hz`、`performance_profile_applied`、`last_error` |
+| `PerformanceProfileSnapshot` | `profile`、`applied`、`npu_governor`、`npu_cur_freq_hz`、`npu_max_freq_hz`、`cpu_policy0_governor`、`cpu_policy4_governor`、`error_code`、`message` |
+
+### 16.4 模块实现顺序
+
+推荐小步提交顺序：
+
+1. **配置与类型层：** `detection_config`、`detection_types`、JSON 序列化、单测。
+2. **性能档层：** `PerformanceProfileManager`，用 mock sysfs 单测覆盖成功、权限失败、回读不匹配。
+3. **RKNN wrapper 骨架：** `RknnModelSession` 接口和 RK3576 编译接入，先支持加载模型、查询 runtime、设置 core mask。
+4. **后处理与绘框：** `DetectionPostprocessor` + `BoxRenderer`，用 fixture 覆盖 NMS 和 bbox 坐标。
+5. **session 骨架：** 状态机、线程生命周期、队列、metrics，不接 Web。
+6. **订阅与发布：** 接 `CameraSubscriberClient`，输出 metadata JSON 和 JPEG annotated frame。
+7. **Gateway/Web 最小接入：** detection 开关、status proxy、每秒 console、annotated frame 显示。
+8. **板端 smoke：** 单 USB、core0、performance profile、Web 可见结果。
+
+每一步都要求本机可构建；涉及 RKNN 真实运行的步骤再增加 RK3576 验证。
+
+### 16.5 关键实现约束
+
+1. `camera_detection_server_app.cpp` 只负责解析参数、装配对象和处理信号，不写业务逻辑。
+2. `PerformanceProfileManager` 不依赖 RKNN，也不依赖 detection session。
+3. `RknnModelSession` 不处理 JSON、不处理 Web、不处理 subscriber。
+4. `DetectionSession` 只编排模块和状态机，不直接写 sysfs、不直接解析 RKNN raw output。
+5. 任何线程退出都必须可重复调用 stop，不允许析构时阻塞无限等待。
+6. JSON 序列化必须集中实现，禁止多处手写拼接不同格式。
+7. 控制面错误码必须使用第 5.4 节固定集合。
+
+## 17. 配置默认值
+
+第一阶段 CLI 默认值如下，除非板端验证证明不可用，否则实现不得擅自更改。
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--stream-id` | `usb0` 或 publisher status 中唯一 stream | 单路 USB 调试默认 |
+| `--model-path` | `/home/luckfox/CameraSubsystem/models/yolo11n.rknn` | 固定 yolo11n |
+| `--labels-path` | `/home/luckfox/CameraSubsystem/models/coco_80_labels.txt` | COCO 标签 |
+| `--npu-core-mask` | `1` | core0 |
+| `--score-threshold` | `0.25` | YOLO 常用默认 |
+| `--nms-threshold` | `0.45` | YOLO 常用默认 |
+| `--output-mode` | `metadata_and_annotated_frame` | metadata + JPEG annotated frame |
+| `--infer-every-n-frames` | `1` | 开启后每帧进入推理队列 |
+| `--draw-boxes` | `1` | server 侧绘框 |
+| `--max-queue-depth` | `2` | 丢旧保新 |
+| `--performance-profile` | `npu-cpu` | 默认高性能 |
+| `--allow-performance-profile-failure` | `0` | 默认 fail fast |
+| `--control-socket` | `/tmp/camera_subsystem_detection.sock` | 控制面 UDS |
+| `--result-socket` | `/tmp/camera_subsystem_detection_result.sock` | 结果输出 UDS，若实现采用同 socket 可合并但文档需同步 |
+| `--metrics-interval-ms` | `1000` | Web console 和摘要日志周期 |
+
+环境变量只允许覆盖板端部署相关字段，不作为业务配置主入口：
+
+| 环境变量 | 作用 |
+|----------|------|
+| `DETECTION_MODEL_PATH` | 覆盖模型路径 |
+| `DETECTION_LABELS_PATH` | 覆盖标签路径 |
+| `DETECTION_PERFORMANCE_PROFILE` | 覆盖性能档 |
+| `DETECTION_NPU_CORE_MASK` | 覆盖 core mask |
+
+配置校验规则：
+
+1. `npu_core_mask` 只允许 `1`、`2`、`4`、`3`、`7`，默认和推荐值只能是 `1`。
+2. `score_threshold`、`nms_threshold` 必须在 `[0.0, 1.0]`。
+3. `infer_every_n_frames` 必须大于等于 `1`。
+4. `max_queue_depth` 第一阶段只允许 `1` 到 `4`。
+5. `performance_profile=full` 第一阶段返回 `INVALID_CONFIG`，不静默降级。
+6. 模型和 labels 路径不存在时，start 必须失败。
+
+## 18. 构建、部署与运行入口
+
+### 18.1 本机构建
+
+第一阶段本机构建目标是确保非 RKNN 代码可编译、可测：
+
+```bash
+cd CameraSubsystem
+./scripts/build.sh
+ctest --output-on-failure -R "test_detection_|test_performance_profile"
+```
+
+本机不要求真实 RKNN 推理。无法链接 RKNN runtime 时，`camera_detection_server` 可只在 RK3576 交叉编译目标中启用，或者本机以 stub 方式编译非推理路径。
+
+### 18.2 RK3576 交叉编译
+
+```bash
+cd CameraSubsystem
+./scripts/build-rk3576.sh
+```
+
+交叉编译必须产出：
+
+```text
+bin/rk3576/camera_detection_server
+```
+
+### 18.3 部署目录
+
+板端目录固定为：
+
+```text
+/home/luckfox/CameraSubsystem/
+```
+
+建议部署后结构：
+
+```text
+/home/luckfox/CameraSubsystem/
+├── bin/
+│   ├── camera_publisher_example
+│   ├── camera_subscriber_example
+│   ├── camera_detection_server
+│   └── web_preview_gateway
+├── models/
+│   ├── yolo11n.rknn
+│   └── coco_80_labels.txt
+├── scripts/
+│   ├── rk3576-board-debug-stack.sh
+│   └── rk3576-detection-server-smoke.sh
+└── logs/
+```
+
+### 18.4 最小运行命令
+
+板端直接运行 detection server 的最小命令：
+
+```bash
+sudo /home/luckfox/CameraSubsystem/bin/camera_detection_server \
+  --stream-id usb0 \
+  --model-path /home/luckfox/CameraSubsystem/models/yolo11n.rknn \
+  --labels-path /home/luckfox/CameraSubsystem/models/coco_80_labels.txt \
+  --npu-core-mask 1 \
+  --performance-profile npu-cpu \
+  --output-mode metadata_and_annotated_frame \
+  --draw-boxes 1
+```
+
+如果后续通过板端统一脚本启动，则脚本必须暴露：
+
+```bash
+/home/luckfox/CameraSubsystem/scripts/rk3576-board-debug-stack.sh start-detection
+/home/luckfox/CameraSubsystem/scripts/rk3576-board-debug-stack.sh stop-detection
+/home/luckfox/CameraSubsystem/scripts/rk3576-board-debug-stack.sh status
+```
+
+## 19. 测试矩阵
+
+测试投入控制在“保障主链路质量”的范围内，不做复杂测试平台。
+
+### 19.1 本机单测
+
+| 测试 | 覆盖点 | 是否必需 |
+|------|--------|----------|
+| `test_detection_config` | 默认值、非法阈值、非法 core mask、路径校验 | 是 |
+| `test_performance_profile_manager` | mock sysfs 成功、写失败、回读不匹配、节点缺失 | 是 |
+| `test_detection_result_json` | JSON 字段完整、字符串转义、空 objects | 是 |
+| `test_detection_postprocessor` | score threshold、NMS、bbox clamp、空输出 | 是 |
+| `test_detection_session_state` | Idle/Starting/Running/Error/Stopping 转换 | 是 |
+
+### 19.2 RK3576 smoke
+
+| 场景 | 预期 |
+|------|------|
+| 默认启动 | NPU/CPU governor 切到 performance，core mask 为 1 |
+| 模型加载 | 日志包含 `rknnrt 2.3.2`、driver、model、core mask |
+| USB 输入 | `detection_input_frames` 持续增长 |
+| 推理输出 | `detection_inferred_frames` 持续增长，metadata JSON 可解析 |
+| annotated frame | Web 可显示带框画面 |
+| stop detection | 原始 preview 不断流，detection session 回到 Idle |
+| profile 失败 | 无 sudo 或 mock 节点缺失时返回 `PERFORMANCE_PROFILE_FAILED` |
+
+### 19.3 不做的测试
+
+| 测试 | 暂缓原因 |
+|------|----------|
+| 多路摄像头同时检测 | 当前只有一个 USB 摄像头 |
+| MIPI DMA-BUF 低拷贝推理 | 缺真实 sensor 与输入链路 |
+| 长时间 AI benchmark dashboard | 不属于当前主线收口目标 |
+| LLM/RKNN-LLM 联合调度 | LLM 非当前主线 |
+
+## 20. 编码准入结论
+
+当前文档已经收敛到可以开始第一阶段编码，原因如下：
+
+1. 进程边界明确：detection 独立进程，不侵入 publisher/gateway 推理路径。
+2. 模块边界明确：配置、性能档、RKNN、订阅、预处理、后处理、绘框、发布、控制面、metrics 都有责任划分。
+3. 控制协议明确：请求、响应、状态、错误码和可热更新字段已定义。
+4. 数据契约明确：输入帧、DetectionResult、annotated frame、metrics 字段已定义。
+5. 性能策略明确：默认 core0 + `npu-cpu` performance profile，失败默认拒绝启动。
+6. 背压策略明确：小队列、丢旧保新、release 不被推理阻塞。
+7. 实现顺序明确：先类型/配置/profile，再 RKNN wrapper，再 session，再订阅发布，最后 Web。
+8. 验收标准明确：板端 governor、core mask、推理帧数、metadata、annotated frame、console 和崩溃隔离都有判定方式。
+
+建议下一步编码从以下最小提交开始：
+
+```text
+[目标检测] 增加 detection server 配置与性能档骨架
+```
+
+该提交只应包含：
+
+1. `extensions/detection_server/` CMake 骨架。
+2. `DetectionServerConfig` / `DetectionState` / `DetectionErrorCode` / `PerformanceProfile` 类型。
+3. `PerformanceProfileManager` sysfs 读写和 mock sysfs 单测。
+4. `camera_detection_server` 空进程入口，支持 `--help` 和配置解析。
+
+完成这个提交后，再进入 RKNN model session 接入。这样代码路径最短，风险最容易控制。
