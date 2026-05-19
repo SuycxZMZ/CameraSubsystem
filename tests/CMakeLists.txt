@@ -262,3 +262,41 @@ target_link_libraries(test_camera_source_degradation
 )
 
 add_test(NAME test_camera_source_degradation COMMAND test_camera_source_degradation)
+
+if (TARGET camera_detection_server_core)
+    add_executable(test_detection_config
+        unit/test_detection_config.cpp
+    )
+
+    target_include_directories(test_detection_config
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/extensions/detection_server/include"
+    )
+
+    target_link_libraries(test_detection_config
+        PRIVATE
+            camera_detection_server_core
+            ${GTEST_TARGET}
+            ${GTEST_MAIN_TARGET}
+    )
+
+    add_test(NAME test_detection_config COMMAND test_detection_config)
+
+    add_executable(test_performance_profile_manager
+        unit/test_performance_profile_manager.cpp
+    )
+
+    target_include_directories(test_performance_profile_manager
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/extensions/detection_server/include"
+    )
+
+    target_link_libraries(test_performance_profile_manager
+        PRIVATE
+            camera_detection_server_core
+            ${GTEST_TARGET}
+            ${GTEST_MAIN_TARGET}
+    )
+
+    add_test(NAME test_performance_profile_manager COMMAND test_performance_profile_manager)
+endif ()
