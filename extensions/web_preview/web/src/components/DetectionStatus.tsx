@@ -62,6 +62,10 @@ export function DetectionStatus({ stream }: DetectionStatusProps) {
         </span>
       )}
 
+      {detection.performanceProfileApplied === false && (
+        <span className="text-amber-400">性能档未生效</span>
+      )}
+
       {detection.lastError && (
         <span className="text-red-400">错误: {detection.lastError}</span>
       )}

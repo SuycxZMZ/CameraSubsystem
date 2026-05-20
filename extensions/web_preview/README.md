@@ -117,13 +117,13 @@ cd /home/luckfox/CameraSubsystem
 # 启动编码录制服务（Record 按钮需要）
 ./bin/camera_codec_server \
   --device /dev/video45 \
-  --stream-id 0 \
+  --stream-id default0 \
   --output-dir /home/luckfox/CameraSubsystem/recordings &
 
 # 启动 Gateway（绑定 0.0.0.0:8080，允许局域网访问）
 ./bin/web_preview_gateway \
   --device /dev/video45 \
-  --stream-id 0 \
+  --stream-id default0 \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
   --output-dir /home/luckfox/CameraSubsystem/recordings \
@@ -209,13 +209,13 @@ cd /home/luckfox/CameraSubsystem
 # 启动编码录制服务
 ./bin/camera_codec_server \
   --device /dev/video45 \
-  --stream-id 0 \
+  --stream-id default0 \
   --output-dir /home/luckfox/CameraSubsystem/recordings &
 
 # 启动 Gateway，指定前端静态文件目录
 ./bin/web_preview_gateway \
   --device /dev/video45 \
-  --stream-id 0 \
+  --stream-id default0 \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
   --output-dir /home/luckfox/CameraSubsystem/recordings \

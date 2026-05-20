@@ -15,7 +15,7 @@ struct GatewayConfig
     std::string codec_socket = "/tmp/camera_subsystem_codec.sock";
     std::string detection_socket = "/tmp/camera_subsystem_detection.sock";
     std::string device_path = "/dev/video0";
-    std::string stream_id = "0";
+    std::string stream_id = "default0";
     std::string static_root = "../web/dist";
     std::string client_id = "web_preview_gateway";
     std::string output_dir = "/home/luckfox/CameraSubsystem/recordings";

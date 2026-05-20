@@ -14,6 +14,7 @@ export interface DetectionState {
   state?: 'idle' | 'running' | 'error';
   modelName?: string;
   npuCoreMask?: number;
+  performanceProfileApplied?: boolean;
   config?: {
     inferEveryNFrames: number;
     scoreThreshold: number;

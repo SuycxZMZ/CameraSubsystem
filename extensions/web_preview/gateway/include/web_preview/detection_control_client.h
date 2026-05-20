@@ -38,6 +38,7 @@ struct DetectionStatusResult
     std::string state;
     std::string model_name;
     uint32_t npu_core_mask = 0;
+    bool performance_profile_applied = false;
     DetectionConfig config;
     DetectionMetrics metrics;
 };

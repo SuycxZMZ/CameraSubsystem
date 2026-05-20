@@ -343,6 +343,7 @@ DetectionStatusResult DetectionControlClient::GetDetectionStatus()
     ExtractStringField(response, "state", &result.state);
     ExtractStringField(response, "model_name", &result.model_name);
     ExtractUint32Field(response, "npu_core_mask", &result.npu_core_mask);
+    ExtractBoolField(response, "applied", &result.performance_profile_applied);
 
     // 解析 config 对象
     std::string config_str;

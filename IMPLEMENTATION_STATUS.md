@@ -1,6 +1,6 @@
 # CameraSubsystem 实现状态
 
-**更新日期:** 2026-05-19
+**更新日期:** 2026-05-20
 
 > **文档硬规范**
 >
@@ -28,9 +28,10 @@
   - [测试状态](#测试状态)
   - [文档状态](#文档状态)
   - [下一步工作计划](#下一步工作计划)
-    - [P0：硬件到位后立即推进](#p0硬件到位后立即推进)
-    - [P1：不依赖新增摄像头的主线增强](#p1不依赖新增摄像头的主线增强)
-    - [P2：暂缓或只做轻量维护](#p2暂缓或只做轻量维护)
+    - [P0：目标检测收敛与主线封稳](#p0目标检测收敛与主线封稳)
+    - [P1：目标检测 Web 调试绘框](#p1目标检测-web-调试绘框)
+    - [P2：保留为后续阶段入口，但不纳入当前收口](#p2保留为后续阶段入口但不纳入当前收口)
+    - [P3：暂缓或只做轻量维护](#p3暂缓或只做轻量维护)
     - [已完成但需持续回归](#已完成但需持续回归)
   - [架构完善项（面向边缘设备）](#架构完善项面向边缘设备)
   - [DMA-BUF Phase 1 后续修改入口](#dma-buf-phase-1-后续修改入口)
@@ -267,9 +268,9 @@ flowchart TB
 - ✅ RK3576 统一部署/启动入口：`scripts/rk3576-build-deploy-debug.sh`（开发机）+ `scripts/rk3576-board-debug-stack.sh`（板端）已落地
 - ✅ RK3576 RKNN demo 基线：复用 `Omni3576-sdk` 自带 `rknn_yolov5_demo` 完成交叉编译、板端部署与推理；板端日志显示 `librknnrt 2.0.0b0`、`bus/person` 检测结果和 `out.jpg` 输出已成功生成
 - ✅ RKNN 官方新栈并行接入：`sync-rknn-official-stack.sh`、`setup-rknn-official-host-env.sh` 和 `rk3576-rknn-official-demo.sh` 已落地；已完成 `rknn-toolkit2 v2.3.2` / `rknn_model_zoo v2.3.2` 主机同步、`yolo11` 模型转换、RK3576 交叉编译、板端离线运行与 `out.png` 结果回收；`rknn-llm` 不纳入当前主线
-- ✅ 目标检测链路设计：已新增并完善 `docs/TARGET_DETECTION_PIPELINE_DESIGN.md`，完成 `yolo11n` NPU core mask 性能对比、`camera_detection_server` 独立订阅端方案、server 端绘框、metadata/annotated frame 输出契约、控制协议、状态机、背压策略、metrics、性能档失败策略、文件级落地蓝图、默认配置、构建部署入口、测试矩阵和第一阶段验收标准；默认 governor 下 core0 为 `26.49 FPS`，已验证 `npu-cpu` performance profile 下 core0 为 `58.56 FPS`，后续 detection server 默认启动时进入该性能档
+- ✅ 目标检测链路设计：已新增并完善 `docs/TARGET_DETECTION_PIPELINE_DESIGN.md`，完成 `yolo11` NPU core mask 性能对比、`camera_detection_server` 独立订阅端方案、server 端绘框、metadata/annotated frame 输出契约、控制协议、状态机、背压策略、metrics、性能档失败策略、文件级落地蓝图、默认配置、构建部署入口、测试矩阵和第一阶段验收标准；默认 governor 下 core0 为 `26.49 FPS`，已验证 `npu-cpu` performance profile 下 core0 为 `58.56 FPS`，后续 detection server 默认启动时进入该性能档
 - ✅ 目标检测代码骨架：`extensions/detection_server/` 已接入 `DetectionServerConfig`、`PerformanceProfileManager`、`RknnModelSession` 和 `DetectionSession` 最小生命周期；本机构建 20/20 测试通过，RK3576 交叉编译已产出 `camera_detection_server`
-- ✅ 目标检测最小数据闭环：已新增 `CameraFrameSubscriber` 和 `DetectionPublisher`，`camera_detection_server` 当前可订阅原始视频流、输出占位 `DetectionResult` JSON Line、按秒打印 session/subscriber/publisher 摘要；本机构建 21/21 测试通过，RK3576 交叉编译通过，板端已验证 `camera_publisher_example + camera_detection_server` 双进程闭环可稳定收帧并持续发布占位结果，真实推理与 Web 控制面仍待接入
+- ✅ 目标检测最小数据闭环：已新增 `CameraFrameSubscriber` 和 `DetectionPublisher`，`camera_detection_server` 已从占位结果推进到真实 DetectionResult 发布；RK3576 板端已验证 `camera_publisher_example + camera_detection_server` 可稳定收帧、完成真实推理并持续输出结果摘要
 - ✅ 目标检测模型输出契约：`RknnModelSession` 已补齐 `Run()` 接口与模型输入/输出 tensor 元数据，新增 `DetectionPostprocessor` 用于把 `yolo11` raw outputs 转为 `DetectionBox`；本机 detection 相关单测通过，RK3576 交叉编译通过，下一步只差输入预处理即可接入真实流式推理
 - ✅ 目标检测可插拔预处理骨架：已新增 `IFramePreprocessor` 抽象与 `MjpegFramePreprocessor` 首个实现，当前 USB/MJPEG 路径通过 `JpegDecodeStage -> NV12 -> letterbox RGB tensor` 进入 RKNN；主循环只依赖预处理接口，后续接入 MIPI/NV12/RGA 路径时不需要重写 detection app 编排层
 - ✅ 目标检测板端真实推理闭环：RK3576 `/dev/video45` 已验证 `camera_publisher_example + camera_detection_server` 可稳定完成 `订阅 -> MJPEG 解码 -> letterbox RGB tensor -> rknn_run -> yolo11 后处理 -> DetectionResult 发布`；当前场景下 `input_frames` 与 `inferred` 持续增长，`pre_fail/infer_fail/post_fail=0`
@@ -277,6 +278,8 @@ flowchart TB
 - ✅ 目标检测结果消费端：已新增 `camera_detection_result_client_example`，通过 UDS 订阅 `DetectionResult` JSON Line 并按秒输出 `frames/fps/parse_fail/objects/infer_ms/total_ms` 摘要；RK3576 板端已验证与 `camera_detection_server` 联动运行，`parse_fail=0`、结果帧率稳定在 15-16fps
 - ✅ 目标检测控制面最小闭环：已新增 detection control UDS server 与 `camera_detection_control_client_example`，当前支持 `get_detection_status`、`set_detection_config`、`stop_detection`、`start_detection` 四个 JSON line 命令；RK3576 板端已验证运行期修改 `infer_every_n_frames/score_threshold/nms_threshold`、停止检测进入 `idle`、重新启动后回到 `running`；`stop -> start` 后 detection runtime counters 已按新 session 正确清零，避免 Web status 混入旧统计值
 - ✅ Web Preview Gateway 检测控制面接入：已新增 `DetectionControlClient` 类，Gateway 可通过 UDS 与 `camera_detection_server` 通信；Web status JSON 已包含 `detection` 字段（available/state/config/metrics）；前端 `DetectionStatus` 组件可显示检测状态摘要；`StreamActions` 检测按钮已启用，支持开启/关闭检测；前端已通过 `/status` 每秒轮询稳定刷新 detection 状态与摘要；RK3576 板端已验证 Gateway WebSocket 命令可成功转发 `stop/start/set_detection_config` 到 detection server；Detection Server 不可用时 Gateway 正常降级运行
+- ✅ 目标检测当前阶段判断：主线已具备 `publisher + detection_server + web_preview_gateway` 单路 USB/RK3576 可运行闭环，后续重点从“继续加功能”切换为“统一板端启动入口、冻结配置与结果契约、收敛最小回归入口”
+- ✅ 目标检测 P0 收敛实现：`rk3576-board-debug-stack.sh` / `deploy-rk3576-web-debug.sh` / `rk3576-run-web-stack.sh` 已收口统一启动、停止、状态与部署入口；默认 `stream_id=default0`、模型 `models/yolo11.rknn`、标签 `models/coco_80_labels_list.txt`；新增 `scripts/rk3576-detection-p0-smoke.sh` 并已在 RK3576 板端验证 `restart -> /status -> stop/start/set_detection_config` 全链路通过
 
 **后续专项（不纳入当前 2 到 3 个对话收口目标）:**
 
@@ -315,7 +318,7 @@ flowchart TB
 
 当前主线不再是继续扩张 smoke 脚本或外围功能，而是把已经跑通的 USB/RK3576 主链路在 2 到 3 个对话内收敛成可交接基线。后续只接受会影响主链路正确性、板端稳定性或文档一致性的修改。
 
-### P0：当前阶段已收口，后续只保留回归与文档维护
+### P0：目标检测收敛与主线封稳
 
 1. **USB/RK3576 主链路回归**
    - 保留现有 `dataplane-lifecycle`、`stream-metrics`、`multi-camera-topology` 作为回归入口，不再新增新的 smoke 维度、报告格式或脚本框架。
@@ -334,14 +337,30 @@ flowchart TB
    - `rknn-llm` 只作为未来可选扩展记录，不进入当前图像主线和默认计划。
 
 5. **目标检测链路**
-   - 以 [docs/TARGET_DETECTION_PIPELINE_DESIGN.md](docs/TARGET_DETECTION_PIPELINE_DESIGN.md) 为设计入口。
-   - 第一阶段新增独立 `camera_detection_server`，订阅原始视频流后执行 RKNN 推理并发布 DetectionResult metadata 和可选 annotated frame。
-   - 默认仅使用 `core0`，目标检测默认关闭，用户开启后每帧推理。
-   - `camera_detection_server` 默认启用 `npu-cpu` performance profile，只设置 NPU/CPU governor，启动失败时必须暴露明确错误。
-   - Web 前端不做重型绘框；目标框绘制放在 `camera_detection_server` 端，前端只展示 annotated frame 和每秒 console 摘要。
-   - 编码入口从 `extensions/detection_server/` CMake 骨架、配置类型、`PerformanceProfileManager` 和空 `camera_detection_server` 进程开始；首个提交不接 RKNN 推理、不接 Web、不扩展多模型、多路调度或复杂测试框架。
+   - 以 [docs/TARGET_DETECTION_PIPELINE_DESIGN.md](docs/TARGET_DETECTION_PIPELINE_DESIGN.md) 第 12 章为当前 P0 设计入口。
+   - 当前不再新增目标检测大功能，优先完成三件事：统一板端启动与清理、冻结配置与状态/结果契约、收敛最小回归入口。
+   - `camera_detection_server` 保持默认 `core0 + npu-cpu performance profile`，DetectionResult 继续走 metadata 主线。
+  - Web 侧保留检测开关、状态查询和每秒摘要；`annotated frame` 不回填到 P0，但已提升为 P1 调试可视化必做项。
+  - 运行期热更新只允许 `infer_every_n_frames`、`score_threshold`、`nms_threshold`，模型路径、labels 路径和 core mask 继续保持启动期固定。
 
-### P1：保留为后续阶段入口，但不纳入当前收口
+### P1：目标检测 Web 调试绘框
+
+1. **server-side 绘框**
+   - `camera_detection_server` 面向真实业务默认 `metadata_only + draw_boxes=0`。
+   - Web 调试开启检测时，Gateway 必须显式请求 `metadata_and_annotated_frame + draw_boxes=1`。
+   - 绘框由 detection server 侧完成，前端不做逐帧 bbox overlay。
+
+2. **annotated frame 输出**
+   - 第一版使用 JPEG annotated frame，携带 `stream_id/frame_id/timestamp_ns`。
+   - DetectionResult JSON metadata 继续保留，Web console 和外部 client 不依赖图像帧。
+   - annotated frame 发布失败时不能影响 metadata 和原始预览。
+
+3. **Web 行为**
+   - 检测开启且 annotated frame 可用时，stream card 显示 server 侧带框画面。
+   - 检测开启但 annotated frame 不可用时，继续显示原始 preview，并在检测状态区明确报错。
+   - 检测关闭后，立即回到原始 preview，清空检测画面状态。
+
+### P2：保留为后续阶段入口，但不纳入当前收口
 
 1. **真实 MIPI/RKISP live STREAMON**
    - MPLANE live 初始化骨架已就绪，当前只缺真实 MIPI sensor 和媒体管道。
@@ -356,7 +375,7 @@ flowchart TB
    - 当前 `mmap/v1` 降级/恢复已完成；DMA-BUF slow-consumer backpressure 不误降级验证已通过。
    - active lease 未 release 时跳过重配置、后续重试等分支保留为后续专项，不塞进本阶段普通 smoke。
 
-### P2：暂缓或只做轻量维护
+### P3：暂缓或只做轻量维护
 
 1. **Web Preview**
    - W1-W2 stream card 归并已完成。

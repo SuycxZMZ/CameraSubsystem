@@ -669,6 +669,9 @@ std::string WebServer::BuildDetectionStatusJson() const
         {
             ss << ",\"npu_core_mask\":" << status.npu_core_mask;
         }
+        ss << ",\"performance_profile\":{"
+           << "\"applied\":" << (status.performance_profile_applied ? "true" : "false")
+           << "}";
         ss << ",\"config\":{"
            << "\"infer_every_n_frames\":" << status.config.infer_every_n_frames
            << ",\"score_threshold\":" << status.config.score_threshold

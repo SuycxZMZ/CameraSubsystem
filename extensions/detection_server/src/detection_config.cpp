@@ -136,7 +136,7 @@ void PrintDetectionServerUsage(const char* program_name)
         << "  --result-socket <path>    Detection result socket path\n"
         << "  --camera-control-socket <path> Camera publisher control socket path\n"
         << "  --camera-data-socket <path> Camera publisher data socket path\n"
-        << "  --stream-id <id>          Camera stream id, default usb0\n"
+        << "  --stream-id <id>          Camera stream id, default default0\n"
         << "  --device <path>           Camera device path, default /dev/video45\n"
         << "  --client-id <id>          Detection subscriber client id\n"
         << "  --camera-id <id>          Camera endpoint numeric id\n"
