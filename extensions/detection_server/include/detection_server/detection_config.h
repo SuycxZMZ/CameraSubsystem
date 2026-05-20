@@ -14,12 +14,12 @@ struct DetectionServerConfig
     std::string result_socket = "/tmp/camera_subsystem_detection_result.sock";
     std::string camera_control_socket = "/tmp/camera_subsystem_control.sock";
     std::string camera_data_socket = "/tmp/camera_subsystem_data.sock";
-    std::string stream_id = "usb0";
+    std::string stream_id = "default0";
     std::string device_path = "/dev/video45";
     std::string client_id = "camera_detection_server";
     uint32_t camera_id = 0;
-    std::string model_path = "/home/luckfox/CameraSubsystem/models/yolo11n.rknn";
-    std::string labels_path = "/home/luckfox/CameraSubsystem/models/coco_80_labels.txt";
+    std::string model_path = "/home/luckfox/CameraSubsystem/models/yolo11.rknn";
+    std::string labels_path = "/home/luckfox/CameraSubsystem/models/coco_80_labels_list.txt";
     uint32_t npu_core_mask = 1;
     double score_threshold = 0.25;
     double nms_threshold = 0.45;

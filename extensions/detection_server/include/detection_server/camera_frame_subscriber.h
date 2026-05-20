@@ -18,7 +18,7 @@ struct CameraFrameSubscriberConfig
     std::string control_socket = "/tmp/camera_subsystem_control.sock";
     std::string data_socket = "/tmp/camera_subsystem_data.sock";
     std::string device_path = "/dev/video45";
-    std::string stream_id = "usb0";
+    std::string stream_id = "default0";
     std::string client_id = "camera_detection_server";
     uint32_t camera_id = 0;
     uint32_t max_frame_size = 64U * 1024U * 1024U;

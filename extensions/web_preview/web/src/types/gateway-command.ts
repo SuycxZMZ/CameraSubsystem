@@ -48,6 +48,9 @@ export interface DetectionStatus {
   state?: string;
   model_name?: string;
   npu_core_mask?: number;
+  performance_profile?: {
+    applied: boolean;
+  };
   config?: {
     infer_every_n_frames: number;
     score_threshold: number;
@@ -88,6 +91,9 @@ export interface GatewayStatus {
     state?: string;
     model_name?: string;
     npu_core_mask?: number;
+    performance_profile?: {
+      applied: boolean;
+    };
     config?: {
       infer_every_n_frames: number;
       score_threshold: number;

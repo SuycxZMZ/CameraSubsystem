@@ -56,7 +56,7 @@ void PrintUsage(const char* program_name)
         << "  --codec-socket <path>     Codec server control socket path\n"
         << "  --detection-socket <path> Detection server control socket path\n"
         << "  --device <path>           Camera device path requested via control IPC\n"
-        << "  --stream-id <id>          Camera stream id requested via control IPC, default 0\n"
+        << "  --stream-id <id>          Camera stream id requested via control IPC, default default0\n"
         << "  --static-root <path>      Frontend dist directory\n"
         << "  --client-id <id>          Control IPC client id\n"
         << "  --output-dir <path>       Recording output directory\n"

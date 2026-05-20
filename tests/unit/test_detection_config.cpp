@@ -13,7 +13,7 @@ TEST(DetectionConfigTest, DefaultConfigIsValid)
 
     EXPECT_TRUE(config.IsValid(&reason));
     EXPECT_TRUE(reason.empty());
-    EXPECT_EQ(config.stream_id, "usb0");
+    EXPECT_EQ(config.stream_id, "default0");
     EXPECT_EQ(config.npu_core_mask, 1U);
     EXPECT_EQ(config.performance_profile, PerformanceProfile::kNpuCpu);
     EXPECT_EQ(config.output_mode, DetectionOutputMode::kMetadataAndAnnotatedFrame);

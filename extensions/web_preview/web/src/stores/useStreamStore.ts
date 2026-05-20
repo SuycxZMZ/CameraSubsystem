@@ -286,6 +286,7 @@ export const useStreamStore = create<StreamStore>((set, get) => ({
           state: status.detection.state as 'idle' | 'running' | 'error' | undefined,
           modelName: status.detection.model_name,
           npuCoreMask: status.detection.npu_core_mask,
+          performanceProfileApplied: status.detection.performance_profile?.applied,
           config: status.detection.config ? {
             inferEveryNFrames: status.detection.config.infer_every_n_frames,
             scoreThreshold: status.detection.config.score_threshold,

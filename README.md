@@ -109,7 +109,7 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 | [docs/MULTI_CAMERA_ARCHITECTURE.md](docs/MULTI_CAMERA_ARCHITECTURE.md) | 多路摄像头架构纠偏 | 查看 USB + MIPI 多路同时接入的目标架构、当前偏差和迁移顺序 |
 | [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md) | DMA-BUF 数据面记录 | 查看 RK3576 / Linux DMA-BUF 阶段性设计、验证结果和 DataPlaneV2 边界 |
 | [docs/CODEC_SERVER_ARCHITECTURE.md](docs/CODEC_SERVER_ARCHITECTURE.md) | Camera Codec Server 架构 | 查看 H.264 编码录制服务、Web 录制控制和 USB/MIPI 输入策略 |
-| [docs/TARGET_DETECTION_PIPELINE_DESIGN.md](docs/TARGET_DETECTION_PIPELINE_DESIGN.md) | Camera Target Detection Pipeline 架构 | 查看 RKNN 目标检测服务、NPU core mask 策略、结果 metadata、server 端绘框、Web console/annotated frame 和第一阶段实现顺序 |
+| [docs/TARGET_DETECTION_PIPELINE_DESIGN.md](docs/TARGET_DETECTION_PIPELINE_DESIGN.md) | Camera Target Detection Pipeline 架构 | 查看 RKNN 目标检测服务、NPU core mask 策略、DetectionResult 契约、Web 检测开关/状态链路和当前 P0 收敛设计 |
 | [docs/METRICS_INTERFACE_DESIGN.md](docs/METRICS_INTERFACE_DESIGN.md) | 统一 Metrics 接口设计 | 查看 `core::StreamMetrics`、`IMetricsProvider` 按 `stream_id` 聚合方案和现有零散统计整合路径 |
 | [docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md) | DataPlaneV2 → MPP 低拷贝录制设计 | 查看 copy path / fd path 选择条件、MPP import 契约、ReleaseFrame 时序和 fallback 策略 |
 | [docs/DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md) | 开发路线图 | 查看当前阶段划分、主线优先级和暂缓项 |
@@ -366,6 +366,7 @@ Smoke suite 档位：
 2. DMA-BUF 数据面已完成 RK3576 `/dev/video45` Phase 2 冒烟、慢消费者/双订阅者长稳、subscriber 崩溃 failover、release socket 主动断开、fd 泄漏长稳和 publisher 退出清理验证，但仍需补充真实 MIPI/RKISP 出帧验证，阶段性记录见 [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md)。
 3. CameraSource 设备断连恢复、设备发现重绑定和 USB mmap/v1 降帧降级已落地；设备发现当前保留 M3 一次性 hook + `candidate_missing` 的时序边界，后续只在真实多设备需求下再扩展。
 4. Web Preview 与 Codec Server 已满足当前调试闭环，后续只做主线 smoke、错误收敛和低拷贝输入适配，不扩展复杂 UI 或新容器能力。
+5. 目标检测已打通单路 USB/RK3576 主线闭环，当前进入 P0 收敛阶段：统一板端启动入口、冻结配置与状态/结果契约、保留最小回归入口；`annotated frame`、多路调度和 MIPI 低拷贝推理暂不进入当前主线。
 
 当前阶段按“快速收口”推进，并与 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 的 P0/P1 风险项对齐：
 
