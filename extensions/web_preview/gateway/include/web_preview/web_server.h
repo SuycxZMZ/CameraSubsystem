@@ -1,6 +1,7 @@
 #ifndef WEB_PREVIEW_WEB_SERVER_H
 #define WEB_PREVIEW_WEB_SERVER_H
 
+#include "web_preview/detection_control_client.h"
 #include "web_preview/frame_pipeline.h"
 #include "web_preview/gateway_config.h"
 
@@ -48,6 +49,10 @@ private:
                                  const std::string& stream_id);
     std::string HandleRecordCommand(const std::string& payload);
 
+    // Detection server control
+    std::string HandleDetectionCommand(const std::string& payload);
+    std::string BuildDetectionStatusJson() const;
+
     std::string BuildFallbackIndex() const;
     std::string BuildStatusJson() const;
     std::string ResolvePath(const std::string& url_path) const;
@@ -70,6 +75,10 @@ private:
 
     // Codec server command serialization.
     std::mutex codec_mutex_;
+
+    // Detection server control client.
+    std::unique_ptr<DetectionControlClient> detection_client_;
+    mutable std::mutex detection_mutex_;
 };
 
 } // namespace web_preview

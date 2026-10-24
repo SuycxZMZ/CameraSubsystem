@@ -4,6 +4,7 @@ import { FrameCanvas } from './FrameCanvas';
 import { StreamOverlay } from './StreamOverlay';
 import { StreamActions } from './StreamActions';
 import { RecordingStatus } from './RecordingStatus';
+import { DetectionStatus } from './DetectionStatus';
 import { useStreamStore } from '@/stores/useStreamStore';
 
 interface StreamTileProps {
@@ -52,6 +53,7 @@ export function StreamTile({ streamId }: StreamTileProps) {
         canvasRef={canvasRef}
       />
       <RecordingStatus stream={stream} />
+      <DetectionStatus stream={stream} />
     </Card>
   );
 }

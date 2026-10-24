@@ -33,4 +33,6 @@ coverage/
 *~
 .DS_Store
 .cache
+.cache-tools/
 .codeartsdoer
+logs/

@@ -70,6 +70,23 @@
 
 板端文件统一部署到 `/home/luckfox/CameraSubsystem`。完整调试方式见 [../../docs/BOARD_WEB_DEBUG_GUIDE.md](../../docs/BOARD_WEB_DEBUG_GUIDE.md)。
 
+如果只是想从开发机完成完整调试闭环，优先使用项目根目录的一键入口：
+
+```bash
+cd CameraSubsystem
+BOARD_HOST=192.168.31.9 \
+BOARD_USER=luckfox \
+BOARD_PASSWORD=luckfox \
+./scripts/rk3576-build-deploy-debug.sh
+```
+
+如果已经登录到板端，优先使用：
+
+```bash
+cd /home/luckfox/CameraSubsystem
+./scripts/rk3576-board-debug-stack.sh restart
+```
+
 ### 方式一：本机开发模式（推荐调试使用）
 
 本机开发模式下，Vite dev server 在本机运行，通过代理转发 WebSocket 到开发板上的 Gateway。前端热更新即时生效，适合开发调试。
@@ -100,13 +117,13 @@ cd /home/luckfox/CameraSubsystem
 # 启动编码录制服务（Record 按钮需要）
 ./bin/camera_codec_server \
   --device /dev/video45 \
-  --stream-id 0 \
+  --stream-id default0 \
   --output-dir /home/luckfox/CameraSubsystem/recordings &
 
 # 启动 Gateway（绑定 0.0.0.0:8080，允许局域网访问）
 ./bin/web_preview_gateway \
   --device /dev/video45 \
-  --stream-id 0 \
+  --stream-id default0 \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
   --output-dir /home/luckfox/CameraSubsystem/recordings \
@@ -192,13 +209,13 @@ cd /home/luckfox/CameraSubsystem
 # 启动编码录制服务
 ./bin/camera_codec_server \
   --device /dev/video45 \
-  --stream-id 0 \
+  --stream-id default0 \
   --output-dir /home/luckfox/CameraSubsystem/recordings &
 
 # 启动 Gateway，指定前端静态文件目录
 ./bin/web_preview_gateway \
   --device /dev/video45 \
-  --stream-id 0 \
+  --stream-id default0 \
   --port 8080 \
   --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
   --output-dir /home/luckfox/CameraSubsystem/recordings \

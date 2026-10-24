@@ -7,27 +7,38 @@ BOARD_USER="${BOARD_USER:-luckfox}"
 BOARD_PASSWORD="${BOARD_PASSWORD:-luckfox}"
 REMOTE_ROOT="${REMOTE_ROOT:-/home/luckfox/CameraSubsystem}"
 DEVICE="${DEVICE:-/dev/video45}"
-STREAM_ID="${STREAM_ID:-0}"
+STREAM_ID="${STREAM_ID:-default0}"
+DETECTION_STREAM_ID="${DETECTION_STREAM_ID:-${STREAM_ID}}"
 HTTP_PORT="${HTTP_PORT:-8080}"
 MAX_PREVIEW_FPS="${MAX_PREVIEW_FPS:-30}"
+ENABLE_DETECTION="${ENABLE_DETECTION:-1}"
+DETECTION_NPU_CORE_MASK="${DETECTION_NPU_CORE_MASK:-1}"
+DETECTION_INFER_EVERY_N_FRAMES="${DETECTION_INFER_EVERY_N_FRAMES:-1}"
+DETECTION_SCORE_THRESHOLD="${DETECTION_SCORE_THRESHOLD:-0.25}"
+DETECTION_NMS_THRESHOLD="${DETECTION_NMS_THRESHOLD:-0.45}"
+DETECTION_PERFORMANCE_PROFILE="${DETECTION_PERFORMANCE_PROFILE:-npu-cpu}"
+DETECTION_ALLOW_PROFILE_FAILURE="${DETECTION_ALLOW_PROFILE_FAILURE:-1}"
 
 CONTROL_SOCKET="${CONTROL_SOCKET:-/tmp/camera_subsystem_control.sock}"
 DATA_SOCKET="${DATA_SOCKET:-/tmp/camera_subsystem_data.sock}"
 CODEC_SOCKET="${CODEC_SOCKET:-/tmp/camera_subsystem_codec.sock}"
+DETECTION_SOCKET="${DETECTION_SOCKET:-/tmp/camera_subsystem_detection.sock}"
+DETECTION_RESULT_SOCKET="${DETECTION_RESULT_SOCKET:-/tmp/camera_subsystem_detection_result.sock}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REMOTE_ROOT}/recordings}"
 STATIC_ROOT="${STATIC_ROOT:-${REMOTE_ROOT}/web_preview/dist}"
+MODEL_DIR="${MODEL_DIR:-${REMOTE_ROOT}/models}"
+DETECTION_MODEL_PATH="${DETECTION_MODEL_PATH:-${MODEL_DIR}/yolo11.rknn}"
+DETECTION_LABELS_PATH="${DETECTION_LABELS_PATH:-${MODEL_DIR}/coco_80_labels_list.txt}"
 
 TARGET="${BOARD_USER}@${BOARD_HOST}"
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 
-remote_bin="${REMOTE_ROOT}/bin"
-remote_logs="${REMOTE_ROOT}/logs"
-remote_run="${REMOTE_ROOT}/run"
+remote_script="${REMOTE_ROOT}/scripts/rk3576-board-debug-stack.sh"
 
 usage()
 {
     cat <<EOF
-Usage: $0 <start|stop|restart|status|logs>
+Usage: $0 <start|stop|restart|status|logs|clean>
 
 Environment:
   BOARD_HOST=${BOARD_HOST}
@@ -35,6 +46,7 @@ Environment:
   REMOTE_ROOT=${REMOTE_ROOT}
   DEVICE=${DEVICE}
   STREAM_ID=${STREAM_ID}
+  DETECTION_STREAM_ID=${DETECTION_STREAM_ID}
   HTTP_PORT=${HTTP_PORT}
 EOF
 }
@@ -67,120 +79,61 @@ run_ssh()
     fi
 }
 
-remote_stop_cmd()
+remote_exec_cmd()
 {
-    cat <<EOF
-set +e
-for pidfile in \
-  '${remote_run}/gateway.pid' \
-  '${remote_run}/codec.pid' \
-  '${remote_run}/publisher.pid'; do
-    if [ -f "\${pidfile}" ]; then
-        kill "\$(cat "\${pidfile}")" 2>/dev/null || true
-    fi
-done
-sleep 1
-pkill -f '[w]eb_preview_gateway' 2>/dev/null || true
-pkill -f '[c]amera_codec_server' 2>/dev/null || true
-pkill -f '[c]amera_publisher_example' 2>/dev/null || true
-rm -f '${remote_run}/gateway.pid' '${remote_run}/codec.pid' '${remote_run}/publisher.pid'
-rm -f '${CONTROL_SOCKET}' '${DATA_SOCKET}' '${CODEC_SOCKET}'
-EOF
-}
-
-remote_start_cmd()
-{
+    local action="$1"
     cat <<EOF
 set -e
-mkdir -p '${remote_logs}' '${remote_run}' '${OUTPUT_DIR}' '${STATIC_ROOT}'
-$(remote_stop_cmd)
-
-'${remote_bin}/camera_publisher_example' '${DEVICE}' '${CONTROL_SOCKET}' '${DATA_SOCKET}' --io-method mmap \
-  > '${remote_logs}/publisher.log' 2>&1 &
-echo \$! > '${remote_run}/publisher.pid'
-sleep 1
-
-'${remote_bin}/camera_codec_server' \
-  --control-socket '${CONTROL_SOCKET}' \
-  --data-socket '${DATA_SOCKET}' \
-  --codec-socket '${CODEC_SOCKET}' \
-  --output-dir '${OUTPUT_DIR}' \
-  --device '${DEVICE}' \
-  --stream-id '${STREAM_ID}' \
-  > '${remote_logs}/codec_server.log' 2>&1 &
-echo \$! > '${remote_run}/codec.pid'
-sleep 1
-
-'${remote_bin}/web_preview_gateway' \
-  --control-socket '${CONTROL_SOCKET}' \
-  --data-socket '${DATA_SOCKET}' \
-  --codec-socket '${CODEC_SOCKET}' \
-  --output-dir '${OUTPUT_DIR}' \
-  --device '${DEVICE}' \
-  --stream-id '${STREAM_ID}' \
-  --static-root '${STATIC_ROOT}' \
-  --port '${HTTP_PORT}' \
-  --max-fps '${MAX_PREVIEW_FPS}' \
-  > '${remote_logs}/web_preview_gateway.log' 2>&1 &
-echo \$! > '${remote_run}/gateway.pid'
-sleep 1
-
-echo "publisher_pid=\$(cat '${remote_run}/publisher.pid')"
-echo "codec_pid=\$(cat '${remote_run}/codec.pid')"
-echo "gateway_pid=\$(cat '${remote_run}/gateway.pid')"
-echo "web_url=http://${BOARD_HOST}:${HTTP_PORT}"
-EOF
-}
-
-remote_status_cmd()
-{
-    cat <<EOF
-set +e
-echo "processes:"
-pgrep -af '[c]amera_publisher_example|[c]amera_codec_server|[w]eb_preview_gateway' || true
-echo
-echo "sockets:"
-ls -l '${CONTROL_SOCKET}' '${DATA_SOCKET}' '${CODEC_SOCKET}' 2>/dev/null || true
-echo
-echo "http:"
-curl -s --max-time 2 "http://127.0.0.1:${HTTP_PORT}/status" 2>/dev/null || true
-echo
-echo
-echo "listen:"
-ss -lntp 2>/dev/null | grep ":${HTTP_PORT}" || true
-EOF
-}
-
-remote_logs_cmd()
-{
-    cat <<EOF
-set +e
-for log in \
-  '${remote_logs}/publisher.log' \
-  '${remote_logs}/codec_server.log' \
-  '${remote_logs}/web_preview_gateway.log'; do
-    echo "===== \${log} ====="
-    tail -80 "\${log}" 2>/dev/null || true
-done
+if [ ! -x '${remote_script}' ]; then
+  echo "missing_remote_script=${remote_script}" >&2
+  exit 1
+fi
+REMOTE_ROOT='${REMOTE_ROOT}' \
+DEVICE='${DEVICE}' \
+STREAM_ID='${STREAM_ID}' \
+DETECTION_STREAM_ID='${DETECTION_STREAM_ID}' \
+HTTP_PORT='${HTTP_PORT}' \
+MAX_PREVIEW_FPS='${MAX_PREVIEW_FPS}' \
+ENABLE_DETECTION='${ENABLE_DETECTION}' \
+DETECTION_NPU_CORE_MASK='${DETECTION_NPU_CORE_MASK}' \
+DETECTION_INFER_EVERY_N_FRAMES='${DETECTION_INFER_EVERY_N_FRAMES}' \
+DETECTION_SCORE_THRESHOLD='${DETECTION_SCORE_THRESHOLD}' \
+DETECTION_NMS_THRESHOLD='${DETECTION_NMS_THRESHOLD}' \
+DETECTION_PERFORMANCE_PROFILE='${DETECTION_PERFORMANCE_PROFILE}' \
+DETECTION_ALLOW_PROFILE_FAILURE='${DETECTION_ALLOW_PROFILE_FAILURE}' \
+CONTROL_SOCKET='${CONTROL_SOCKET}' \
+DATA_SOCKET='${DATA_SOCKET}' \
+CODEC_SOCKET='${CODEC_SOCKET}' \
+DETECTION_SOCKET='${DETECTION_SOCKET}' \
+DETECTION_RESULT_SOCKET='${DETECTION_RESULT_SOCKET}' \
+OUTPUT_DIR='${OUTPUT_DIR}' \
+STATIC_ROOT='${STATIC_ROOT}' \
+MODEL_DIR='${MODEL_DIR}' \
+DETECTION_MODEL_PATH='${DETECTION_MODEL_PATH}' \
+DETECTION_LABELS_PATH='${DETECTION_LABELS_PATH}' \
+'${remote_script}' '${action}'
 EOF
 }
 
 action="${1:-}"
 case "${action}" in
     start)
-        run_ssh "$(remote_start_cmd)"
+        run_ssh "$(remote_exec_cmd start)"
         ;;
     stop)
-        run_ssh "$(remote_stop_cmd)"
+        run_ssh "$(remote_exec_cmd stop)"
         ;;
     restart)
-        run_ssh "$(remote_start_cmd)"
+        run_ssh "$(remote_exec_cmd restart)"
         ;;
     status)
-        run_ssh "$(remote_status_cmd)"
+        run_ssh "$(remote_exec_cmd status)"
         ;;
     logs)
-        run_ssh "$(remote_logs_cmd)"
+        run_ssh "$(remote_exec_cmd logs)"
+        ;;
+    clean)
+        run_ssh "$(remote_exec_cmd clean)"
         ;;
     -h|--help|help|"")
         usage

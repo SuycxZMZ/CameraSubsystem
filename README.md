@@ -3,7 +3,7 @@
 **目标平台:** Linux / 嵌入式边缘设备（当前已接入 RK3576 / Debian 验证链路，预留 Android 迁移）<br>
 **开发语言:** C++17 / C POD 数据结构<br>
 **核心方向:** Camera 采集后端 -> Publish/Subscribe -> AI / 编码 / 录制<br>
-**最后更新:** 2026-05-14
+**最后更新:** 2026-05-17
 
 > **文档硬规范**
 >
@@ -66,6 +66,8 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 | DMA-BUF 零拷贝主链路 | Phase 2 冒烟通过 | 已新增 `FrameDescriptor` / `FrameLease` 与 V4L2 `VIDIOC_EXPBUF` 尝试路径；RK3576 `/dev/video45` 已通过 `dmabuf_smoke_test` 和跨进程 DataPlaneV2 smoke |
 | H.264 录制编码 | 已打通 Web 控制闭环 | 独立 `camera_codec_server` 订阅原始流并使用 Rockchip MPP 编码；状态回传包含录制时长、文件统计、有效编码 profile 和错误信息；已支持 `container=mp4` 主链路并完成 RK3576 live 验证 |
 | 板端运行验证 | 阶段完成 | 已在 RK3576 Debian 12 上完成 publisher/subscriber copy、DataPlaneV2 smoke、Web 录制 start/stop smoke |
+| RKNN Demo 基线 | 已跑通当前 SDK 目标检测 demo | 当前先收敛到 `Omni3576-sdk` 自带 `rknn_yolov5_demo`；RK3576 板端实测 `librknnrt 2.0.0b0` 下推理成功，`bus.jpg` 输出检测结果与 `out.jpg` |
+| RKNN 官方新栈 | 已跑通 host + board 闭环 | 已新增官方 `rknn-toolkit2` / `rknn_model_zoo` 同步、host venv 和 RK3576 离线部署脚本；默认验证入口切到 `yolo11`，并已完成主机同步、模型转换、交叉编译、板端离线运行，不覆盖旧 SDK 基线；`rknn-llm` 仅保留为未来可选扩展 |
 | 统一 Metrics 接口 | 已完成 | `core::StreamMetrics` + `IMetricsProvider` + `MetricsAggregator`；CameraSource/FrameBroker 已接入；publisher 示例已替换手动聚合 |
 | FrameBroker 背压参数化 | 已完成 | `BackpressureConfig` / `DropPolicy` / 慢消费者检测；4 个单元测试通过；stress test 兼容 |
 | CameraSource 断连恢复 | 已完成 | `SourceState`、断连/恢复 Metrics、capture/monitor 双线程已落地；自动恢复默认关闭；RK3576 quick、DataPlaneV2 lifecycle、multi-camera-topology smoke 和 USB 物理拔插/重插恢复实测已通过 |
@@ -107,10 +109,13 @@ CameraSubsystem 是一个面向边缘视觉应用的通用 Camera 数据流基�
 | [docs/MULTI_CAMERA_ARCHITECTURE.md](docs/MULTI_CAMERA_ARCHITECTURE.md) | 多路摄像头架构纠偏 | 查看 USB + MIPI 多路同时接入的目标架构、当前偏差和迁移顺序 |
 | [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md) | DMA-BUF 数据面记录 | 查看 RK3576 / Linux DMA-BUF 阶段性设计、验证结果和 DataPlaneV2 边界 |
 | [docs/CODEC_SERVER_ARCHITECTURE.md](docs/CODEC_SERVER_ARCHITECTURE.md) | Camera Codec Server 架构 | 查看 H.264 编码录制服务、Web 录制控制和 USB/MIPI 输入策略 |
+| [docs/TARGET_DETECTION_PIPELINE_DESIGN.md](docs/TARGET_DETECTION_PIPELINE_DESIGN.md) | Camera Target Detection Pipeline 架构 | 查看 RKNN 目标检测服务、NPU core mask 策略、DetectionResult 契约、Web 检测开关/状态链路和当前 P0 收敛设计 |
 | [docs/METRICS_INTERFACE_DESIGN.md](docs/METRICS_INTERFACE_DESIGN.md) | 统一 Metrics 接口设计 | 查看 `core::StreamMetrics`、`IMetricsProvider` 按 `stream_id` 聚合方案和现有零散统计整合路径 |
 | [docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md](docs/DATAPLANEV2_MPP_LOW_COPY_RECORDING_DESIGN.md) | DataPlaneV2 → MPP 低拷贝录制设计 | 查看 copy path / fd path 选择条件、MPP import 契约、ReleaseFrame 时序和 fallback 策略 |
 | [docs/DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md) | 开发路线图 | 查看当前阶段划分、主线优先级和暂缓项 |
 | [docs/BOARD_WEB_DEBUG_GUIDE.md](docs/BOARD_WEB_DEBUG_GUIDE.md) | 板端 Web 调试指南 | 查看 RK3576 板端 Web Preview、录制联调、统一部署目录和 smoke 方法 |
+| [docs/RKNN_SDK_DEMO_GUIDE.md](docs/RKNN_SDK_DEMO_GUIDE.md) | RKNN SDK 适配指南 | 查看当前 Omni3576 SDK 下的 RKNN 交叉编译、板端 demo 和主机侧转换环境边界 |
+| [docs/RKNN_OFFICIAL_STACK_GUIDE.md](docs/RKNN_OFFICIAL_STACK_GUIDE.md) | RKNN 官方新栈指南 | 查看官方最新 toolkit/model zoo 并行接入、host 同步、模型转换和 RK3576 离线部署流程；`rknn-llm` 仅作为未来可选扩展记录 |
 | [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | 实现状态 | 查看模块完成度、测试状态、技术债务和下一步计划 |
 | [API_REFERENCE.md](API_REFERENCE.md) | API 参考 | 查询公开数据结构、类接口、IPC 协议和示例用法 |
 | [NAMING_CONVENTION.md](NAMING_CONVENTION.md) | 工程规范 | 查询命名、目录、代码格式和跨平台约定 |
@@ -202,6 +207,31 @@ OMNI3576_SDK_ROOT=/path/to/Omni3576-sdk ./scripts/build-rk3576.sh
 bin/rk3576/
 ```
 
+官方最新 RKNN 新栈主机同步与 RK3576 离线部署入口：
+
+```bash
+./scripts/sync-rknn-official-stack.sh
+./scripts/setup-rknn-official-host-env.sh
+./scripts/rk3576-rknn-official-demo.sh all
+```
+
+一键构建、部署并重启板端调试栈：
+
+```bash
+BOARD_HOST=192.168.31.9 \
+BOARD_USER=luckfox \
+BOARD_PASSWORD=luckfox \
+./scripts/rk3576-build-deploy-debug.sh
+```
+
+该入口会依次完成：
+
+1. `./scripts/build-rk3576.sh`
+2. `./extensions/web_preview/scripts/build-gateway-rk3576.sh`
+3. `./extensions/web_preview/scripts/build-web.sh`
+4. `./scripts/deploy-rk3576-web-debug.sh`
+5. `./scripts/rk3576-run-web-stack.sh restart`
+
 ### 6.3 常用开发命令
 
 | 任务 | 命令 |
@@ -246,46 +276,37 @@ bin/rk3576/
 
 ### 7.3 板端 Web 预览
 
-在开发板上启动 Camera 发布端和 Web Preview Gateway 后，局域网内浏览器可直接访问实时画面。默认使用统一启动脚本：
+推荐直接使用一键入口：
 
 ```bash
-BOARD_HOST=192.168.31.9 BOARD_USER=luckfox ./scripts/rk3576-run-web-stack.sh start
-BOARD_HOST=192.168.31.9 BOARD_USER=luckfox ./scripts/rk3576-run-web-stack.sh status
+BOARD_HOST=192.168.31.9 \
+BOARD_USER=luckfox \
+BOARD_PASSWORD=luckfox \
+./scripts/rk3576-build-deploy-debug.sh
 ```
 
-停止或重启：
+执行完成后，浏览器访问 `http://192.168.31.9:8080` 即可进入调试页面。
+
+如果只想重启板端服务栈，不重复构建和部署：
 
 ```bash
-./scripts/rk3576-run-web-stack.sh stop
+BOARD_HOST=192.168.31.9 BOARD_USER=luckfox BOARD_PASSWORD=luckfox \
 ./scripts/rk3576-run-web-stack.sh restart
+
+BOARD_HOST=192.168.31.9 BOARD_USER=luckfox BOARD_PASSWORD=luckfox \
+./scripts/rk3576-run-web-stack.sh status
 ```
 
-需要手工排查时，可在开发板上按以下等价顺序启动：
+在板端本机也保留单命令入口，适合 SSH 登录后手工排查：
 
 ```bash
 cd /home/luckfox/CameraSubsystem
-
-# 1. 启动核心发布端（必须先启动）
-./bin/camera_publisher_example /dev/video45 &
-
-# 2. 启动编码录制服务（Record 按钮需要）
-./bin/camera_codec_server \
-  --device /dev/video45 \
-  --stream-id 0 \
-  --output-dir /home/luckfox/CameraSubsystem/recordings &
-
-# 3. 启动 Gateway
-./bin/web_preview_gateway \
-  --device /dev/video45 \
-  --stream-id 0 \
-  --port 8080 \
-  --static-root /home/luckfox/CameraSubsystem/web_preview/dist \
-  --output-dir /home/luckfox/CameraSubsystem/recordings
+./scripts/rk3576-board-debug-stack.sh restart
+./scripts/rk3576-board-debug-stack.sh status
+./scripts/rk3576-board-debug-stack.sh logs
 ```
 
-浏览器访问 `http://<开发板IP>:8080` 即可看到实时 Camera 预览，并可通过 Record 按钮触发后台 H.264 录制。
-
-> **重要**：必须先启动 `camera_publisher_example`，再启动 `web_preview_gateway`。Gateway 启动时会立即连接发布端的 IPC，如果发布端未就绪，Gateway 会因连接失败而退出。
+`rk3576-board-debug-stack.sh` 会统一完成旧进程清理、socket 清理、日志清理和三进程按顺序重启，不再建议手工逐个起进程。
 
 详细部署步骤和开发模式配置见 [extensions/web_preview/README.md](extensions/web_preview/README.md) 和 [docs/BOARD_WEB_DEBUG_GUIDE.md](docs/BOARD_WEB_DEBUG_GUIDE.md)。
 
@@ -345,6 +366,7 @@ Smoke suite 档位：
 2. DMA-BUF 数据面已完成 RK3576 `/dev/video45` Phase 2 冒烟、慢消费者/双订阅者长稳、subscriber 崩溃 failover、release socket 主动断开、fd 泄漏长稳和 publisher 退出清理验证，但仍需补充真实 MIPI/RKISP 出帧验证，阶段性记录见 [docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md](docs/DMA_BUF_ZERO_COPY_ARCHITECTURE.md)。
 3. CameraSource 设备断连恢复、设备发现重绑定和 USB mmap/v1 降帧降级已落地；设备发现当前保留 M3 一次性 hook + `candidate_missing` 的时序边界，后续只在真实多设备需求下再扩展。
 4. Web Preview 与 Codec Server 已满足当前调试闭环，后续只做主线 smoke、错误收敛和低拷贝输入适配，不扩展复杂 UI 或新容器能力。
+5. 目标检测已打通单路 USB/RK3576 主线闭环，P0 已收口统一板端启动入口、配置与状态/结果契约、最小回归入口；下一步 P1 必做 Web 调试绘框，绘框由 `camera_detection_server` 侧完成，server 默认仍保持 metadata-only，多路调度和 MIPI 低拷贝推理暂不进入当前主线。
 
 当前阶段按“快速收口”推进，并与 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) 的 P0/P1 风险项对齐：
 

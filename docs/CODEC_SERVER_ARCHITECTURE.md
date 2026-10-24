@@ -729,14 +729,32 @@ stateDiagram-v2
 - 已完成 Gateway 交叉编译：`extensions/web_preview/scripts/build-gateway-rk3576.sh`
 - 开发机 SSH 可连接板端（用户 `luckfox`，密码 `luckfox`）
 
-#### 一键部署
+#### 一键部署并启动
 
 ```bash
-# 部署所有二进制和前端资源到板端
+# 构建、部署并远程重启板端三服务
+BOARD_HOST=192.168.31.9 \
+BOARD_USER=luckfox \
+BOARD_PASSWORD=luckfox \
+./scripts/rk3576-build-deploy-debug.sh
+```
+
+如果本轮只想重新部署：
+
+```bash
 ./scripts/deploy-rk3576-web-debug.sh
 ```
 
-#### 手动启动三服务
+#### 板端一键启动三服务
+
+SSH 登录板端后执行：
+
+```bash
+cd /home/luckfox/CameraSubsystem
+./scripts/rk3576-board-debug-stack.sh restart
+```
+
+#### 手动启动三服务（仅排障时使用）
 
 在板端 SSH 会话中依次启动：
 
@@ -797,16 +815,6 @@ ffprobe /tmp/usb_camera_0_*.h264
 
 # 用 ffplay 播放
 ffplay /tmp/usb_camera_0_*.h264
-```
-
-#### 自动化全功能测试
-
-```bash
-# 运行全功能测试脚本（自动启动三服务、验证预览和录制）
-./scripts/rk3576-fullstack-web-test.sh
-
-# 自定义录制时长（默认 10 秒）
-RECORD_SECONDS=30 ./scripts/rk3576-fullstack-web-test.sh
 ```
 
 #### 长时间录制稳定性测试
